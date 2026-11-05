@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+global.crypto = require('node:crypto').webcrypto;
+const {DemoStore} = require('../dist/demo-store.js');
+(async()=>{
+ const s=new DemoStore(); const event='training-event-001';
+ const body={request_id:'short-1',event_id:event,operator:'Test desk',location:'C-10',quantities:{normal:2,vip:1,vvip:0},custody_confirmed:true};
+ let calls=0; s.code=()=>++calls===1?'K7M4':'N8P2';
+ const created=await s.request('/api/deposits',body);
+ assert.equal(created.collection_code,'N8P2'); assert.equal(calls,2);
+ console.log('PASS Four-character collision is retried within the event');
+ assert.equal((await s.request('/api/deposits',body)).collection_code,'N8P2');
+ assert.equal(s.state(event).deposits.length,2);
+ console.log('PASS Repeated deposit request keeps one packet and one code');
+ assert.match(new DemoStore().code(),/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/);
+ console.log('PASS New synthetic codes have exactly four unambiguous alphanumeric characters');
+ await assert.rejects(s.request('/api/verify',{event_id:'training-event-002',collection_code:'N8P2'}),/not found/);
+ console.log('PASS Four-character codes remain event-scoped');
+ const limited=new DemoStore();for(let i=0;i<5;i++) await assert.rejects(limited.request('/api/verify',{event_id:event,collection_code:'ZZZZ'}));
+ await assert.rejects(limited.request('/api/verify',{event_id:event,collection_code:'K7M4'}),/Wait a minute/);
+ console.log('PASS Repeated failed attempts block further verification in the tab');
+ console.log('5 short-code checks passed. Browser controls do not provide production custody security.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

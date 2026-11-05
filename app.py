@@ -381,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.store.state(event_id); result["csrf"]=self.server.csrf
                 return self.send(200,result)
             except DomainError as error: return self.error(error.status,str(error),error.code,error.not_applied)
-        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css","/desk-enhancements.js":"desk-enhancements.js","/assets/bullseye-entertainment.jpg":"assets/bullseye-entertainment.jpg"}
+        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css","/tactile.css":"tactile.css","/brand-palette.css":"brand-palette.css","/desk-enhancements.js":"desk-enhancements.js","/assets/bullseye-entertainment.jpg":"assets/bullseye-entertainment.jpg"}
         if path not in files: return self.error(404,"Not found.")
         filename=ROOT/"static"/files[path]
         content_type=mimetypes.guess_type(str(filename))[0] or "application/octet-stream"

@@ -5,8 +5,8 @@ class DemoStore {
   constructor({seed=true,now=()=>Date.now()}={}) {
     this.now=now; this.deposits=[]; this.collections=[]; this.audit=[];
     this.codes=new Map(); this.claims=new Map(); this.requests=new Map(); this.failures=[];
-    this.events=[{id:'training-event-001',name:'Bullseye · Demo event'},{id:'training-event-002',name:'Second demo event'}];
-    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Demo Operator',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'DEMO-PASS-2026','PKT-DEMO-001');
+    this.events=[{id:'training-event-001',name:'Oktoberfest 2027'},{id:'training-event-002',name:'Oktoberfest 2027 · isolation fixture'}];
+    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Desk operator',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'K7M4','PKT-DEMO-001');
   }
   clone(value){return JSON.parse(JSON.stringify(value));}
   error(message,status=400){const e=new Error(message);e.status=status;e.notExecuted=true;throw e;}
@@ -19,12 +19,12 @@ class DemoStore {
   publicDeposit(d){return {...this.clone(d),pending_collection:this.clone(this.collections.find(c=>c.deposit_id===d.id&&c.status==='RELEASE_RECORDED')||null)};}
   state(event_id){this.event(event_id);return {event_id,event_name:this.events.find(e=>e.id===event_id).name,events:this.clone(this.events),deposits:this.deposits.filter(d=>d.event_id===event_id).map(d=>this.publicDeposit(d)),collections:this.clone(this.collections.filter(c=>c.event_id===event_id)),audit:this.clone(this.audit.filter(a=>a.event_id===event_id).slice(0,100)),counts:{},csrf:'browser-demo-only'};}
   normalize(code){return String(code||'').toUpperCase().replace(/[\s-]/g,'');}
-  code(){const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';const bytes=crypto.getRandomValues(new Uint8Array(12));const s=Array.from(bytes,b=>alphabet[b%alphabet.length]).join('');return s.match(/.{4}/g).join('-');}
+  code(){const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';const bytes=crypto.getRandomValues(new Uint8Array(4));const s=Array.from(bytes,b=>alphabet[b%alphabet.length]).join('');return s;}
   create(b,fixedCode=null,fixedPacket=null){
     this.event(b.event_id);const operator=this.operator(b.operator);this.qty(b.quantities);
     const location=String(b.location||'').trim();if(!location||location.length>30)this.error('Enter a synthetic shelf slot, up to 30 characters.');
     if(b.custody_confirmed!==true)this.error('Confirm the simulated custody first.');
-    if(this.deposits.some(d=>d.event_id===b.event_id&&d.location.toUpperCase()===location.toUpperCase()))this.error('Use a fresh shelf slot for this demo event.');
+    if(this.deposits.some(d=>d.event_id===b.event_id&&d.location.toUpperCase()===location.toUpperCase()))this.error('Use a fresh shelf slot for this event.');
     const d={id:this.id(),event_id:b.event_id,packet_id:fixedPacket||'PKT-'+this.id().slice(0,8).toUpperCase(),location,created_by:operator,created_at:this.stamp(),version:1,initial:{...b.quantities},remaining:{...b.quantities}};
     let code=fixedCode||this.code();while(this.codes.has(b.event_id+':'+this.normalize(code)))code=this.code();
     this.deposits.push(d);this.codes.set(b.event_id+':'+this.normalize(code),d.id);
@@ -35,7 +35,7 @@ class DemoStore {
     this.event(b.event_id);this.failures=this.failures.filter(t=>t>this.now()-60000);
     if(this.failures.length>=5)this.error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
     const id=this.codes.get(b.event_id+':'+this.normalize(b.collection_code));const d=this.deposits.find(d=>d.id===id);
-    if(!d){this.failures.push(this.now());this.error('Collection code not found in this demo event.',404);}
+    if(!d){this.failures.push(this.now());this.error('Collection code not found in this event.',404);}
     if(this.collections.some(c=>c.deposit_id===id&&c.status==='RELEASE_RECORDED'))this.error('A handover is unconfirmed. Review the existing record before another collection.',409);
     if(!Object.values(d.remaining).some(n=>n>0))this.error('All passes for this demo code have already been collected.',409);
     const token=this.id();this.claims.set(token,{deposit_id:d.id,event_id:d.event_id,version:d.version,expires:this.now()+120000});
@@ -58,7 +58,7 @@ class DemoStore {
     this.event(b.event_id);const operator=this.operator(b.operator);
     const c=this.collections.find(c=>c.id===id&&c.event_id===b.event_id);if(!c)this.error('Collection not found in this event.',404);
     const d=this.deposits.find(d=>d.id===c.deposit_id);
-    if(operator!==c.created_by)this.error('Use the original demo staff label to confirm this handover.',403);
+    if(operator!==c.created_by)this.error('Use the original staff label to confirm this handover.',403);
     if(b.handover_confirmed!==true)this.error('Confirm the simulated handover first.');
     if(c.status!=='RELEASE_RECORDED'||c.version!==b.version)this.error('This collection changed or was already confirmed.',409);
     c.status='HANDED_OVER';c.version++;c.handed_over_by=operator;c.handed_over_at=this.stamp();d.version++;

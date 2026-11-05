@@ -298,12 +298,12 @@ class HTTPTests(unittest.TestCase):
 
     def test_home_headers_and_static_assets(self):
         status,headers,body=self.request('GET','/')
-        self.assertEqual(status,200); self.assertIn(b'Demo only',body)
+        self.assertEqual(status,200); self.assertIn(b'Practice only.',body)
         self.assertEqual(headers['Cache-Control'],'no-store')
         self.assertEqual(headers['Referrer-Policy'],'no-referrer')
         self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
         self.assertIn('HttpOnly',headers['Set-Cookie']); self.assertIn('SameSite=Strict',headers['Set-Cookie'])
-        for path in ('/app.js','/style.css','/desk-enhancements.js','/assets/bullseye-entertainment.jpg'): self.assertEqual(self.request('GET',path)[0],200)
+        for path in ('/app.js','/style.css','/tactile.css','/desk-enhancements.js','/assets/bullseye-entertainment.jpg'): self.assertEqual(self.request('GET',path)[0],200)
 
     def test_no_session_no_state_or_write(self):
         self.assertEqual(self.request('GET','/api/state')[0],401)
