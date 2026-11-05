@@ -1,0 +1,15 @@
+_runtime/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db*
+*.backup
+*.csv
+*.env
+.env*
+node_modules/
+test-results/
+screenshots/
+*.zip
+*.tar.gz
+
