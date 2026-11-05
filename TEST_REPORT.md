@@ -1,36 +1,29 @@
-# Shared collection prototype verification
+# Redesign validation — 5 November 2026
 
-Build date: 5 November 2026. Scope: synthetic-data local demo on branch `style/quiet-verification`.
+## Automated checks
 
-## Passed
+- `node --check dist/app.js`, `node --check dist/demo-store.js`, `node --check dist/desk-enhancements.js`: syntax checks.
+- `node tests/demo-store.test.cjs`: 20 model checks, including mixed-category partial pickup, replay/idempotency, exhausted balances, expiry, wrong packet, over-collection, event separation and throttling.
+- Primary Python repository: `python -X utf8 -m unittest discover -s tests -v`: 42 checks for domain logic, HTTP security and selected accessibility contracts.
+- Primary repository: `node tests/ui_state_test.cjs`: 18 state checks covering interrupted requests, stale responses, disconnection, recovery and secret clearing.
+- No package-based lint, TypeScript or framework build exists. This is buildless static HTML/CSS/JS; the deployment archive packages the exact tested static files. Node syntax checking is not a full linter.
 
-- **42 Python checks:** 37 domain/API checks and 5 targeted accessibility-contract checks.
-- **18 Node UI state regression checks** using a minimal DOM stub.
-- Python syntax/bytecode compilation and JavaScript syntax check.
-- Manual source review of publication scope, secret handling, atomic balances, retry semantics and recovery warnings. No claim of a new independent security audit is made.
+## Actual browser checks
 
-Domain/API coverage includes secure-code format/alphabet, event-bound verification, two friends collecting partial category quantities, exhaustion and over-release, simultaneous unique and identical requests, pending-handover protection, original-operator procedural checks, tampered/expired/restarted claim tokens, committed retry after restart, persistent global failed-attempt throttling, closed events, matching backup keys, no plaintext codes in state/database/audit, Host/CSRF/origin protections and a complete local HTTP workflow.
+Tested through the in-app browser at 1440×1000, default desktop width (~857px), 390×844 and 320×720. Screenshots were visually inspected. At 320px, DOM bounds showed no child extending beyond the viewport. Physical mobile hardware and a full screen-reader audit were not tested.
 
-UI checks cover uncertain-request preservation, definitive uncommitted failures, conflicting fingerprints, no raw code/phone in recovery storage, disconnected/pending physical-instruction blocking, out-of-order records, changed-claim invalidation, inventory lookup not authorizing release, ephemeral code-display state and clearing secrets on close.
+- Deposit of 3 Normal, 2 VIP and 1 VVIP at synthetic shelf B-04, including double-click Save: one packet created and one private code shown.
+- Sample partial pickup: 2 Normal + 1 VIP leaves 4 Normal + 1 VIP + 1 VVIP; wrong packet ID is rejected without mutation.
+- A second mixed pickup scenario: 2 Normal + 1 VIP + 1 VVIP leaves 4 Normal + 1 VIP + 0 VVIP. The same code verifies again against the reduced balance.
+- Attempting 7 Normal against a balance of 6 triggers the number input range validation. Model tests separately verify server/store rejection.
+- Recording release via double-click subtracts once. Closing the pending handover, attempting collection, and reopening the packet confirms the pending lock and reconciliation path.
+- Handover checkbox and confirmation complete the recorded release. Repeated rapid confirmation retains the completion screen after fixing click-through between successive dialog steps.
+- Exhausting all categories causes the next code verification to show “All passes ... already been collected.”
+- Cancel deposit, close dialogs, Escape from code verification, invalid code error, empty second event, no-match search, clear filters, Activity and Desk guide navigation, and `/` search keyboard focus checked.
+- Public demo reload resets changes as disclosed. No real names, phone numbers, pass records, or messages used.
 
-Two added UI checks verify no printing action, private display/verbal read-back guidance, and NFC remaining explicitly future-only without hardware/permission calls.
+## Fixes found during validation
 
-Selected text contrast pairs exceed 4.5:1; a selected input boundary pair exceeds 3:1. Source checks confirm visible dark focus, reduced-motion and forced-colors rules, keyboard tab controls and a focusable table scroll region. These are targeted contracts, not full rendered accessibility conformance.
+Restored an event-name UI binding required during initialization. Added an explicit rapid double-click guard so the second click cannot operate the next dialog step. Added the new local script/logo to the Python static allowlist. Closed the SQLite backup destination explicitly so the Windows backup test can release its file handle. Existing selected-color tests were updated to cover the new palette. All local runtime and verification-key files remain excluded from publication.
 
-## NFC compatibility research
-
-Official Chrome documentation and MDN compatibility data were checked on 5 November 2026. Desktop Chrome Web NFC is unsupported; Chrome for Android supports compatible NDEF tags with hardware, secure-context, visibility and permission conditions. Peer-to-peer sharing and card emulation are not supported. NFC is not implemented, no device/permission action was attempted, and no offline NFC behavior is claimed. Source links and copy/overwrite risks are documented in README.
-
-## Not verified
-
-Chromium through installed Playwright could not launch: its process-singleton socket returned `Operation not permitted`, including after the supported escalation attempt. No app integration run or screenshot resulted from that launch. The separate cloud browser cannot reach the local loopback server. Those attempts do not validate the UI.
-
-The updated optional `tests/browser_smoke.py` is a verification aid, **not evidence of a passed browser run**. It is designed to check shared partial collection, manual WhatsApp preview without opening/sending it, lost-response recovery, disconnection, no automatic third-party requests and narrow layout.
-
-Visual layout, browser-specific modal/focus behavior, screen readers, physical label/scanner hardware, actual WhatsApp behavior/delivery, power-loss hardware recovery and live-event throughput remain unverified.
-
-## Publication and readiness
-
-The public repository contains source, tests and documentation only. This revision is isolated on a branch; the prior main branch is not changed by publishing it. No runtime database, verification key, backup, log, real guest record, production screenshot or official brand asset is included. No software license is added. No live/public app deployment or automatic messaging is enabled.
-
-**Functional training prototype, not a production event system.** It remains restricted to one trusted laptop and synthetic data until authenticated staff/admin roles, code-loss/revocation policies, ticket validity rules, tamper-evident audit, secure retention/backups, supervised reconciliation, hardware testing and an event rehearsal are completed. Anyone with a shared code can claim any remaining quantities; the code does not authenticate a person or allocate shares among friends.
+Production security, multiple-device coordination, hardware crash/power recovery, load/throughput, offline installation and complete accessibility conformance are outside this demonstration.

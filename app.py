@@ -321,7 +321,8 @@ class Store:
         destination=Path(destination); key_destination=destination.with_suffix(destination.suffix+".verification.key")
         if destination.exists() or key_destination.exists(): raise DomainError("Backup target already exists; refusing to overwrite.")
         destination.parent.mkdir(parents=True,exist_ok=True)
-        with self.connect() as source,sqlite3.connect(destination) as target:
+        from contextlib import closing
+        with self.connect() as source,closing(sqlite3.connect(destination)) as target:
             source.backup(target)
             if target.execute("PRAGMA integrity_check").fetchone()[0]!="ok": raise DomainError("Backup integrity check failed.")
         descriptor=os.open(key_destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -370,7 +371,7 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.store.state(event_id); result["csrf"]=self.server.csrf
                 return self.send(200,result)
             except DomainError as error: return self.error(error.status,str(error),error.code,error.not_applied)
-        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css"}
+        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css","/desk-enhancements.js":"desk-enhancements.js","/assets/bullseye-entertainment.jpg":"assets/bullseye-entertainment.jpg"}
         if path not in files: return self.error(404,"Not found.")
         filename=ROOT/"static"/files[path]
         content_type=mimetypes.guess_type(str(filename))[0] or "application/octet-stream"

@@ -303,7 +303,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(headers['Referrer-Policy'],'no-referrer')
         self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
         self.assertIn('HttpOnly',headers['Set-Cookie']); self.assertIn('SameSite=Strict',headers['Set-Cookie'])
-        for path in ('/app.js','/style.css'): self.assertEqual(self.request('GET',path)[0],200)
+        for path in ('/app.js','/style.css','/desk-enhancements.js','/assets/bullseye-entertainment.jpg'): self.assertEqual(self.request('GET',path)[0],200)
 
     def test_no_session_no_state_or_write(self):
         self.assertEqual(self.request('GET','/api/state')[0],401)

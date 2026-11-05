@@ -14,7 +14,7 @@ def contrast(a,b):
 
 class AccessibilityContractTests(unittest.TestCase):
     def test_selected_text_pairs_exceed_aa(self):
-        for fg,bg in [('#62656a','#f7f7f6'),('#62656a','#ededeb'),('#265b42','#e9f0e7'),('#765314','#f4ecda'),('#963323','#fbeee9'),('#ffffff','#191a1b')]:
+        for fg,bg in [('#626967','#f5f4f1'),('#626967','#ffffff'),('#ffffff','#243f37'),('#ffffff','#b7202c'),('#6c551a','#f3ecd9'),('#634875','#eee8f3'),('#963323','#fbeee9')]:
             with self.subTest(fg=fg,bg=bg): self.assertGreaterEqual(contrast(fg,bg),4.5)
     def test_form_boundary_contrast(self):
         self.assertGreaterEqual(contrast('#7c8085','#ededeb'),3)

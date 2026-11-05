@@ -4,7 +4,7 @@ A staff-only, **single-laptop prototype for physical event passes**. A depositor
 
 **Use synthetic data only.** This is not a ticket issuer, admission scanner, identity system or live-event deployment. Digital tickets should be shared through their issuer, not deposited here. There is no default named collector or ID check. The source repository is public; the app and its runtime records stay local.
 
-The neutral near-white design, pale rounded controls, dark focus outlines, black Verified completion and restrained pastel accents adapt the requested visual reference. Official Bullseye brand assets and an applicable software license have not been verified or added.
+The redesigned interface puts collection and deposit first, with labeled category balances, phone packet cards, a searchable custody register and deliberate handover confirmation. The authentic GEVA-hosted Bullseye logo is used with the user's explicit permission for this public demo. Current-master status and a general asset/software redistribution licence are not claimed. See REFERENCES.md and TEST_REPORT.md.
 
 ## Run locally
 
@@ -103,7 +103,11 @@ node tests/ui_state_test.cjs
 
 Python domain/API tests cover code generation, event isolation, shared partial balances, concurrent releases, repeated requests, restart/expiry recovery, invalid inputs, failed-attempt throttling, matching backup keys and local HTTP protections. Node tests use a minimal DOM stub for recovery/race checks, **not a browser**. Accessibility checks verify selected contrast values and focus/reduced-motion contracts, not full WCAG compliance.
 
-Optional `python3 tests/browser_smoke.py` uses **already installed** Playwright and Chromium. No install is performed. Browser launch in the build environment is blocked by a process-socket restriction, including the supported escalation attempt. No screenshot, layout, actual browser, scanner, power-loss hardware or throughput validation is claimed. See `TEST_REPORT.md`.
+The redesigned public demo was tested in the actual in-app browser at desktop and phone widths. See `TEST_REPORT.md` for the exact scenarios and limits. The older optional `python3 tests/browser_smoke.py` remains a separate local harness; it was not used for this browser review. No physical scanner, power-loss hardware or throughput validation is claimed.
+
+## Public demonstration source
+
+`public-demo/dist/` contains the buildless synthetic public demonstration, with its own model checks in `public-demo/tests/`. Serve that folder with a static HTTP server; run `node public-demo/tests/demo-store.test.cjs` for its model checks. The matching Sites manifest is in `public-demo/.openai/hosting.json`. The hosted demo resets on reload and has independent inventory in every tab. Publishing that static folder never exposes the Python server, its database or its verification key. The local Python app remains loopback-only.
 
 ## Before live use
 
