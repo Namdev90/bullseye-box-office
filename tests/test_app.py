@@ -298,7 +298,7 @@ class HTTPTests(unittest.TestCase):
 
     def test_home_headers_and_static_assets(self):
         status,headers,body=self.request('GET','/')
-        self.assertEqual(status,200); self.assertIn(b'DEMO',body)
+        self.assertEqual(status,200); self.assertIn(b'Demo only',body)
         self.assertEqual(headers['Cache-Control'],'no-store')
         self.assertEqual(headers['Referrer-Policy'],'no-referrer')
         self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])

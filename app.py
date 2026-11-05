@@ -361,6 +361,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def error(self,status,message,code="REQUEST_REJECTED",not_applied=False):
         self.send(status,{"error":message,"code":code,"not_applied":not_applied})
+    def reject_post(self,status,message):
+        # Discard only a bounded body, without parsing it or authorizing any action.
+        # Otherwise Windows can reset a closing socket before the error is read.
+        try:
+            length=int(self.headers.get("Content-Length","0"))
+            if 0<length<=16384:
+                self.connection.settimeout(0.25)
+                self.rfile.read(length)
+        except (ValueError,OSError): pass
+        return self.error(status,message)
     def do_GET(self):
         if not self.valid_host(): return self.error(403,"Invalid host. Use the printed local address.")
         path=urlsplit(self.path).path
@@ -377,15 +387,18 @@ class Handler(BaseHTTPRequestHandler):
         content_type=mimetypes.guess_type(str(filename))[0] or "application/octet-stream"
         self.send(200,filename.read_bytes(),content_type+"; charset=utf-8",path=="/")
     def do_POST(self):
-        if not self.valid_host() or not self.authorized(): return self.error(403,"Local session required. Reload and inspect any pending request.")
+        if not self.valid_host() or not self.authorized(): return self.reject_post(403,"Local session required. Reload and inspect any pending request.")
         origin=self.headers.get("Origin")
-        if origin and origin!=f"http://{self.headers.get('Host')}": return self.error(403,"Cross-origin writes are not allowed.")
-        if not hmac.compare_digest(self.headers.get("X-CSRF-Token",""),self.server.csrf): return self.error(403,"Session changed. Reload before recovering the original request.")
-        if self.headers.get("Content-Type","").split(";")[0]!="application/json": return self.error(415,"JSON content type required.")
+        if origin and origin!=f"http://{self.headers.get('Host')}": return self.reject_post(403,"Cross-origin writes are not allowed.")
+        if not hmac.compare_digest(self.headers.get("X-CSRF-Token",""),self.server.csrf): return self.reject_post(403,"Session changed. Reload before recovering the original request.")
         try:
             length=int(self.headers.get("Content-Length","0"))
             if not 0<length<=16384: raise DomainError("Invalid request size.")
-            data=json.loads(self.rfile.read(length)); path=urlsplit(self.path).path
+            raw=self.rfile.read(length)
+            # Consume the bounded, authorized request before rejecting its type.
+            # Closing with unread bytes can reset the socket on Windows.
+            if self.headers.get("Content-Type","").split(";")[0]!="application/json": return self.error(415,"JSON content type required.")
+            data=json.loads(raw); path=urlsplit(self.path).path
             if path=="/api/verify": result=self.server.store.verify(data)
             elif path=="/api/deposits": result=self.server.store.mutate("DEPOSIT",data)
             else:

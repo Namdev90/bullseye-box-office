@@ -26,4 +26,6 @@ Tested through the in-app browser at 1440×1000, default desktop width (~857px),
 
 Restored an event-name UI binding required during initialization. Added an explicit rapid double-click guard so the second click cannot operate the next dialog step. Added the new local script/logo to the Python static allowlist. Closed the SQLite backup destination explicitly so the Windows backup test can release its file handle. Existing selected-color tests were updated to cover the new palette. All local runtime and verification-key files remain excluded from publication.
 
+Following user feedback, the final shell was revised again to a compact register-first workstation with standard buttons and restrained branding. Final automated checks were rerun and final desktop/phone screenshots inspected. Python validation also exposed an intermittent Windows loopback reset when rejecting an authorized invalid Content-Type before consuming its bounded request body. The handler now consumes that body before returning 415, while retaining authentication, origin, CSRF and size checks before parsing or mutation.
+
 Production security, multiple-device coordination, hardware crash/power recovery, load/throughput, offline installation and complete accessibility conformance are outside this demonstration.
