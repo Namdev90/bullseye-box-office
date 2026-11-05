@@ -1,222 +1,185 @@
 'use strict';
-const $ = (selector) => document.querySelector(selector);
-const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const statuses = {READY: 'Ready for collection', RELEASE_RECORDED: 'Handover unconfirmed', HANDED_OVER: 'Handed over'};
-let state = {packets: [], audit: [], counts: {}}, csrf = '', filter = 'ALL', online = false, busy = false;
-let operator = sessionStorage.getItem('staff_name') || '';
-let selectedPacket = null;
-let refreshSequence = 0, appliedRefreshSequence = 0;
-let toastTimer;
-const formatTime = value => value ? new Date(value).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '—';
-
-function toast(message) {
-  $('#toast').textContent = message;
-  $('#toast').classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), 6500);
+const $ = selector => document.querySelector(selector);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const categories = ['normal','vip','vvip'];
+const total = q => categories.reduce((n,k) => n + Number(q?.[k] || 0), 0);
+const quantities = q => `${q?.normal || 0} Normal · ${q?.vip || 0} VIP · ${q?.vvip || 0} VVIP`;
+const formatTime = value => value ? new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+let state = {deposits:[],collections:[],events:[],audit:[],counts:{}}, csrf = '', filter = 'ALL', eventId = 'training-event-001';
+let online = false, busy = false, operator = sessionStorage.getItem('staff_name') || '';
+let selectedDeposit = null, selectedCollection = null, claim = null, receiptCode = '', viewMode = 'review';
+let refreshSequence = 0, appliedRefreshSequence = 0, toastTimer;
+const depositCache = new Map(), collectionCache = new Map();
+const statusOf = d => d.pending_collection ? 'RELEASE_RECORDED' : total(d.remaining) ? 'READY' : 'HANDED_OVER';
+const statuses = {READY:'Available',RELEASE_RECORDED:'Handover unconfirmed',HANDED_OVER:'Collected'};
+function latest(record, cache) { if (!record) return null; const known = cache.get(record.id); if (known && known.version > record.version) return known; cache.set(record.id,record); return record; }
+function mergeResult(result) {
+  if (result.collection) latest(result.collection, collectionCache);
+  const d = latest(result.deposit, depositCache);
+  if (d?.pending_collection) d.pending_collection = latest(d.pending_collection, collectionCache);
+  return {deposit:d,collection:result.collection ? latest(result.collection,collectionCache) : null};
 }
-
-function updateOperator() {
-  $('#operator-label').textContent = operator || 'Set staff name';
-  $('.avatar').textContent = operator ? operator[0].toUpperCase() : 'S';
-}
-
-function pending() {
-  try { return JSON.parse(sessionStorage.getItem('pending_action')); } catch { return null; }
-}
-
+function toast(message) { $('#toast').textContent = message; $('#toast').classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.add('hidden'),6500); }
+function updateOperator() { $('#operator-label').textContent = operator || 'Set staff label'; $('.avatar').textContent = operator ? operator[0].toUpperCase() : 'S'; }
+function pending() { try { return JSON.parse(sessionStorage.getItem('pending_action')); } catch { return null; } }
+function clearSecrets() { receiptCode = ''; claim = null; $('#collection-code').value = ''; }
 function showPending() {
   let banner = $('#pending-banner');
-  if (!pending()) { if (banner) banner.remove(); return; }
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'pending-banner'; banner.className = 'pending-banner';
-    banner.innerHTML = '<div><strong>An action needs checking.</strong><p>A response was interrupted. Do not repeat a physical handover. Retry the identical saved request to recover its outcome safely.</p></div><button class="button secondary" id="recover-action">Recover saved request</button>';
-    $('main').prepend(banner);
-    $('#recover-action').addEventListener('click', recover);
-  }
+  if (!pending()) { banner?.remove(); return; }
+  if (!banner) { banner = document.createElement('div'); banner.id = 'pending-banner'; banner.className = 'pending-banner'; banner.innerHTML = '<div><strong>An action needs checking.</strong><p>Do not repeat a physical handover. Recover the identical saved request before starting another action.</p></div><button class="button secondary" id="recover-action">Recover saved request</button>'; $('main').prepend(banner); $('#recover-action').addEventListener('click',recover); }
 }
-
 function connection(ok) {
   online = ok;
   $('#connection').textContent = ok ? 'Local desk connected' : 'Desk connection lost';
   $('#connection').className = `connection ${ok ? 'is-online' : 'is-offline'}`;
-  $('#new-deposit').disabled = !ok || busy || !!pending();
-  document.querySelectorAll('[data-mutation]').forEach(button => { button.disabled = !ok || busy || !!pending(); });
-  const warning = $('#packet-live-warning');
-  if (warning) {
-    const unsafe = !ok || !!pending();
-    warning.classList.toggle('hidden', !unsafe);
-    $('#packet-procedure')?.classList.toggle('hidden', unsafe && selectedPacket?.status === 'RELEASE_RECORDED');
-  }
+  const blocked = !ok || busy || !!pending();
+  for (const id of ['new-deposit','collect-code','event-select']) $( '#' + id).disabled = blocked;
+  document.querySelectorAll('[data-mutation]').forEach(button => { button.disabled = blocked || button.dataset.originalOnly === 'true' && selectedCollection?.created_by !== operator; });
+  $('#operator-button').disabled = busy || !!pending();
+  const unsafe = !ok || !!pending();
+  $('#packet-live-warning')?.classList.toggle('hidden',!unsafe);
+  $('#packet-procedure')?.classList.toggle('hidden',unsafe && (viewMode === 'handover' || viewMode === 'release'));
 }
-
-async function request(url, options = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-  try {
-    const response = await fetch(url, {...options, cache: 'no-store', signal: controller.signal});
-    const data = await response.json();
-    if (!response.ok) { const error = new Error(data.error || 'Request failed.'); error.status = response.status; throw error; }
-    return data;
-  } finally { clearTimeout(timeout); }
+async function request(url,options={}) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(),6000);
+  try { const response = await fetch(url,{...options,cache:'no-store',signal:controller.signal}); const data = await response.json(); if (!response.ok) { const error = new Error(data.error || 'Request failed.'); error.status = response.status; error.notExecuted = data.not_applied === true; throw error; } return data; } finally { clearTimeout(timer); }
 }
-
 async function refresh() {
-  const sequence = ++refreshSequence;
+  const sequence = ++refreshSequence, requestedEvent = eventId;
   try {
-    const incoming = await request('/api/state');
-    if (sequence < appliedRefreshSequence) return;
+    const incoming = await request('/api/state?event_id=' + encodeURIComponent(requestedEvent));
+    if (requestedEvent !== eventId || sequence < appliedRefreshSequence) return;
     appliedRefreshSequence = sequence;
-    incoming.packets = incoming.packets.map(latestKnownPacket);
-    incoming.counts = {READY:0, RELEASE_RECORDED:0, HANDED_OVER:0, PASSES_IN_CUSTODY:0};
-    incoming.packets.forEach(packet => { incoming.counts[packet.status]++; if (packet.status === 'READY') incoming.counts.PASSES_IN_CUSTODY += packet.quantity; });
-    state = incoming; csrf = state.csrf;
+    incoming.collections = (incoming.collections || []).map(c => latest(c,collectionCache));
+    incoming.deposits = (incoming.deposits || []).map(d => { d = latest(d,depositCache); if (d.pending_collection) d.pending_collection = latest(d.pending_collection,collectionCache); return d; });
+    state = incoming; csrf = incoming.csrf;
     $('#event-name').textContent = state.event_name;
+    $('#event-select').innerHTML = (state.events || []).map(e => `<option value="${esc(e.id)}" ${e.id === eventId ? 'selected' : ''}>${esc(e.name)}</option>`).join('');
     connection(true); render();
-    if ($('#packet-dialog').open && selectedPacket && !busy) {
-      const latest = state.packets.find(packet => packet.id === selectedPacket.id);
-      if (latest && latest.version > selectedPacket.version) {
-        showPacket(latest);
-        toast('This packet changed in another window. The record has been refreshed. Check its current status before acting.');
+    if ($('#packet-dialog').open && selectedDeposit && !busy) {
+      const d = state.deposits.find(item => item.id === selectedDeposit.id);
+      const c = selectedCollection && collectionCache.get(selectedCollection.id);
+      if (!d) { $('#packet-dialog').close(); clearSecrets(); toast('This record is no longer in this event. Verify again before collecting.'); }
+      else if (d.version > selectedDeposit.version || c && c.version > selectedCollection.version) {
+        claim = null; receiptCode = ''; showRecord(d,c?.status === 'HANDED_OVER' ? 'complete' : 'review',c);
+        toast('This record changed. The current balance is shown; verify the code again for any new collection.');
       }
     }
-  } catch { if (sequence >= appliedRefreshSequence) connection(false); }
+  } catch { if (requestedEvent === eventId && sequence >= appliedRefreshSequence) connection(false); }
 }
-
-function latestKnownPacket(packet) {
-  const candidates = [packet, state.packets.find(item => item.id === packet.id), selectedPacket?.id === packet.id ? selectedPacket : null].filter(Boolean);
-  return candidates.reduce((latest, item) => item.version > latest.version ? item : latest);
-}
-
 function render() {
-  $('#ready-count').textContent = state.counts.READY || 0;
-  $('#pending-count').textContent = state.counts.RELEASE_RECORDED || 0;
-  $('#done-count').textContent = state.counts.HANDED_OVER || 0;
-  $('#all-count').textContent = state.packets.length;
+  $('#ready-count').textContent = state.deposits.reduce((n,d) => n + total(d.remaining),0);
+  $('#pending-count').textContent = state.collections.filter(c => c.status === 'RELEASE_RECORDED').length;
+  $('#done-count').textContent = state.collections.filter(c => c.status === 'HANDED_OVER').length;
+  $('#all-count').textContent = state.deposits.length;
   const query = $('#search').value.trim().toLocaleLowerCase();
-  const rows = state.packets.filter(packet => (filter === 'ALL' || packet.status === filter) && ['collector', 'depositor', 'code', 'location'].some(key => packet[key].toLocaleLowerCase().includes(query)));
-  $('#packets-body').innerHTML = rows.map(packet => `<tr><td><div class="person-cell"><span class="person-icon">${esc(packet.collector[0].toUpperCase())}</span><div><strong>${esc(packet.collector)}</strong><small>From ${esc(packet.depositor)}</small></div></div></td><td><span class="packet-code">${esc(packet.code)}</span><small class="cell-sub">${esc(formatTime(packet.created_at))}</small></td><td><strong>${packet.quantity}</strong><small class="cell-sub">${esc(packet.category)}</small></td><td><span class="shelf">${esc(packet.location)}</span></td><td><span class="status ${packet.status.toLowerCase()}"><i></i>${statuses[packet.status]}</span></td><td><button class="row-action" data-open="${packet.id}" aria-label="Open packet for ${esc(packet.collector)}">${packet.status === 'READY' ? 'Collect' : 'Review'} <span>↗</span></button></td></tr>`).join('');
-  $('#empty').classList.toggle('hidden', rows.length > 0);
-  $('#result-count').textContent = `${rows.length} packet${rows.length === 1 ? '' : 's'} shown`;
-  document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => openPacket(button.dataset.open)));
-  $('#activity-list').innerHTML = state.audit.length ? state.audit.map(item => {
-    const packet = state.packets.find(p => p.id === item.packet_id);
-    const action = {DEPOSIT:'Deposit accepted', RELEASE:'Release recorded', HANDOVER:'Physical handover confirmed'}[item.action] || item.action;
-    return `<article class="activity-row"><span class="audit-number">${item.seq.toString().padStart(2, '0')}</span><div><strong>${esc(action)}</strong><p>${esc(packet?.code || item.packet_id)} · ${esc(packet?.collector || '')}</p></div><div class="audit-meta">${esc(item.operator)}<small>${esc(formatTime(item.at))}</small></div></article>`;
-  }).join('') : '<div class="empty"><h3>No actions recorded</h3><p>Your first deposit will appear here.</p></div>';
+  const rows = state.deposits.filter(d => (filter === 'ALL' || statusOf(d) === filter) && [d.packet_id,d.location,d.created_by].some(v => String(v).toLocaleLowerCase().includes(query)));
+  $('#packets-body').innerHTML = rows.map(d => `<tr><td><strong class="packet-code">${esc(d.packet_id)}</strong><small class="cell-sub">${esc(d.created_by)} · ${esc(formatTime(d.created_at))}</small></td><td><strong>${d.remaining.normal} / ${d.remaining.vip} / ${d.remaining.vvip}</strong><small class="cell-sub">Normal / VIP / VVIP</small></td><td><span class="cell-sub">${esc(quantities(d.initial))}</span></td><td><span class="shelf">${esc(d.location)}</span></td><td><span class="status ${statusOf(d).toLowerCase()}"><i></i>${statuses[statusOf(d)]}</span></td><td><button class="row-action" data-open="${esc(d.id)}">Review ↗</button></td></tr>`).join('');
+  $('#empty').classList.toggle('hidden',rows.length > 0); $('#result-count').textContent = `${rows.length} deposit${rows.length === 1 ? '' : 's'} shown`;
+  document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click',async () => { if (busy) return; await refresh(); const d = state.deposits.find(d => d.id === button.dataset.open); if (d) { clearSecrets(); showRecord(d); } }));
+  $('#activity-list').innerHTML = state.audit.length ? state.audit.map(a => `<article class="activity-row"><span class="audit-number">${esc(a.seq)}</span><div><strong>${esc(a.action)}</strong><p>${esc(state.deposits.find(d => d.id === a.deposit_id)?.packet_id || a.deposit_id)} · ${esc(a.collection_id || '')}</p><p>${esc(JSON.stringify(a.details || {}))}</p></div><div class="audit-meta">${esc(a.operator)}<small>${esc(formatTime(a.at))}</small></div></article>`).join('') : '<div class="empty"><h3>No actions recorded</h3><p>A deposit will appear here once saved.</p></div>';
 }
-
-async function mutate(url, body, recovering = false) {
+async function mutate(url,body,recovering=false) {
   if (!online) throw new Error('Reconnect to the local desk before recording an action.');
-  if (pending() && !recovering) throw new Error('Recover the interrupted request first. Do not start a second action.');
-  const action = {url, body};
-  sessionStorage.setItem('pending_action', JSON.stringify(action));
-  busy = true; connection(online);
+  if (pending() && !recovering) throw new Error('Recover the interrupted request first.');
+  if ('collection_code' in body || 'phone' in body) throw new Error('Private code and phone must never enter request recovery storage.');
+  sessionStorage.setItem('pending_action',JSON.stringify({url,body})); busy = true; connection(online);
   try {
-    const result = await request(url, {method: 'POST', headers: {'Content-Type':'application/json', 'X-CSRF-Token':csrf}, body:JSON.stringify(body)});
-    sessionStorage.removeItem('pending_action'); showPending();
-    return result;
+    const result = await request(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});
+    sessionStorage.removeItem('pending_action'); showPending(); appliedRefreshSequence = ++refreshSequence; mergeResult(result); return result;
   } catch(error) {
-    if (error.status && error.status < 500 && !recovering) { sessionStorage.removeItem('pending_action'); }
-    else { error.message = 'Outcome uncertain. Do not repeat a physical handover. Use “Recover saved request” or check the packet after reconnecting.'; connection(false); }
+    if (error.notExecuted) { sessionStorage.removeItem('pending_action'); if (recovering) claim = null; }
+    else { error.message = 'Outcome uncertain. Do not repeat a physical handover. Recover the saved request after reconnecting, or stop for supervisor review.'; connection(false); }
     showPending(); throw error;
   } finally { busy = false; connection(online); }
 }
-
 async function recover() {
   const action = pending(); if (!action || busy) return;
   try {
-    await refresh();
-    const result = await mutate(action.url, action.body, true);
-    await refresh();
-    document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
-    const latest = latestKnownPacket(result.packet);
-    showPacket(latest, action.url === '/api/deposits' && latest.status === 'READY');
-    toast('Request recovered. Inspect the current record and physical packet before doing anything else.');
+    if (action.body.event_id && action.body.event_id !== eventId) { eventId = action.body.event_id; clearSecrets(); }
+    await refresh(); const result = await mutate(action.url,action.body,true); await refresh();
+    document.querySelectorAll('dialog[open]').forEach(d => { if (d.id !== 'packet-dialog') d.close(); });
+    const current = mergeResult(result); clearSecrets();
+    if (action.url === '/api/deposits' && current.deposit.version === 1 && result.collection_code) { receiptCode = result.collection_code; showRecord(current.deposit,'receipt'); }
+    else showRecord(current.deposit,current.collection?.status === 'HANDED_OVER' ? 'complete' : 'review',current.collection);
+    toast('Request recovered. Check the current record and physical stock before acting.');
   } catch(error) { toast(error.message); }
 }
-
-async function openPacket(id) {
-  if (busy) return;
-  try {
-    const {packet} = await request(`/api/packets/${id}`);
-    showPacket(packet);
-  } catch(error) { if (!error.status) connection(false); toast(error.message || 'Could not load packet. Reconnect before acting.'); }
-}
-
-function showPacket(packet, justDeposited = false) {
-  packet = latestKnownPacket(packet);
-  selectedPacket = packet;
-  const summary = `<div class="packet-summary"><div><span>COLLECTOR</span><strong>${esc(packet.collector)}</strong><small>Left by ${esc(packet.depositor)}</small></div><div><span>PASSES</span><strong>${packet.quantity}</strong><small>${esc(packet.category)}</small></div><div><span>SHELF</span><strong>${esc(packet.location)}</strong><small>One sealed packet</small></div></div>`;
+function quantityInputs(q) { return `<div class="quantity-grid">${categories.map(k => `<label>${k === 'normal' ? 'Normal' : k.toUpperCase()} <small>${q[k]} available</small><input name="${k}" type="number" min="0" max="${q[k]}" value="0" required></label>`).join('')}</div>`; }
+function readQuantities(form) { return Object.fromEntries(categories.map(k => [k,Number(form.get(k))])); }
+function validateQuantities(q) { if (!categories.every(k => Number.isInteger(q[k]) && q[k] >= 0 && q[k] <= 100) || !total(q)) throw new Error('Choose at least one pass, using whole numbers from 0 to 100.'); }
+function showError(id,error) { const target = $(id); if (target) { target.textContent = error.message; target.classList.remove('hidden'); } else toast(error.message); }
+function showRecord(deposit,mode='review',collection=null) {
+  deposit = latest(deposit,depositCache); collection = collection && latest(collection,collectionCache);
+  if (!deposit) return;
+  if (deposit.pending_collection) { collection = latest(deposit.pending_collection,collectionCache); if (collection.status === 'RELEASE_RECORDED') mode = 'handover'; }
+  if (collection?.status === 'HANDED_OVER' && mode === 'handover') mode = 'complete';
+  if (mode === 'release' && (!total(deposit.remaining) || !claim || claim.depositId !== deposit.id || claim.version !== deposit.version || claim.expiresAt <= Date.now())) { claim = null; mode = 'review'; }
+  selectedDeposit = deposit; selectedCollection = collection; viewMode = mode;
   let content = '';
-  if (packet.status === 'READY' && justDeposited) {
-    content = `<div class="success-note"><strong>Deposit saved.</strong><p>Write <b>${esc(packet.code)}</b> on the sealed envelope in slot <b>${esc(packet.location)}</b>. Keep the shelf label visible. You may print a receipt below.</p></div><div class="dialog-actions"><button class="button secondary" id="print-receipt">Print receipt / label</button><button class="button primary close-dialog">Done</button></div>`;
-  } else if (packet.status === 'READY') {
-    content = `<form id="release-form"><label>Match the label on the physical packet<input name="packet_code" required autocomplete="off" placeholder="Type or scan ${esc(packet.code)}" maxlength="30"></label><label class="check-row"><input name="identity_verified" type="checkbox" required><span>I visually checked an accepted photo ID and matched it to <strong>${esc(packet.collector)}</strong>. I have not saved ID details.</span></label><div class="inline-note">No matching ID? Pause collection and contact the supervisor. This prototype has no exception override. Record release before handing over.</div><p class="error hidden" id="release-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button class="button primary" type="submit" data-mutation>Record release</button></div></form>`;
-  } else if (packet.status === 'RELEASE_RECORDED') {
-    content = `<div class="recovery-alert"><strong>Release recorded. Physical handover is not confirmed.</strong><p>Recorded by ${esc(packet.released_by)} at ${esc(formatTime(packet.released_at))}. Check whether the original packet is still at the desk. Hand over that packet only once. If it was already handed over, confirm the existing handover below. If uncertain, stop and call the supervisor.</p></div><form id="handover-form"><label class="check-row"><input name="handover_confirmed" type="checkbox" required><span>I am the original operator and confirm this physical packet has been handed over exactly once.</span></label><p class="error hidden" id="handover-error" role="alert"></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Close for review</button><button class="button primary" type="submit" data-mutation>Confirm handover</button></div></form>`;
+  if (mode === 'receipt') {
+    content = `<div class="success-note"><strong>Deposit saved.</strong><p>Write packet ID <b>${esc(deposit.packet_id)}</b> on the envelope at <b>${esc(deposit.location)}</b>. Do not write the private code on a publicly visible envelope.</p></div><section class="code-slip"><span class="eyebrow">PRIVATE COLLECTION CODE · DEMO</span><strong>${esc(receiptCode)}</strong><p>${esc(state.event_name)} · ${esc(deposit.packet_id)}<br>${esc(quantities(deposit.initial))}</p><p>Anyone with this code can collect any remaining passes. Share only with trusted friends. No individual allocations.</p></section><p class="muted">Print or privately note this slip now. The code is not available from inventory or activity records.</p><details class="share-options"><summary>Optional: prepare a WhatsApp message</summary><p class="muted">No reception? Give the paper slip in person. WhatsApp requires internet and actual delivery to the recipient.</p><form id="share-form"><label>Demo recipient phone, with country code<input name="phone" type="tel" autocomplete="off" placeholder="Country code + number" maxlength="20" required></label><button class="button secondary" type="submit">Preview message locally</button></form><div id="share-preview" class="hidden" aria-live="polite"></div></details><div class="dialog-actions"><button class="button secondary" id="print-receipt">Print private code slip</button><button class="button primary close-dialog">Done</button></div>`;
+  } else if (mode === 'release') {
+    content = `<form id="release-form"><div class="success-note"><strong>Code verified.</strong><p>Select only the passes being collected now. The remaining balance stays available under the same code.</p></div>${quantityInputs(deposit.remaining)}<label>Physical packet ID<input name="packet_id" required autocomplete="off" maxlength="40" placeholder="Type or scan the ID on the envelope"></label><p class="inline-note">Take the packet from shelf ${esc(deposit.location)} and match its label. Record this release before handing over passes. Verification expires after two minutes.</p><p class="error hidden" id="release-error" role="alert"></p><div class="dialog-actions"><button class="button secondary close-dialog" type="button">Cancel</button><button class="button primary" data-mutation type="submit">Record selected release</button></div></form>`;
+  } else if (mode === 'handover') {
+    content = `<div class="recovery-alert"><strong>Release recorded. Handover unconfirmed.</strong><p>Reserved: <b>${esc(quantities(collection.quantities))}</b>. These quantities are already subtracted from the available balance.</p><p>Recorded by ${esc(collection.created_by)} at ${esc(formatTime(collection.created_at))}. Check the physical stock. Hand over these reserved passes exactly once, then confirm below. If already handed over, confirm that existing handover. If unsure, stop and ask the supervisor. Never issue replacement passes or return the balance automatically.</p></div><form id="handover-form"><label class="check-row"><input name="handover_confirmed" type="checkbox" required><span>I am the original operator and confirm these exact quantities have physically been handed over once.</span></label><p class="inline-note">Only the original staff label (${esc(collection.created_by)}) can confirm. This is a procedural check, not authentication.</p><p class="error hidden" id="handover-error" role="alert"></p><div class="dialog-actions"><button class="button secondary close-dialog" type="button">Close for review</button><button class="button primary" type="submit" data-mutation data-original-only="true">Confirm physical handover</button></div></form>`;
+  } else if (mode === 'complete' && collection) {
+    content = `<div class="verified-state" role="status" aria-live="polite"><span class="verified-check" aria-hidden="true">✓</span><h3>Verified.</h3><p>Handed over: <b>${esc(quantities(collection.quantities))}</b></p><p>Remaining: <b>${esc(quantities(deposit.remaining))}</b></p><p class="no-repeat">This collection is complete. Do not hand it over again.</p><p>${esc(collection.handed_over_by)} · ${esc(formatTime(collection.handed_over_at))}</p></div><div class="dialog-actions"><button class="button primary close-dialog">Done</button></div>`;
   } else {
-    content = `<div class="success-note"><strong>Collection complete. Do not release again.</strong><p>Handed over by ${esc(packet.handed_over_by)} at ${esc(formatTime(packet.handed_over_at))}.</p></div><div class="dialog-actions"><button class="button secondary" id="print-receipt">Print record</button><button class="button primary close-dialog">Done</button></div>`;
+    const history = state.collections.filter(c => c.deposit_id === deposit.id);
+    content = `<div class="inline-note">This is an administrative custody record. A packet ID, shelf or staff label does not authorize a new release. Use “Collect by code” and verify the shared code for every new collection.</div><h3>${total(deposit.remaining) ? 'Collections' : 'All passes collected'}</h3>${history.length ? history.map(c => `<div class="collection-history"><strong>${esc(quantities(c.quantities))}</strong><p>${esc(c.status === 'HANDED_OVER' ? 'Handed over' : 'Handover unconfirmed')} · ${esc(c.created_by)} · ${esc(formatTime(c.created_at))}</p><small>Collection ${esc(c.id)}${c.handed_over_at ? ` · Confirmed ${esc(formatTime(c.handed_over_at))} by ${esc(c.handed_over_by)}` : ''}</small></div>`).join('') : '<p class="muted">No collections recorded.</p>'}<div class="dialog-actions"><button class="button primary close-dialog">Close record</button></div>`;
   }
-  $('#packet-detail').innerHTML = `<div class="dialog-top"><span class="eyebrow">${justDeposited ? 'DEPOSIT RECEIPT' : 'PACKET RECORD'}</span><button class="icon-button close-dialog" aria-label="Close packet">×</button></div><h2 class="record-code">${esc(packet.code)}</h2><span class="status ${packet.status.toLowerCase()}"><i></i>${statuses[packet.status]}</span>${summary}<div id="packet-live-warning" class="error hidden" role="alert"><strong>Stop: this screen is not safe to act on.</strong><br>The desk connection is lost or an action has an uncertain outcome. Do not hand over a packet. Reconnect, recover any saved request, and inspect the current record and physical custody first.</div><div id="packet-procedure">${content}</div><div class="receipt-only">TRAINING RECORD · NOT AN ADMISSION TICKET<br>Saved ${esc(formatTime(packet.created_at))} by ${esc(packet.created_by)}. This receipt does not replace identity verification.</div>`;
-  wireClose($('#packet-dialog'));
-  if (!$('#packet-dialog').open) $('#packet-dialog').showModal();
-  $('#print-receipt')?.addEventListener('click', () => window.print());
-  $('#release-form')?.addEventListener('submit', async event => {
-    event.preventDefault(); if (busy) return;
-    const data = new FormData(event.currentTarget);
-    try {
-      const result = await mutate(`/api/packets/${packet.id}/release`, {request_id:crypto.randomUUID(), operator, version:packet.version, packet_code:data.get('packet_code'), identity_verified:data.get('identity_verified') === 'on'});
-      showPacket(result.packet); await refresh();
-    } catch(error) { $('#release-error').textContent = error.message; $('#release-error').classList.remove('hidden'); await refresh(); }
+  $('#packet-detail').innerHTML = `<div class="dialog-top"><span class="eyebrow">${mode === 'receipt' ? 'DEPOSIT RECEIPT' : 'CUSTODY RECORD'} · DEMO</span><button class="icon-button close-dialog" aria-label="Close record">×</button></div><h2 class="record-code">${esc(deposit.packet_id)}</h2><span class="status ${statusOf(deposit).toLowerCase()}"><i></i>${statuses[statusOf(deposit)]}</span><div class="packet-summary"><div><span>REMAINING</span><strong>${esc(quantities(deposit.remaining))}</strong><small>Initial: ${esc(quantities(deposit.initial))}</small></div><div><span>SHELF</span><strong>${esc(deposit.location)}</strong><small>${esc(state.events?.find(e => e.id === deposit.event_id)?.name || deposit.event_id)}</small></div></div><p class="record-origin">Created by ${esc(deposit.created_by)} · ${esc(formatTime(deposit.created_at))}</p><div id="packet-live-warning" class="error hidden" role="alert"><strong>Stop. Do not hand over passes.</strong><br>Connection is lost or an action is uncertain. Recover the request and check current records and physical stock first.</div><div id="packet-procedure">${content}</div><div class="receipt-only">DEMO ONLY · NOT AN ADMISSION TICKET</div>`;
+  wireClose($('#packet-dialog')); if (!$('#packet-dialog').open) $('#packet-dialog').showModal();
+  $('#print-receipt')?.addEventListener('click',() => window.print());
+  $('#share-form')?.addEventListener('submit',event => {
+    event.preventDefault(); const raw = new FormData(event.currentTarget).get('phone').trim();
+    if (!/^\+?[1-9][0-9 ()-]{7,18}$/.test(raw)) { toast('Enter a demo phone number including country code.'); return; }
+    const phone = raw.replace(/\D/g,''), message = `DEMO ONLY — ${state.event_name}\nCollection code: ${receiptCode}\nDeposited: ${quantities(deposit.initial)}\nShare only with trusted friends. Anyone with this code can collect any remaining passes; there are no individual allocations. Present the code at the pass desk. This is not an admission ticket.`;
+    const preview = $('#share-preview'); preview.classList.remove('hidden'); preview.innerHTML = `<p><strong>Recipient: +${esc(phone)}</strong></p><p class="message-preview">${esc(message)}</p><p class="inline-note">Opening WhatsApp shares this phone number and bearer code with WhatsApp. Review the recipient and exact text there, then decide whether to send. Nothing is sent automatically.</p><a class="button secondary" target="_blank" rel="noopener noreferrer" href="https://wa.me/${phone}?text=${encodeURIComponent(message)}">Open WhatsApp to review ↗</a>`;
   });
-  $('#handover-form')?.addEventListener('submit', async event => {
-    event.preventDefault(); if (busy) return;
-    const data = new FormData(event.currentTarget);
+  $('#release-form')?.addEventListener('submit',async event => {
+    event.preventDefault(); if (busy) return; const form = new FormData(event.currentTarget);
     try {
-      const result = await mutate(`/api/packets/${packet.id}/handover`, {request_id:crypto.randomUUID(), operator, version:packet.version, handover_confirmed:data.get('handover_confirmed') === 'on'});
-      showPacket(result.packet); await refresh(); toast('Handover recorded. This packet cannot be released again.');
-    } catch(error) { $('#handover-error').textContent = error.message; $('#handover-error').classList.remove('hidden'); await refresh(); }
+      if (!claim || claim.expiresAt <= Date.now() || claim.version !== deposit.version) throw new Error('Verification expired or the balance changed. Close this record and verify the code again.');
+      const q = readQuantities(form); validateQuantities(q); if (categories.some(k => q[k] > deposit.remaining[k])) throw new Error('Requested quantities exceed the available balance.');
+      const result = await mutate(`/api/deposits/${encodeURIComponent(deposit.id)}/release`,{request_id:crypto.randomUUID(),operator,event_id:eventId,claim_token:claim.token,version:deposit.version,packet_id:form.get('packet_id'),quantities:q});
+      clearSecrets(); const current = mergeResult(result); showRecord(current.deposit,'handover',current.collection); await refresh();
+    } catch(error) { showError('#release-error',error); await refresh(); }
+  });
+  $('#handover-form')?.addEventListener('submit',async event => {
+    event.preventDefault(); if (busy) return;
+    try { const result = await mutate(`/api/collections/${encodeURIComponent(collection.id)}/handover`,{request_id:crypto.randomUUID(),operator,event_id:eventId,version:collection.version,handover_confirmed:new FormData(event.currentTarget).get('handover_confirmed') === 'on'}); const current = mergeResult(result); showRecord(current.deposit,'complete',current.collection); await refresh(); }
+    catch(error) { showError('#handover-error',error); await refresh(); }
   });
   connection(online);
 }
-
-function wireClose(root) {
-  root.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => { if (!busy) root.close(); }));
-}
-document.querySelectorAll('dialog').forEach(dialog => { wireClose(dialog); dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); }); });
-$('#operator-dialog').addEventListener('cancel', event => { if (!operator) event.preventDefault(); });
-$('#operator-form').addEventListener('submit', event => {
-  event.preventDefault(); operator = new FormData(event.currentTarget).get('operator').trim();
-  if (!operator) return;
-  sessionStorage.setItem('staff_name', operator); updateOperator(); $('#operator-dialog').close();
+function wireClose(root) { root.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click',() => { if (!busy) root.close(); })); }
+document.querySelectorAll('dialog').forEach(dialog => { wireClose(dialog); dialog.addEventListener('cancel',event => { if (busy) event.preventDefault(); }); });
+$('#packet-dialog').addEventListener('close',() => { clearSecrets(); selectedDeposit = null; selectedCollection = null; $('#packet-detail').innerHTML = ''; });
+$('#code-dialog').addEventListener('close',() => { $('#collection-code').value = ''; });
+$('#operator-dialog').addEventListener('cancel',event => { if (!operator) event.preventDefault(); });
+$('#operator-form').addEventListener('submit',event => { event.preventDefault(); operator = new FormData(event.currentTarget).get('operator').trim(); if (!operator) return; sessionStorage.setItem('staff_name',operator); updateOperator(); $('#operator-dialog').close(); connection(online); });
+$('#operator-button').addEventListener('click',() => { if (busy || pending()) return; $('#operator-form input').value = operator; $('#operator-dialog').showModal(); });
+$('#new-deposit').addEventListener('click',() => { if (!operator) { $('#operator-dialog').showModal(); return; } $('#deposit-form').reset(); $('#deposit-error').classList.add('hidden'); $('#deposit-dialog').showModal(); });
+$('#deposit-form').addEventListener('submit',async event => {
+  event.preventDefault(); if (busy) return; const form = new FormData(event.currentTarget);
+  try { const q = readQuantities(form); validateQuantities(q); const result = await mutate('/api/deposits',{request_id:crypto.randomUUID(),operator,event_id:eventId,location:form.get('location'),quantities:q,custody_confirmed:form.get('custody_confirmed') === 'on'}); $('#deposit-dialog').close(); receiptCode = result.collection_code; showRecord(result.deposit,'receipt'); await refresh(); }
+  catch(error) { showError('#deposit-error',error); } finally { connection(online); }
 });
-$('#operator-button').addEventListener('click', () => { if (busy) return; $('#operator-form input').value = operator; $('#operator-dialog').showModal(); });
-$('#new-deposit').addEventListener('click', () => {
-  if (!operator) { $('#operator-dialog').showModal(); return; }
-  $('#deposit-form').reset(); $('#deposit-error').classList.add('hidden'); $('#deposit-dialog').showModal();
+$('#collect-code').addEventListener('click',() => { if (!operator) { $('#operator-dialog').showModal(); return; } clearSecrets(); $('#code-form').reset(); $('#code-error').classList.add('hidden'); $('#code-dialog').showModal(); });
+$('#code-form').addEventListener('submit',async event => {
+  event.preventDefault(); if (busy || pending() || !online) return; busy = true; connection(online);
+  try { const code = $('#collection-code').value.trim(); const result = await request('/api/verify',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({event_id:eventId,collection_code:code})}); $('#collection-code').value = ''; $('#code-dialog').close(); const d = latest(result.deposit,depositCache); claim = {token:result.claim_token,depositId:d.id,version:result.deposit.version,expiresAt:Date.now() + result.expires_in * 1000}; showRecord(d,'release'); }
+  catch(error) { if (!error.status) connection(false); showError('#code-error',error); }
+  finally { busy = false; connection(online); }
 });
-$('#deposit-form').addEventListener('submit', async event => {
-  event.preventDefault(); if (busy) return;
-  const form = new FormData(event.currentTarget);
-  $('#save-deposit').disabled = true;
-  try {
-    const result = await mutate('/api/deposits', {request_id:crypto.randomUUID(), operator, depositor:form.get('depositor'), collector:form.get('collector'), category:form.get('category'), quantity:Number(form.get('quantity')), location:form.get('location'), custody_confirmed:form.get('custody_confirmed') === 'on'});
-    $('#deposit-dialog').close(); showPacket(result.packet, true); await refresh();
-  } catch(error) { $('#deposit-error').textContent = error.message; $('#deposit-error').classList.remove('hidden'); }
-  finally { connection(online); }
+$('#event-select').addEventListener('change',async event => { if (busy || pending()) return; clearSecrets(); document.querySelectorAll('dialog[open]').forEach(d => d.close()); eventId = event.target.value; state = {deposits:[],collections:[],events:state.events,audit:[],counts:{}}; $('#search').value = ''; render(); connection(false); await refresh(); });
+$('#search').addEventListener('input',render); $('#refresh').addEventListener('click',refresh);
+document.querySelectorAll('[data-filter]').forEach(button => {
+  button.addEventListener('click',() => { filter = button.dataset.filter; document.querySelectorAll('[data-filter]').forEach(tab => { const active = tab === button; tab.classList.toggle('active',active); tab.setAttribute('aria-selected',String(active)); tab.setAttribute('tabindex',active ? '0' : '-1'); }); render(); });
+  button.addEventListener('keydown',event => { if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return; event.preventDefault(); const tabs = Array.from(document.querySelectorAll('[data-filter]')), i = tabs.indexOf(button), next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; tabs[next].focus(); tabs[next].click(); });
 });
-$('#search').addEventListener('input', render);
-$('#refresh').addEventListener('click', refresh);
-document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
-  filter = button.dataset.filter;
-  document.querySelectorAll('[data-filter]').forEach(tab => { const active = tab === button; tab.classList.toggle('active', active); tab.setAttribute('aria-selected', String(active)); }); render();
-}));
-['packets', 'activity', 'guide'].forEach(name => $(`#nav-${name}`).addEventListener('click', () => {
-  ['packets', 'activity', 'guide'].forEach(view => { $(`#${view}-view`).classList.toggle('hidden', view !== name); $(`#nav-${view}`).classList.toggle('active', view === name); });
-}));
-window.addEventListener('focus', refresh);
-setInterval(() => { if (!busy && !document.hidden) refresh(); }, 8000);
-updateOperator(); showPending(); refresh();
-if (!operator) $('#operator-dialog').showModal();
+['packets','activity','guide'].forEach(name => $(`#nav-${name}`).addEventListener('click',() => { ['packets','activity','guide'].forEach(view => { $(`#${view}-view`).classList.toggle('hidden',view !== name); $(`#nav-${view}`).classList.toggle('active',view === name); }); }));
+window.addEventListener('focus',refresh); setInterval(() => { if (!busy && !document.hidden) refresh(); },8000);
+updateOperator(); showPending(); refresh(); if (!operator) $('#operator-dialog').showModal();

@@ -1,95 +1,49 @@
-// Small state-machine regression tests, not a DOM/browser or visual substitute.
-// Uses only Node built-ins: node tests/ui_state_test.cjs
+// Node-only state regressions. These are not a substitute for real browser QA.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const {webcrypto} = require('node:crypto');
-
+const path = require('node:path');
 async function setup() {
   const nodes = new Map();
   class Element {
-    constructor() { this.value = ''; this.disabled = false; this.open = false; this.textContent = ''; this.classes = new Set(); this.classList = {add: x => this.classes.add(x), remove: x => this.classes.delete(x), toggle: (x, force) => { const add = force ?? !this.classes.has(x); add ? this.classes.add(x) : this.classes.delete(x); }}; }
-    set innerHTML(value) { this.html = value; for (const match of value.matchAll(/id="([^"]+)"/g)) if (!nodes.has('#' + match[1])) nodes.set('#' + match[1], new Element()); }
+    constructor() { this.value = ''; this.disabled = false; this.open = false; this.textContent = ''; this.dataset = {}; this.classes = new Set(); this.listeners = {}; this.classList = {add:x=>this.classes.add(x),remove:x=>this.classes.delete(x),toggle:(x,force)=>{const add=force??!this.classes.has(x);add?this.classes.add(x):this.classes.delete(x);}}; }
+    set innerHTML(value) { this.html = value; for (const match of value.matchAll(/id="([^"]+)"/g)) nodes.set('#'+match[1],new Element()); }
     get innerHTML() { return this.html || ''; }
-    addEventListener() {} querySelectorAll() { return []; } setAttribute() {} showModal() { this.open = true; } close() { this.open = false; }
-    prepend(node) { nodes.set('#' + node.id, node); }
-    remove() { for (const [key, node] of nodes) if (node === this) nodes.delete(key); }
+    addEventListener(name,fn) { this.listeners[name] = fn; } querySelectorAll() { return []; } setAttribute() {} showModal() {this.open=true;} close() {this.open=false;} reset() {}
+    prepend(node) {nodes.set('#'+node.id,node);} remove() {for(const [key,node] of nodes) if(node===this) nodes.delete(key);}
   }
-  const html = fs.readFileSync(new URL('../static/index.html', 'file://' + __filename), 'utf8');
-  for (const match of html.matchAll(/id="([^"]+)"/g)) nodes.set('#' + match[1], new Element());
-  for (const selector of ['.avatar', 'main', '#operator-form input']) nodes.set(selector, new Element());
-  const storage = new Map([['staff_name', 'Demo Operator']]);
-  const mutations = [nodes.get('#save-deposit')];
-  const currentState = {event_name:'Training', packets:[], audit:[], counts:{}, csrf:'csrf-test'};
-  const document = {hidden:false, querySelector: key => nodes.get(key) || null, querySelectorAll: key => key === '[data-mutation]' ? mutations : [], createElement: () => new Element()};
-  const context = vm.createContext({document, sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}, window:{addEventListener(){},print(){}}, console, crypto:webcrypto, AbortController, setTimeout, clearTimeout, setInterval:()=>0, fetch:async()=>({ok:true,status:200,json:async()=>currentState})});
-  vm.runInContext(fs.readFileSync(new URL('../static/app.js', 'file://' + __filename), 'utf8'), context);
-  await new Promise(resolve => setImmediate(resolve));
+  const html=fs.readFileSync(path.join(__dirname,'../static/index.html'),'utf8');
+  for(const match of html.matchAll(/id="([^"]+)"/g)) nodes.set('#'+match[1],new Element());
+  for(const key of ['.avatar','main','#operator-form input']) nodes.set(key,new Element());
+  const storage=new Map([['staff_name','Demo Operator']]);
+  const currentState={event_id:'training-event-001',event_name:'Training',events:[{id:'training-event-001',name:'Training'}],deposits:[],collections:[],audit:[],counts:{},csrf:'csrf-test'};
+  const document={hidden:false,querySelector:key=>nodes.get(key)||null,querySelectorAll:key=>key==='[data-mutation]'?[nodes.get('#save-deposit')]:[],createElement:()=>new Element()};
+  const context=vm.createContext({document,sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},window:{addEventListener(){},print(){}},console,crypto:webcrypto,AbortController,setTimeout,clearTimeout,setInterval:()=>0,fetch:async()=>({ok:true,status:200,json:async()=>currentState})});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
   return {context,nodes,storage,currentState,Element,run:code=>vm.runInContext(code,context)};
 }
-
-(async () => {
-  let passed = 0;
-  async function test(name, action) { const state = await setup(); await action(state); passed++; console.log('PASS:',name); }
-
-  await test('HTML escaping keeps input inert', ({run}) => {
-    assert.equal(run(`esc('<img src=x onerror="bad()">')`), '&lt;img src=x onerror=&quot;bad()&quot;&gt;');
-  });
-  await test('Lost response preserves original request and blocks mutations', async ({context,run,storage,nodes}) => {
-    context.fetch = async () => { throw new Error('response lost'); };
-    await assert.rejects(run(`mutate('/api/deposits', {request_id:'same-id',operator:'Demo Operator'})`), /Outcome uncertain/);
-    assert.equal(JSON.parse(storage.get('pending_action')).body.request_id, 'same-id');
-    assert.equal(nodes.get('#new-deposit').disabled, true);
-    assert.equal(nodes.get('#save-deposit').disabled, true);
-  });
-  await test('Recovery authentication failure never discards original request', async ({context,run,storage}) => {
-    storage.set('pending_action', JSON.stringify({url:'/api/deposits',body:{request_id:'original'}}));
-    context.fetch = async () => ({ok:false,status:403,json:async()=>({error:'Session changed'})});
-    await assert.rejects(run(`mutate('/api/deposits', {request_id:'original'}, true)`));
-    assert.equal(JSON.parse(storage.get('pending_action')).body.request_id, 'original');
-  });
-  await test('Known fresh validation failure clears request but not an uncertain retry', async ({context,run,storage}) => {
-    context.fetch = async () => ({ok:false,status:400,json:async()=>({error:'Wrong label'})});
-    await assert.rejects(run(`mutate('/api/packets/p/release', {request_id:'bad-label'})`), /Wrong label/);
-    assert.equal(storage.has('pending_action'), false);
-  });
-  await test('Recovered deposit restores receipt presentation', async ({context,run,storage,currentState}) => {
-    storage.set('pending_action', JSON.stringify({url:'/api/deposits',body:{request_id:'original'}}));
-    context.fetch = async url => ({ok:true,status:200,json:async()=>url === '/api/state' ? currentState : {packet:{id:'p',status:'READY',version:1},replayed:true}});
-    run(`var shown = null; showPacket = (packet, receipt) => { shown = {packet,receipt}; };`);
-    await run('recover()');
-    assert.equal(run('shown.receipt'), true);
-    assert.equal(storage.has('pending_action'), false);
-  });
-  await test('Refreshed dialog adopts newer completed state', async ({run,currentState,nodes}) => {
-    nodes.get('#packet-dialog').open = true;
-    run(`selectedPacket = {id:'p',version:2,status:'RELEASE_RECORDED'}; var updated = null; showPacket = packet => { updated = packet; }; render = () => {};`);
-    currentState.packets = [{id:'p',version:3,status:'HANDED_OVER'}];
-    await run('refresh()');
-    assert.equal(run('updated.status'), 'HANDED_OVER');
-  });
-  await test('Disconnected handover instructions are replaced by blocking warning', ({run,nodes,Element}) => {
-    nodes.set('#packet-live-warning', new Element()); nodes.set('#packet-procedure', new Element());
-    run(`selectedPacket = {id:'p',status:'RELEASE_RECORDED'}; connection(false);`);
-    assert.equal(nodes.get('#packet-live-warning').classes.has('hidden'), false);
-    assert.equal(nodes.get('#packet-procedure').classes.has('hidden'), true);
-    assert.equal(nodes.get('#save-deposit').disabled, true);
-  });
-  await test('Older refresh cannot downgrade a newer open dialog', async ({run,currentState,nodes}) => {
-    nodes.get('#packet-dialog').open = true;
-    run(`selectedPacket = {id:'p',version:3,status:'HANDED_OVER'}; var downgraded = false; showPacket = packet => { downgraded = packet.version < 3; }; render = () => {};`);
-    currentState.packets = [{id:'p',version:2,status:'RELEASE_RECORDED'}];
-    await run('refresh()');
-    assert.equal(run('downgraded'), false);
-    assert.equal(run('state.packets[0].version'), 3);
-  });
-  await test('Recovery prefers newer refresh over an earlier replay response', async ({context,run,storage,currentState}) => {
-    storage.set('pending_action', JSON.stringify({url:'/api/packets/p/release',body:{request_id:'original'}}));
-    let reads = 0;
-    context.fetch = async url => ({ok:true,status:200,json:async()=>url === '/api/state' ? {...currentState,packets:++reads === 1 ? [] : [{id:'p',version:3,status:'HANDED_OVER'}]} : {packet:{id:'p',status:'RELEASE_RECORDED',version:2},replayed:true}});
-    run(`var recoveredPacket = null; showPacket = packet => { recoveredPacket = packet; }; render = () => {};`);
-    await run('recover()');
-    assert.equal(run('recoveredPacket.status'), 'HANDED_OVER');
-  });
-  console.log(`${passed} state-machine checks passed. These do not validate a real browser or visual layout.`);
-})().catch(error => { console.error(error); process.exitCode = 1; });
+const deposit=(version=1,pending_collection=null)=>({id:'d',event_id:'training-event-001',packet_id:'PKT-DEMO',location:'A1',created_by:'Demo Operator',created_at:'2026-11-05T00:00:00Z',version,initial:{normal:10,vip:2,vvip:1},remaining:{normal:version>1?8:10,vip:2,vvip:1},pending_collection});
+const collection=(version=1,status='RELEASE_RECORDED')=>({id:'c',deposit_id:'d',event_id:'training-event-001',packet_id:'PKT-DEMO',version,status,quantities:{normal:2,vip:0,vvip:0},created_by:'Demo Operator',created_at:'2026-11-05T00:00:00Z',handed_over_by:status==='HANDED_OVER'?'Demo Operator':null});
+(async()=>{
+  let passed=0;
+  async function test(name,action){const s=await setup();await action(s);passed++;console.log('PASS:',name);}
+  await test('HTML escaping keeps user inputs inert',({run})=>assert.equal(run(`esc('<img src=x onerror="bad()">')`),'&lt;img src=x onerror=&quot;bad()&quot;&gt;'));
+  await test('Lost response retains exact request and blocks new actions',async({context,run,storage,nodes})=>{context.fetch=async()=>{throw Error('lost');};await assert.rejects(run(`mutate('/api/deposits',{request_id:'original',operator:'Demo Operator'})`),/Outcome uncertain/);assert.equal(JSON.parse(storage.get('pending_action')).body.request_id,'original');assert.equal(nodes.get('#new-deposit').disabled,true);assert.equal(nodes.get('#collect-code').disabled,true);});
+  await test('Auth failure preserves interrupted request despite HTTP 403',async({context,run,storage})=>{context.fetch=async()=>({ok:false,status:403,json:async()=>({error:'Session changed',not_applied:false})});await assert.rejects(run(`mutate('/api/deposits',{request_id:'original'},true)`),/Outcome uncertain/);assert.equal(JSON.parse(storage.get('pending_action')).body.request_id,'original');});
+  await test('Expired uncommitted claim clears saved request for re-verification',async({context,run,storage})=>{context.fetch=async()=>({ok:false,status:409,json:async()=>({error:'Verify code again',not_applied:true})});await assert.rejects(run(`mutate('/api/deposits/d/release',{request_id:'original',claim_token:'expired'},true)`),/Verify code again/);assert.equal(storage.has('pending_action'),false);});
+  await test('Fingerprint conflict does not clear uncertain action',async({context,run,storage})=>{context.fetch=async()=>({ok:false,status:409,json:async()=>({error:'Conflict',not_applied:false})});await assert.rejects(run(`mutate('/api/deposits/d/release',{request_id:'original'},true)`));assert.equal(storage.has('pending_action'),true);});
+  await test('Recovery storage refuses raw collection code or phone',async({run,storage})=>{await assert.rejects(run(`mutate('/api/verify',{collection_code:'SECRET-CODE'})`),/never enter/);await assert.rejects(run(`mutate('/api/deposits',{phone:'1234567890'})`),/never enter/);assert.equal(storage.has('pending_action'),false);});
+  await test('Quantity validation rejects zero, fractional and negative totals',({run})=>{for(const q of [{normal:0,vip:0,vvip:0},{normal:-1,vip:2,vvip:0},{normal:0.5,vip:0,vvip:0},{normal:101,vip:0,vvip:0}])assert.throws(()=>run(`validateQuantities(${JSON.stringify(q)})`));run(`validateQuantities({normal:2,vip:1,vvip:0})`);});
+  await test('Disconnected handover replaces physical instructions with a warning',({run,nodes,Element})=>{nodes.set('#packet-live-warning',new Element());nodes.set('#packet-procedure',new Element());run(`viewMode='handover';connection(false)`);assert.equal(nodes.get('#packet-live-warning').classes.has('hidden'),false);assert.equal(nodes.get('#packet-procedure').classes.has('hidden'),true);});
+  await test('Pending action also hides physical handover instructions',({run,nodes,Element,storage})=>{nodes.set('#packet-live-warning',new Element());nodes.set('#packet-procedure',new Element());storage.set('pending_action','{"url":"x","body":{}}');run(`viewMode='handover';connection(true)`);assert.equal(nodes.get('#packet-procedure').classes.has('hidden'),true);});
+  await test('Newer confirmed collection invalidates open unconfirmed screen',async({run,currentState,nodes})=>{const c=collection(),d=deposit(2,c);run(`showRecord(${JSON.stringify(d)},'handover',${JSON.stringify(c)})`);currentState.deposits=[deposit(3)];currentState.collections=[collection(2,'HANDED_OVER')];await run('refresh()');assert.equal(run('viewMode'),'complete');assert.match(nodes.get('#packet-detail').innerHTML,/Verified\./);assert.doesNotMatch(nodes.get('#packet-detail').innerHTML,/id="handover-form"/);});
+  await test('Old refresh cannot downgrade confirmed collection or deposit',async({run,currentState})=>{run(`mergeResult({deposit:${JSON.stringify(deposit(3))},collection:${JSON.stringify(collection(2,'HANDED_OVER'))}})`);currentState.deposits=[deposit(2,collection())];currentState.collections=[collection()];await run('refresh()');assert.equal(run('state.deposits[0].version'),3);assert.equal(run('state.collections[0].status'),'HANDED_OVER');});
+  await test('Recovery prefers newer state over earlier release replay',async({context,run,storage,currentState})=>{storage.set('pending_action',JSON.stringify({url:'/api/deposits/d/release',body:{request_id:'original',event_id:'training-event-001'}}));context.fetch=async url=>({ok:true,status:200,json:async()=>url.startsWith('/api/state')?{...currentState,deposits:[deposit(3)],collections:[collection(2,'HANDED_OVER')]}:{deposit:deposit(2,collection()),collection:collection(),replayed:true}});await run('recover()');assert.equal(run('selectedDeposit.version'),3);assert.equal(run('viewMode'),'complete');assert.equal(storage.has('pending_action'),false);});
+  await test('Changed deposit revokes verified release form',async({run,currentState,nodes})=>{run(`claim={depositId:'d',version:1,token:'token',expiresAt:Date.now()+120000};showRecord(${JSON.stringify(deposit())},'release')`);assert.equal(run('viewMode'),'release');currentState.deposits=[deposit(2)];await run('refresh()');assert.equal(run('claim'),null);assert.equal(run('viewMode'),'review');assert.doesNotMatch(nodes.get('#packet-detail').innerHTML,/id="release-form"/);});
+  await test('Packet inventory review cannot create release form',({run,nodes})=>{run(`showRecord(${JSON.stringify(deposit())})`);assert.equal(run('viewMode'),'review');assert.doesNotMatch(nodes.get('#packet-detail').innerHTML,/id="release-form"/);});
+  await test('Receipt keeps code out of state and persistent recovery',({run,nodes,storage})=>{run(`receiptCode='ABCD-EFGH-JKLM';showRecord(${JSON.stringify(deposit())},'receipt')`);assert.match(nodes.get('#packet-detail').innerHTML,/ABCD-EFGH-JKLM/);assert.doesNotMatch(run('JSON.stringify(state)'),/ABCD-EFGH-JKLM/);assert.equal([...storage.values()].some(v=>v.includes('ABCD-EFGH-JKLM')),false);});
+  await test('Closing receipt erases bearer code and recipient DOM',({run,nodes})=>{run(`receiptCode='ABCD-EFGH-JKLM';showRecord(${JSON.stringify(deposit())},'receipt')`);nodes.get('#packet-dialog').listeners.close();assert.equal(run('receiptCode'),'');assert.equal(nodes.get('#packet-detail').innerHTML,'');});
+  console.log(`${passed} state-machine checks passed. Real-browser layout and behavior remain separate checks.`);
+})().catch(error=>{console.error(error);process.exitCode=1;});

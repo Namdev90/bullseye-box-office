@@ -2,16 +2,22 @@ import concurrent.futures
 import http.client
 import json
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import threading
 import unittest
 
-from app import Store, Server, DomainError
+from app import Store, Server, DomainError, CATEGORIES, CODE_ALPHABET, DEFAULT_EVENT
+
+
+def counts(normal=0, vip=0, vvip=0):
+    return dict(normal=normal, vip=vip, vvip=vvip)
 
 
 def deposit(**overrides):
-    data = dict(request_id="deposit-1", operator="Demo Operator", depositor="Taylor Demo", collector="Alex Demo", category="General admission", quantity=2, location="A-01", custody_confirmed=True)
+    data = dict(request_id='deposit-1', operator='Demo Operator', event_id=DEFAULT_EVENT,
+                quantities=counts(6,2,1), location='A-01', custody_confirmed=True)
     data.update(overrides)
     return data
 
@@ -19,234 +25,324 @@ def deposit(**overrides):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.path = Path(self.temp.name) / "db.sqlite3"
-        self.store = Store(self.path)
+        self.path = Path(self.temp.name) / 'db.sqlite3'
+        self.now = 1800000000.0
+        self.store = Store(self.path, clock=lambda: self.now)
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def make(self):
-        return self.store.mutate("DEPOSIT", deposit())["packet"]
+    def make(self, **overrides):
+        return self.store.mutate('DEPOSIT', deposit(**overrides))
 
-    def release(self, packet, request_id="release-1", **overrides):
-        data = dict(request_id=request_id, operator="Demo Operator", version=packet["version"], packet_code=packet["code"], identity_verified=True)
+    def verified(self, result):
+        return self.store.verify(dict(event_id=result['deposit']['event_id'], collection_code=result['collection_code']))
+
+    def release_data(self, verified, request_id='release-1', **overrides):
+        packet = verified['deposit']
+        data = dict(request_id=request_id, operator='Demo Operator', event_id=packet['event_id'],
+                    version=packet['version'], packet_id=packet['packet_id'],
+                    claim_token=verified['claim_token'], quantities=counts(2,1,0))
         data.update(overrides)
-        return self.store.mutate("RELEASE", data, packet["id"])
+        return data
 
-    def handover(self, packet, request_id="handover-1", **overrides):
-        data = dict(request_id=request_id, operator="Demo Operator", version=packet["version"], handover_confirmed=True)
+    def release(self, verified, request_id='release-1', **overrides):
+        return self.store.mutate('RELEASE', self.release_data(verified,request_id,**overrides),verified['deposit']['id'])
+
+    def handover(self, released, request_id='handover-1', **overrides):
+        c = released['collection']
+        data = dict(request_id=request_id, operator='Demo Operator', event_id=c['event_id'],version=c['version'],handover_confirmed=True)
         data.update(overrides)
-        return self.store.mutate("HANDOVER", data, packet["id"])
+        return self.store.mutate('HANDOVER', data, c['id'])
 
-    def test_deposit_preserves_packet_and_audit(self):
-        packet = self.make()
-        self.assertEqual(packet["status"], "READY")
-        self.assertEqual(packet["quantity"], 2)
-        self.assertTrue(packet["code"].startswith("BX-"))
-        self.assertEqual(len(self.store.state()["audit"]), 1)
+    def fails(self, code, call):
+        with self.assertRaises(DomainError) as cm: call()
+        self.assertEqual(cm.exception.code,code)
+        return cm.exception
 
-    def test_complete_flow(self):
-        packet = self.make()
-        released = self.release(packet)["packet"]
-        self.assertEqual(released["status"], "RELEASE_RECORDED")
-        self.assertEqual(released["version"], 2)
-        done = self.handover(released)["packet"]
-        self.assertEqual(done["status"], "HANDED_OVER")
-        self.assertEqual(done["version"], 3)
-        self.assertEqual([a["action"] for a in self.store.state()["audit"]], ["HANDOVER", "RELEASE", "DEPOSIT"])
+    def test_code_format_and_entropy_alphabet(self):
+        self.assertEqual(len(set(CODE_ALPHABET)),32)
+        a=self.make(); b=self.make(request_id='deposit-2',location='A-02')
+        self.assertRegex(a['collection_code'],r'^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){2}$')
+        self.assertNotEqual(a['collection_code'],b['collection_code'])
+        self.assertNotEqual(a['collection_code'],a['deposit']['packet_id'])
 
-    def test_duplicate_deposit_same_key(self):
-        first = self.make()
-        repeated = self.store.mutate("DEPOSIT", deposit())
-        self.assertTrue(repeated["replayed"])
-        self.assertEqual(first["id"], repeated["packet"]["id"])
-        self.assertEqual(len(self.store.state()["packets"]), 1)
+    def test_code_normalization(self):
+        r=self.make()
+        code=r['collection_code'].lower().replace('-',' ')
+        self.assertEqual(self.store.verify(dict(event_id=DEFAULT_EVENT,collection_code=code))['deposit']['id'],r['deposit']['id'])
 
-    def test_same_key_different_payload_rejected(self):
+    def test_deposit_audit_and_no_raw_code_in_state_or_database(self):
+        r=self.make(); s=self.store.state()
+        self.assertEqual(s['deposits'][0]['remaining'],counts(6,2,1))
+        self.assertEqual(s['audit'][0]['action'],'CODE_GENERATED')
+        self.assertEqual(s['audit'][0]['details']['categories'],counts(6,2,1))
+        self.assertEqual(s['audit'][0]['operator'],'Demo Operator')
+        self.assertNotIn(r['collection_code'],json.dumps(s))
+        self.assertNotIn('code_hash',json.dumps(s))
+        self.assertNotIn('collection_code',json.dumps(s))
+        with self.store.connect() as db:
+            dump='\n'.join(db.iterdump())
+            self.assertNotIn(r['collection_code'],dump)
+            self.assertNotIn(r['collection_code'].replace('-',''),dump)
+
+    def test_deposit_idempotency_returns_same_code(self):
+        first=self.make(); again=self.make()
+        self.assertTrue(again['replayed'])
+        self.assertEqual(first['collection_code'],again['collection_code'])
+        self.assertEqual(len(self.store.state()['audit']),1)
+
+    def test_request_conflict_is_not_definitively_unapplied(self):
         self.make()
-        changed = deposit(); changed["quantity"] = 3
-        with self.assertRaises(DomainError) as cm:
-            self.store.mutate("DEPOSIT", changed)
-        self.assertEqual(cm.exception.status, 409)
+        error=self.fails('REQUEST_CONFLICT',lambda:self.make(location='A-02'))
+        self.assertFalse(error.not_applied)
 
-    def test_replayed_release_returns_current_completed_state(self):
-        packet = self.make()
-        released = self.release(packet)["packet"]
-        self.handover(released)
-        repeat = self.release(packet)
-        self.assertTrue(repeat["replayed"])
-        self.assertEqual(repeat["packet"]["status"], "HANDED_OVER")
-        self.assertEqual(len(self.store.state()["audit"]), 3)
+    def test_duplicate_slot_in_event_rejected_but_other_event_allowed(self):
+        self.make()
+        self.fails('SLOT_OCCUPIED',lambda:self.make(request_id='d2'))
+        self.make(request_id='d3',event_id='training-event-002')
+        self.assertEqual(len(self.store.state('training-event-002')['deposits']),1)
 
-    def test_duplicate_release_different_key_fails(self):
-        packet = self.make(); self.release(packet)
-        with self.assertRaises(DomainError):
-            self.release(packet, "release-2")
-        self.assertEqual(len(self.store.state()["audit"]), 2)
+    def test_quantities_invalid_shapes(self):
+        for q in (None,{}, {'normal':1},counts(),counts(-1,0,0),counts(True,0,0),counts(101,0,0),dict(counts(1),extra=1),counts(1.2)):
+            with self.subTest(q=q),self.assertRaises(DomainError): self.make(quantities=q)
+        self.assertEqual(self.store.state()['counts']['DEPOSITS'],0)
+
+    def test_deposit_requires_boolean_custody(self):
+        for value in (False,'true',1,None):
+            with self.subTest(value=value),self.assertRaises(DomainError): self.make(custody_confirmed=value)
+
+    def test_text_validation(self):
+        for changes in ({'operator':''},{'operator':'x'*81},{'location':'a\nb'},{'event_id':''},{'request_id':123}):
+            with self.subTest(changes=changes),self.assertRaises(DomainError): self.make(**changes)
+
+    def test_two_friends_partial_collections_then_exhaustion(self):
+        r=self.make(); a=self.release(self.verified(r))
+        self.assertEqual(a['deposit']['remaining'],counts(4,1,1))
+        self.assertEqual(a['collection']['quantities'],counts(2,1))
+        self.assertEqual(a['collection']['status'],'RELEASE_RECORDED')
+        b=self.handover(a)
+        self.assertEqual(b['deposit']['version'],3)
+        self.assertIsNone(b['deposit']['pending_collection'])
+        c=self.release(self.verified(r),'release-2',quantities=counts(4,1,1))
+        self.handover(c,'handover-2')
+        s=self.store.state()
+        self.assertEqual(s['counts'],dict(DEPOSITS=1,PASSES_REMAINING=0,UNCONFIRMED=0,HANDED_OVER=9))
+        self.fails('OVER_RELEASE',lambda:self.release(self.verified(r),'release-3',quantities=counts(1)))
+        self.assertEqual(len(s['audit']),5)
+
+    def test_over_release_rejected_without_partial_mutation(self):
+        r=self.make(); self.fails('OVER_RELEASE',lambda:self.release(self.verified(r),quantities=counts(1,3,0)))
+        self.assertEqual(self.store.state()['deposits'][0]['remaining'],counts(6,2,1))
+        self.assertEqual(len(self.store.state()['audit']),1)
+
+    def test_pending_handover_blocks_further_release(self):
+        r=self.make(); self.release(self.verified(r))
+        error=self.fails('HANDOVER_PENDING',lambda:self.release(self.verified(r),'release-2'))
+        self.assertTrue(error.not_applied)
+
+    def test_wrong_physical_packet_rejected(self):
+        r=self.make()
+        self.fails('WRONG_PACKET',lambda:self.release(self.verified(r),packet_id='BX-WRONG'))
+        self.assertEqual(len(self.store.state()['audit']),1)
+
+    def test_stale_version_rejected(self):
+        r=self.make(); v=self.verified(r); self.release(v)
+        self.fails('STALE_BALANCE',lambda:self.release(v,'release-2'))
 
     def test_parallel_distinct_releases_exactly_one_wins(self):
-        packet = self.make()
-        def worker(index):
-            try:
-                self.release(packet, f"parallel-{index}"); return True
-            except DomainError:
-                return False
+        v=self.verified(self.make())
+        def run(index):
+            try: self.release(v,f'parallel-{index}'); return True
+            except DomainError: return False
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            outcomes = list(pool.map(worker, range(16)))
-        self.assertEqual(sum(outcomes), 1)
-        self.assertEqual(self.store.get(packet["id"])["status"], "RELEASE_RECORDED")
-        self.assertEqual(len(self.store.state()["audit"]), 2)
+            results=list(pool.map(run,range(16)))
+        self.assertEqual(sum(results),1)
+        self.assertEqual(self.store.state()['deposits'][0]['remaining'],counts(4,1,1))
+        self.assertEqual(len(self.store.state()['collections']),1)
 
-    def test_parallel_identical_retry_creates_one_action(self):
-        packet = self.make()
+    def test_parallel_identical_retry_creates_one_release(self):
+        v=self.verified(self.make())
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(lambda _: self.release(packet), range(12)))
-        self.assertEqual(sum(not result["replayed"] for result in results), 1)
-        self.assertEqual(len(self.store.state()["audit"]), 2)
+            results=list(pool.map(lambda _:self.release(v),range(12)))
+        self.assertEqual(sum(not r['replayed'] for r in results),1)
+        self.assertEqual(len(self.store.state()['audit']),2)
 
-    def test_wrong_label_rejected_without_audit(self):
-        packet = self.make()
-        with self.assertRaises(DomainError): self.release(packet, packet_code="BX-WRONG")
-        self.assertEqual(self.store.get(packet["id"])["status"], "READY")
-        self.assertEqual(len(self.store.state()["audit"]), 1)
+    def test_handover_is_one_time_and_original_operator(self):
+        r=self.release(self.verified(self.make()))
+        self.fails('OPERATOR_MISMATCH',lambda:self.handover(r,operator='Other Demo'))
+        for value in (False,'true',1,None):
+            with self.assertRaises(DomainError): self.handover(r,handover_confirmed=value)
+        done=self.handover(r); repeat=self.handover(r)
+        self.assertTrue(repeat['replayed'])
+        self.assertEqual(done['collection']['version'],2)
+        self.fails('STALE_HANDOVER',lambda:self.handover(r,'h2'))
+        self.assertEqual(len(self.store.state()['audit']),3)
 
-    def test_identity_confirmation_must_be_boolean(self):
-        packet = self.make()
-        for value in (False, "true", 1, None):
-            with self.assertRaises(DomainError): self.release(packet, identity_verified=value)
+    def test_release_retry_returns_current_state_even_after_claim_expiry_restart(self):
+        r=self.make(); v=self.verified(r); release_data=self.release_data(v)
+        out=self.release(v); self.handover(out)
+        self.now += 200; self.store=Store(self.path,clock=lambda:self.now)
+        result=self.store.mutate('RELEASE',release_data,v['deposit']['id'])
+        self.assertTrue(result['replayed'])
+        self.assertEqual(result['collection']['status'],'HANDED_OVER')
+        self.assertEqual(result['deposit']['version'],3)
+        self.assertEqual(len(self.store.state()['audit']),3)
 
-    def test_no_handover_before_release(self):
-        with self.assertRaises(DomainError): self.handover(self.make())
+    def test_uncommitted_expired_claim_is_definitively_unapplied(self):
+        v=self.verified(self.make()); self.now += 121
+        error=self.fails('CLAIM_EXPIRED',lambda:self.release(v))
+        self.assertTrue(error.not_applied)
+        self.assertEqual(self.store.state()['counts']['PASSES_REMAINING'],9)
 
-    def test_only_original_operator_confirms_handover(self):
-        packet = self.release(self.make())["packet"]
-        with self.assertRaises(DomainError): self.handover(packet, operator="Another Operator")
-        self.assertEqual(self.store.get(packet["id"])["status"], "RELEASE_RECORDED")
+    def test_uncommitted_claim_invalid_after_restart(self):
+        v=self.verified(self.make()); self.store=Store(self.path,clock=lambda:self.now)
+        self.fails('CLAIM_EXPIRED',lambda:self.release(v))
 
-    def test_confirmed_handover_cannot_repeat_with_new_key(self):
-        packet = self.release(self.make())["packet"]
-        done = self.handover(packet)["packet"]
-        with self.assertRaises(DomainError): self.handover(done, "another-handover")
+    def test_tampered_or_malformed_claims(self):
+        v=self.verified(self.make())
+        for token in ('bad','a.b.c','💥.x',v['claim_token']+'x',None,True):
+            with self.subTest(token=token):
+                self.fails('CLAIM_EXPIRED',lambda:self.release(v,claim_token=token))
 
-    def test_restart_preserves_deduplication_and_state(self):
-        packet = self.make(); self.release(packet)
-        self.store = Store(self.path)
-        retry = self.release(packet)
-        self.assertTrue(retry["replayed"])
-        self.assertEqual(retry["packet"]["status"], "RELEASE_RECORDED")
+    def test_claim_bound_to_deposit_and_event(self):
+        a=self.make(); b=self.make(request_id='d2',location='A-02')
+        va=self.verified(a); vb=self.verified(b)
+        self.fails('CLAIM_EXPIRED',lambda:self.release(vb,claim_token=va['claim_token']))
+        self.fails('DEPOSIT_NOT_FOUND',lambda:self.release(va,event_id='training-event-002'))
 
-    def test_missing_packet_is_not_found(self):
-        with self.assertRaises(DomainError) as cm: self.store.get("wrong-event-code")
-        self.assertEqual(cm.exception.status, 404)
+    def test_event_code_isolation_and_selected_state(self):
+        r=self.make()
+        self.fails('CODE_NOT_ACCEPTED',lambda:self.store.verify(dict(event_id='training-event-002',collection_code=r['collection_code'])))
+        self.assertEqual(self.store.state('training-event-002')['deposits'],[])
+        self.fails('EVENT_NOT_FOUND',lambda:self.store.state('missing-event'))
 
-    def test_duplicate_shelf_rejected(self):
-        self.make(); other = deposit(); other["request_id"] = "new-deposit"
-        with self.assertRaises(DomainError): self.store.mutate("DEPOSIT", other)
+    def test_global_throttle_persists_restart_and_event_switch(self):
+        r=self.make()
+        for i in range(5):
+            self.fails('CODE_NOT_ACCEPTED',lambda:self.store.verify(dict(event_id=DEFAULT_EVENT,collection_code=f'bad-{i}')))
+        self.store=Store(self.path,clock=lambda:self.now)
+        self.fails('RATE_LIMITED',lambda:self.verified(r))
+        self.fails('RATE_LIMITED',lambda:self.store.verify(dict(event_id='training-event-002',collection_code='bad')))
+        self.now += 61
+        self.assertEqual(self.verified(r)['deposit']['id'],r['deposit']['id'])
+        with self.store.connect() as db:
+            self.assertEqual([r[1] for r in db.execute('PRAGMA table_info(verification_failures)')],['at'])
 
-    def test_input_validation(self):
-        cases = [("collector", ""), ("collector", "x" * 101), ("collector", "test\nname"), ("quantity", True), ("quantity", 0), ("quantity", 21), ("quantity", "2"), ("custody_confirmed", False), ("operator", " ")]
-        for key, value in cases:
-            with self.subTest(key=key, value=value):
-                data = deposit(); data[key] = value
-                with self.assertRaises(DomainError): self.store.mutate("DEPOSIT", data)
-        self.assertEqual(len(self.store.state()["packets"]), 0)
+    def test_closed_event_blocks_verify_deposit_release_but_allows_pending_handover(self):
+        r=self.make(); v=self.verified(r); out=self.release(v)
+        with self.store.connect() as db: db.execute('UPDATE events SET active=0 WHERE id=?',(DEFAULT_EVENT,))
+        self.fails('CODE_NOT_ACCEPTED',lambda:self.verified(r))
+        self.fails('EVENT_CLOSED',lambda:self.make(request_id='d2',location='A-02'))
+        self.fails('EVENT_CLOSED',lambda:self.release(v,'r2'))
+        self.assertEqual(self.handover(out)['collection']['status'],'HANDED_OVER')
 
-    def test_non_object_rejected(self):
-        for data in (None, [], "text", 1):
-            with self.assertRaises(DomainError): self.store.mutate("DEPOSIT", data)
+    def test_event_expiry(self):
+        r=self.make(); self.now += 8*86400
+        self.fails('CODE_NOT_ACCEPTED',lambda:self.verified(r))
+        self.fails('EVENT_CLOSED',lambda:self.make(request_id='d2',location='A-02'))
 
-    def test_version_boolean_not_accepted(self):
-        with self.assertRaises(DomainError): self.release(self.make(), version=True)
-
-    def test_search_casefold_and_counts(self):
-        self.store.seed()
-        self.assertEqual(len(self.store.state("aLeX")["packets"]), 1)
-        self.assertEqual(self.store.state()["counts"]["READY"], 3)
-        self.assertEqual(self.store.state()["counts"]["PASSES_IN_CUSTODY"], 6)
-
-    def test_seed_is_repeatable(self):
-        self.store.seed(); self.store.seed()
-        self.assertEqual(len(self.store.state()["packets"]), 3)
-
-    def test_backup_is_integrity_checked_and_no_overwrite(self):
-        packet = self.make(); self.release(packet)
-        destination = Path(self.temp.name) / "snapshot.sqlite3"
-        self.store.backup(destination)
-        restored = Store(destination)
-        self.assertEqual(restored.get(packet["id"])["status"], "RELEASE_RECORDED")
+    def test_backup_restores_codes_and_current_balances_with_secret_companion(self):
+        r=self.make(); self.handover(self.release(self.verified(r)))
+        destination=Path(self.temp.name)/'snapshot.sqlite3'
+        dbpath,keypath=self.store.backup(destination)
+        self.assertTrue(keypath.exists())
+        restored=Store(dbpath,clock=lambda:self.now)
+        verified=restored.verify(dict(event_id=DEFAULT_EVENT,collection_code=r['collection_code']))
+        self.assertEqual(verified['deposit']['remaining'],counts(4,1,1))
+        self.assertEqual(restored.state(),self.store.state())
         with self.assertRaises(DomainError): self.store.backup(destination)
+
+    def test_missing_secret_companion_refuses_existing_database(self):
+        self.make(); self.store.key_path.unlink()
+        with self.assertRaises(DomainError): Store(self.path)
+
+    def test_invalid_secret_companion_refuses_database(self):
+        self.make(); self.store.key_path.write_bytes(b'short')
+        with self.assertRaises(DomainError): Store(self.path)
+
+    def test_wrong_valid_length_key_refuses_mismatched_backup_pair(self):
+        self.make(); self.store.key_path.write_bytes(b'x'*32)
+        with self.assertRaises(DomainError): Store(self.path)
+
+    def test_seed_is_repeatable_synthetic_and_no_code_logs(self):
+        self.store.seed(); self.store.seed()
+        self.assertEqual(len(self.store.state()['deposits']),2)
+        self.assertEqual(len(self.store.state('training-event-002')['deposits']),1)
 
 
 class HTTPTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.store = Store(Path(self.temp.name) / "db.sqlite3")
-        self.server = Server(("127.0.0.1", 0), self.store)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True); self.thread.start()
-        self.port = self.server.server_address[1]
-        response, _ = self.request("GET", "/")
-        self.cookie = response.getheader("Set-Cookie").split(";")[0]
+    @classmethod
+    def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory(); cls.store=Store(Path(cls.temp.name)/'http.sqlite3')
+        cls.server=Server(('127.0.0.1',0),cls.store)
+        cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True); cls.thread.start()
+        cls.port=cls.server.server_address[1]
 
-    def tearDown(self):
-        self.server.shutdown(); self.server.server_close(); self.thread.join(); self.temp.cleanup()
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join(); cls.temp.cleanup()
 
-    def request(self, method, path, body=None, headers=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        connection.request(method, path, body=body, headers=headers or {})
-        response = connection.getresponse(); result = response.read(); connection.close()
-        return response, result
+    def request(self,method,path,body=None,headers=None):
+        connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5)
+        connection.request(method,path,body,headers or {})
+        response=connection.getresponse(); payload=response.read(); result=(response.status,dict(response.getheaders()),payload)
+        connection.close(); return result
 
-    def post(self, body=None, extra=None):
-        headers = {"Cookie":self.cookie, "Content-Type":"application/json", "X-CSRF-Token":self.server.csrf, "Origin":f"http://127.0.0.1:{self.port}"}
-        headers.update(extra or {})
-        return self.request("POST", "/api/deposits", json.dumps(body if body is not None else deposit()), headers)
+    def session(self):
+        status,headers,_=self.request('GET','/'); self.assertEqual(status,200)
+        cookie=headers['Set-Cookie'].split(';')[0]
+        status,_,body=self.request('GET','/api/state',headers={'Cookie':cookie})
+        self.assertEqual(status,200)
+        return {'Cookie':cookie,'X-CSRF-Token':json.loads(body)['csrf'],'Content-Type':'application/json'}
 
-    def test_session_required_for_read(self):
-        response, _ = self.request("GET", "/api/state")
-        self.assertEqual(response.status, 401)
+    def test_home_headers_and_static_assets(self):
+        status,headers,body=self.request('GET','/')
+        self.assertEqual(status,200); self.assertIn(b'DEMO',body)
+        self.assertEqual(headers['Cache-Control'],'no-store')
+        self.assertEqual(headers['Referrer-Policy'],'no-referrer')
+        self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
+        self.assertIn('HttpOnly',headers['Set-Cookie']); self.assertIn('SameSite=Strict',headers['Set-Cookie'])
+        for path in ('/app.js','/style.css'): self.assertEqual(self.request('GET',path)[0],200)
 
-    def test_get_state_with_session(self):
-        response, body = self.request("GET", "/api/state", headers={"Cookie":self.cookie})
-        self.assertEqual(response.status, 200)
-        self.assertIn("csrf", json.loads(body))
+    def test_no_session_no_state_or_write(self):
+        self.assertEqual(self.request('GET','/api/state')[0],401)
+        status,_,body=self.request('POST','/api/deposits',json.dumps(deposit()),{'Content-Type':'application/json'})
+        self.assertEqual(status,403); self.assertFalse(json.loads(body)['not_applied'])
 
-    def test_api_deposit(self):
-        response, body = self.post()
-        self.assertEqual(response.status, 200)
-        self.assertEqual(json.loads(body)["packet"]["status"], "READY")
+    def test_csrf_and_foreign_origin_fail_closed(self):
+        headers=self.session(); headers['X-CSRF-Token']='bad'
+        status,_,body=self.request('POST','/api/deposits',json.dumps(deposit()),headers)
+        self.assertEqual(status,403); self.assertFalse(json.loads(body)['not_applied'])
+        headers=self.session(); headers['Origin']='https://untrusted.example'
+        self.assertEqual(self.request('POST','/api/deposits',json.dumps(deposit()),headers)[0],403)
 
-    def test_foreign_origin_blocked(self):
-        response, _ = self.post(extra={"Origin":"https://malicious.example"})
-        self.assertEqual(response.status, 403)
-        self.assertEqual(len(self.store.state()["packets"]), 0)
+    def test_rebinding_path_traversal_and_private_files(self):
+        self.assertEqual(self.request('GET','/',headers={'Host':'attacker.example'})[0],403)
+        for path in ('/../app.py','/_runtime/http.sqlite3','/app.py','/../README.md'):
+            self.assertEqual(self.request('GET',path)[0],404)
 
-    def test_bad_csrf_blocked(self):
-        response, _ = self.post(extra={"X-CSRF-Token":"wrong"})
-        self.assertEqual(response.status, 403)
+    def test_invalid_body_and_content_type(self):
+        headers=self.session()
+        self.assertEqual(self.request('POST','/api/deposits','{broken',headers)[0],400)
+        self.assertEqual(self.request('POST','/api/deposits','[]',headers)[0],400)
+        headers['Content-Type']='text/plain'
+        self.assertEqual(self.request('POST','/api/deposits','{}',headers)[0],415)
 
-    def test_rebinding_host_blocked(self):
-        response, _ = self.request("GET", "/", headers={"Host":"malicious.example"})
-        self.assertEqual(response.status, 403)
-
-    def test_non_json_content_type_blocked(self):
-        response, _ = self.post(extra={"Content-Type":"text/plain"})
-        self.assertEqual(response.status, 415)
-
-    def test_path_traversal_blocked(self):
-        response, _ = self.request("GET", "/../../app.py")
-        self.assertEqual(response.status, 404)
-
-    def test_bad_json_rejected(self):
-        response, _ = self.request("POST", "/api/deposits", body="{broken", headers={"Cookie":self.cookie, "Content-Type":"application/json", "X-CSRF-Token":self.server.csrf})
-        self.assertEqual(response.status, 400)
-
-    def test_security_headers(self):
-        response, _ = self.request("GET", "/")
-        self.assertIn("frame-ancestors 'none'", response.getheader("Content-Security-Policy"))
-        self.assertEqual(response.getheader("Cache-Control"), "no-store")
-        self.assertIn("HttpOnly", response.getheader("Set-Cookie"))
-        self.assertIn("SameSite=Strict", response.getheader("Set-Cookie"))
+    def test_full_http_workflow(self):
+        headers=self.session()
+        def post(path,body):
+            status,_,raw=self.request('POST',path,json.dumps(body),headers)
+            self.assertEqual(status,200,raw)
+            return json.loads(raw)
+        r=post('/api/deposits',deposit(request_id='http-deposit',location='H-01'))
+        v=post('/api/verify',dict(event_id=DEFAULT_EVENT,collection_code=r['collection_code']))
+        d=v['deposit']
+        release=dict(request_id='http-release',operator='Demo Operator',event_id=DEFAULT_EVENT,version=d['version'],claim_token=v['claim_token'],packet_id=d['packet_id'],quantities=counts(2,1))
+        out=post('/api/deposits/'+d['id']+'/release',release); c=out['collection']
+        done=post('/api/collections/'+c['id']+'/handover',dict(request_id='http-handover',operator='Demo Operator',event_id=DEFAULT_EVENT,version=c['version'],handover_confirmed=True))
+        self.assertEqual(done['deposit']['remaining'],counts(4,1,1))
+        self.assertEqual(done['collection']['status'],'HANDED_OVER')
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__=='__main__': unittest.main()

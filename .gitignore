@@ -13,3 +13,6 @@ screenshots/
 *.zip
 *.tar.gz
 
+*.key
+*.pem
+*.log
