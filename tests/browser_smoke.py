@@ -49,10 +49,10 @@ def run():
 
                 make_deposit('A-01')
                 expect(page.locator('#packet-dialog')).to_contain_text('Deposit saved.')
-                code=page.locator('.code-slip > strong').inner_text()
+                code=page.locator('.code-display > strong').inner_text()
                 packet_id=page.locator('.record-code').inner_text()
                 assert len(code.replace('-',''))==12
-                page.screenshot(path=str(artifacts/'02-private-receipt.png'),full_page=True)
+                page.screenshot(path=str(artifacts/'02-private-code-display.png'),full_page=True)
                 page.locator('.share-options > summary').click()
                 page.locator('#share-form [name=phone]').fill('+12025550123')
                 page.get_by_role('button',name='Preview message locally').click()
@@ -60,7 +60,7 @@ def run():
                 # Inspect only; never click the third-party handoff or send a message.
                 assert page.locator('#share-preview a').get_attribute('href').startswith('https://wa.me/12025550123?text=')
                 page.locator('#packet-dialog').get_by_role('button',name='Done',exact=True).click()
-                expect(page.locator('.code-slip')).to_have_count(0)
+                expect(page.locator('.code-display')).to_have_count(0)
 
                 def verify_code():
                     page.locator('#collect-code').click()

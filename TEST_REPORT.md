@@ -5,15 +5,21 @@ Build date: 5 November 2026. Scope: synthetic-data local demo on branch `style/q
 ## Passed
 
 - **42 Python checks:** 37 domain/API checks and 5 targeted accessibility-contract checks.
-- **16 Node UI state regression checks** using a minimal DOM stub.
+- **18 Node UI state regression checks** using a minimal DOM stub.
 - Python syntax/bytecode compilation and JavaScript syntax check.
 - Manual source review of publication scope, secret handling, atomic balances, retry semantics and recovery warnings. No claim of a new independent security audit is made.
 
 Domain/API coverage includes secure-code format/alphabet, event-bound verification, two friends collecting partial category quantities, exhaustion and over-release, simultaneous unique and identical requests, pending-handover protection, original-operator procedural checks, tampered/expired/restarted claim tokens, committed retry after restart, persistent global failed-attempt throttling, closed events, matching backup keys, no plaintext codes in state/database/audit, Host/CSRF/origin protections and a complete local HTTP workflow.
 
-UI checks cover uncertain-request preservation, definitive uncommitted failures, conflicting fingerprints, no raw code/phone in recovery storage, disconnected/pending physical-instruction blocking, out-of-order records, changed-claim invalidation, inventory lookup not authorizing release, ephemeral receipt state and clearing secrets on close.
+UI checks cover uncertain-request preservation, definitive uncommitted failures, conflicting fingerprints, no raw code/phone in recovery storage, disconnected/pending physical-instruction blocking, out-of-order records, changed-claim invalidation, inventory lookup not authorizing release, ephemeral code-display state and clearing secrets on close.
+
+Two added UI checks verify no printing action, private display/verbal read-back guidance, and NFC remaining explicitly future-only without hardware/permission calls.
 
 Selected text contrast pairs exceed 4.5:1; a selected input boundary pair exceeds 3:1. Source checks confirm visible dark focus, reduced-motion and forced-colors rules, keyboard tab controls and a focusable table scroll region. These are targeted contracts, not full rendered accessibility conformance.
+
+## NFC compatibility research
+
+Official Chrome documentation and MDN compatibility data were checked on 5 November 2026. Desktop Chrome Web NFC is unsupported; Chrome for Android supports compatible NDEF tags with hardware, secure-context, visibility and permission conditions. Peer-to-peer sharing and card emulation are not supported. NFC is not implemented, no device/permission action was attempted, and no offline NFC behavior is claimed. Source links and copy/overwrite risks are documented in README.
 
 ## Not verified
 
@@ -21,7 +27,7 @@ Chromium through installed Playwright could not launch: its process-singleton so
 
 The updated optional `tests/browser_smoke.py` is a verification aid, **not evidence of a passed browser run**. It is designed to check shared partial collection, manual WhatsApp preview without opening/sending it, lost-response recovery, disconnection, no automatic third-party requests and narrow layout.
 
-Visual layout, browser-specific modal/focus behavior, screen readers, real printer output, physical label/scanner hardware, actual WhatsApp behavior/delivery, power-loss hardware recovery and live-event throughput remain unverified.
+Visual layout, browser-specific modal/focus behavior, screen readers, physical label/scanner hardware, actual WhatsApp behavior/delivery, power-loss hardware recovery and live-event throughput remain unverified.
 
 ## Publication and readiness
 
