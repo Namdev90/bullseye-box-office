@@ -32,7 +32,7 @@ Data persists under `_runtime/shared-code-training.sqlite3`, with a secret match
 
 ## Run Android emulator sharing the same database
 
-Requires an Android Studio virtual device (Android Emulator, not a physical phone), the *already existing* Gradle-compatible Android SDK, JDK 21, Gradle wrapper and build dependencies. Building here was **not possible** because this environment has no Android SDK. No paid tools and no software installation performed.
+Requires an Android Studio virtual device (Android Emulator, not a physical phone), the *already existing* Gradle-compatible Android SDK platform 36, JDK 21, Gradle wrapper and build dependencies. Building here was **not possible** because this environment has no Android SDK. No paid tools and no software installation performed.
 
 1. Start the Python server with `--android-emulator` on the host laptop. Check that `http://127.0.0.1:8765/` works.
 2. In Android Studio open `android-shared-preview/` as an independent Gradle project. Do not merge with Navrang or with the old SharePass 0.2.0 offline APK. Build the debug variant and run it on an Android **emulator**. No production key is required for a development debug build.
