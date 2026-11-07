@@ -1,12 +1,12 @@
 plugins { id("com.android.application") }
 android {
     namespace = "in.sharepass.sharedpreview"
-    compileSdk { version = release(37) { minorApiLevel = 0 } }
+    compileSdk = 36
     buildToolsVersion = "36.0.0"
     defaultConfig {
         applicationId = "in.sharepass.sharedpreview"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 3
         versionName = "0.3.0-local-integration"
     }
