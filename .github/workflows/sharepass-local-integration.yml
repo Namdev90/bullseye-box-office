@@ -36,7 +36,7 @@ jobs:
       - name: Prepare Android SDK platform and build tools
         run: |
           if [ -n "${ANDROID_HOME:-}" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" || true
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
           fi
       - name: Build separate emulator-only debug APK
         working-directory: android-shared-preview
