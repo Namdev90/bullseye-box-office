@@ -32,10 +32,10 @@ Data persists under `_runtime/shared-code-training.sqlite3`, with a secret match
 
 ## Run Android emulator sharing the same database
 
-Requires an Android Studio virtual device (Android Emulator, not a physical phone), the *already existing* Gradle-compatible Android SDK platform 36, JDK 21, Gradle wrapper and build dependencies. Building here was **not possible** because this environment has no Android SDK. No paid tools and no software installation performed.
+Requires an Android Studio virtual device (Android Emulator, not a physical phone), the *already existing* Gradle-compatible Android SDK platform 36, JDK 21, Gradle wrapper and build dependencies. The independent **GitHub Actions build has passed** and produced the emulator-only debug APK, included in `artifacts/` of the bundled download. This analysis container itself has no Android SDK; no local SDK was installed. No paid tools and no software installation performed.
 
 1. Start the Python server with `--android-emulator` on the host laptop. Check that `http://127.0.0.1:8765/` works.
-2. In Android Studio open `android-shared-preview/` as an independent Gradle project. Do not merge with Navrang or with the old SharePass 0.2.0 offline APK. Build the debug variant and run it on an Android **emulator**. No production key is required for a development debug build.
+2. Start an Android **emulator** in Android Studio. Install `artifacts/SharePass-0.3.0-Emulator-Debug.apk` from the bundled release (drag it onto the emulator, or run `adb install -r artifacts/SharePass-0.3.0-Emulator-Debug.apk`). Alternatively open `android-shared-preview/` in Android Studio to rebuild its debug variant. Keep it separate from Navrang and the older 0.2.0 offline APK.
 3. Its WebView loads `http://10.0.2.2:8765/`, which Android Emulator maps to the host loopback server. Enter a separate made-up staff label, then compare balances and records in Android and laptop website.
 4. Test a synthetic deposit on desktop, collect on emulator, confirm handover on desktop and re-open the history on both. If the Python server is down, **do not hand over passes**; restart with the same database + key and reconcile pending requests.
 
@@ -49,7 +49,7 @@ node tests/ui_state_test.cjs
 cd android-shared-preview && ./run-policy-tests.sh
 ```
 
-Results on 8 November 2026: **45 Python tests PASS** (including real HTTP requests from both Host aliases, partial collection, idempotency, fail-closed origin and CSRF); **18 Node state-machine checks PASS**; **Android origin allowlist JVM test PASS**. A Chromium smoke run was attempted but was blocked by the execution environment (`ERR_BLOCKED_BY_ADMINISTRATOR`). Android SDK compilation and device/emulator UI testing were **not run**.
+Results on 8 November 2026: **45 Python tests PASS** (including real HTTP requests from both Host aliases, partial collection, idempotency, fail-closed origin and CSRF); **18 Node state-machine checks PASS**; **Android origin allowlist JVM test PASS**. A Chromium smoke run was attempted but was blocked by the execution environment (`ERR_BLOCKED_BY_ADMINISTRATOR`). Android SDK **compilation passed** on GitHub Actions (workflow run `42422459173`); live Android emulator/device UI testing was **not run**.
 
 ## Required work before a real website + phone can sync anywhere
 
