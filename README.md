@@ -1,3 +1,5 @@
+> **8 November 2026 integrated local preview:** New logo, shared desktop + Android emulator workflow, exact `10.0.2.2` alias, 45 Python tests. See [START_HERE.md](START_HERE.md). The hosted browser-only public Site remains a separate practice demo; no real distributed deployment has been made.
+
 # SharePass — brought to you by Bullseye Entertainment
 
 **Practice only; not production-ready.** See SHAREPASS_RELEASE.md for the latest tactile design, fictional Oktoberfest 2027 hosted fixture, and four-character public-practice codes. The local custody engine below retains its original long-code security model.

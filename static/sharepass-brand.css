@@ -1,0 +1,51 @@
+/* SharePass visual system — derived from the latest 5 Nov ticket handoff lockup.
+   Controlled black, polished silver, deep red; never print or store private codes in the logo. */
+:root{--red:#c5122a;--ink:#f3eef0;--muted:#c9b6bd;--line:#655963;--metal:linear-gradient(110deg,#4a4d56,#e2e4e8 22%,#858994 48%,#faf9fb 70%,#474a50);--leather:radial-gradient(ellipse at 25% 0,#3b1a23,#131117 68%,#07070a);--paper:linear-gradient(145deg,#211a24,#141219);background:#09080d}
+html,body{background:#09080d;color:#f3eef0}
+body{background:radial-gradient(ellipse at 35% 0,rgba(114,15,36,.3),transparent 66%),repeating-linear-gradient(0deg,rgba(255,255,255,.009) 0px 1px,transparent 1px 5px),#09080d}
+.workspace,.welcome-case{border-color:#a9adb6;box-shadow:inset 0 0 0 2px #14121a,0 1px 0 1px #d3d6df,0 20px 45px #000a}
+.welcome-case,.case-edge{background:linear-gradient(140deg,#09090d,#52505a 42%,#0d0b11);border-color:#bfc0c8}
+.welcome-leather{background:radial-gradient(ellipse at 60% 40%,#28131d 0,#110e15 58%,#08080c 100%);color:#f4f1f4;box-shadow:inset 0 2px 15px #040307,inset 0 0 0 1px #aeb0be66}
+.welcome-leather:before,.workspace:before{border-color:#ee304955}
+.welcome-composition{grid-template-columns:minmax(0,1fr) minmax(240px,1.15fr);gap:clamp(10px,3vw,50px);align-items:center;min-height:290px}
+.maker-plaque{width:auto;max-width:280px;height:auto;min-height:62px;padding:7px 13px;display:flex;align-items:center;gap:10px;background:linear-gradient(140deg,#201a22,#0c0c11);border:1px solid #797d89;border-radius:11px;box-shadow:inset 0 1px #e4e4ea55,0 8px 15px #0009}
+.maker-plaque img{width:71px;height:44px;object-fit:contain;background:transparent;border:0;mix-blend-mode:normal;filter:drop-shadow(0 2px 3px #000)}
+.maker-plaque span{color:#c4c4cd;font-size:9px;letter-spacing:2px;font-weight:750;text-shadow:0 1px #000}
+.ticket-stack.sharepass-art-panel{width:100%;height:auto;min-height:270px;display:flex;align-items:center;justify-content:center;transform:none;overflow:visible;filter:none;isolation:isolate}
+.sharepass-art-panel:before{content:"";position:absolute;inset:9% 6%;border-radius:50%;background:radial-gradient(ellipse,#d20c333b 0,transparent 72%);filter:blur(23px);z-index:-1}
+.sharepass-hero-art{display:block;width:min(100%,480px);height:auto;object-fit:contain;filter:drop-shadow(0 13px 17px #000a);background:transparent;mix-blend-mode:normal}
+.logo-plaque{width:65px;height:47px;background:linear-gradient(130deg,#3c303a,#111018);border:1px solid #8c8d9b;border-radius:8px;box-shadow:inset 0 1px #fff5,0 3px 9px #0009}
+.logo-plaque img{width:100%;height:100%;object-fit:contain;mix-blend-mode:normal}
+.brand-pass{color:#fa183c;text-shadow:0 1px #3d0714,0 0 12px #c9003025}
+.welcome-copy h1,.brand>span:last-child,.title-row h1{color:#f2f0f2;text-shadow:0 1px 2px #000}
+.welcome-copy p,.welcome-guide,.welcome-base,.engraved-label,.desk-rule,.event-control,.connection,.brand small,.screen-note{color:#d4bec5}
+.welcome-base{border-color:#d41f3c55}
+.nav-item.active{background:linear-gradient(#30202c,#201722);border-color:#8a5364;color:#fff}
+.button.primary{background:linear-gradient(#fa3153,#c90e32 48%,#900c23 50%,#b70829);border-color:#72091e;color:#fff;box-shadow:inset 0 1px #ffa6b588,0 3px #61071e,0 5px 12px #0007}
+.button.primary:hover{background:linear-gradient(#fc4060,#d70f36)}
+.button.secondary,.row-action{background:linear-gradient(#4a414c,#29212e);border-color:#9891a0;color:#f4e7ed;box-shadow:inset 0 1px #faf8ff66,0 2px #171018,0 4px 8px #0005}
+.button.secondary:hover,.row-action:hover{background:linear-gradient(#58505d,#372b3b)}
+.stock-strip{background:linear-gradient(#291b27,#16111a);border-color:#746875;box-shadow:inset 0 2px 5px #09060b,0 1px #c4bbc955}
+.paper-sheet,.guide-grid article{background:linear-gradient(140deg,#241e29,#15141c);border-color:#8b7a89;box-shadow:0 2px #514650,0 4px #2c2630,0 7px 16px #0008}
+.register-heading h2,.guide-grid h2,.activity-row strong,dialog h2,dialog h3,.empty h3{color:#f4f1f5}
+.search-wrap,label>input:not([type=checkbox]){background:#17141d;border-color:#867584;color:#f3ebf2}
+.event-control select{background:linear-gradient(#29212d,#16121c);border-color:#8e7484;color:#fff}
+.event-control option{background:#211924;color:#fff}
+th{background:#302631;color:#d7c7d2;border-color:#685968}td,.activity-row,.collection-history{border-color:#6c5a6b66}
+.tab.active{background:linear-gradient(#3a2332,#271c2a);border-color:#cb637c;color:#fff}
+.balance.normal,.stock-categories .balance.normal{background:linear-gradient(110deg,#4a4554,#282631)!important;border-color:#aaa9b8!important;color:#fcfaff!important}
+.balance.vip{background:linear-gradient(110deg,#8c3049,#4e1429)!important;border-color:#d56882!important;color:#ffecf4!important}
+.balance.vvip{background:linear-gradient(110deg,#5d1436,#310c25)!important;border-color:#a34c87!important;color:#ffe8fa!important}
+.status,.shelf{background:#382934;border-color:#8c7a8c;color:#f2e5f0}
+.status.release_recorded{background:#5a2922;border-color:#bf7157;color:#ffead7}
+.status.handed_over{background:#25433b;border-color:#6ea99b;color:#d8f6ef}
+.cell-sub,.panel-footer,.muted,.record-origin,.packet-summary small,.packet-summary>div>span,.eyebrow,.collection-history p,.collection-history small,.code-display p,.activity-row p,.audit-meta,.guide-grid p,.flow-steps span,.empty,.empty p{color:#c7b7c2}
+.activity-row p,.guide-grid p{color:#c7b7c2}
+dialog{background:#19131d;border-color:#9a8394;color:#f7eef5;box-shadow:inset 0 1px #fff2,0 25px 80px #000c}
+dialog::backdrop{background:#08060bdc}
+.practice-disclosure{background:#21151d;border-top-color:#af435d;color:#d6c4cd}
+.practice-disclosure strong{color:#ff8fa5}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline-color:#ff7c9c}
+@media(max-width:800px){.welcome-composition{grid-template-columns:minmax(0,1fr) minmax(180px,1fr)}.sharepass-hero-art{width:min(100%,390px)}}
+@media(max-width:600px){.welcome-composition{display:flex;flex-direction:column-reverse;gap:3px}.ticket-stack.sharepass-art-panel{width:100%;height:auto;min-height:0;max-height:305px;margin:0;transform:none}.sharepass-hero-art{width:min(80vw,300px);max-height:305px}.maker-plaque{width:auto;max-width:220px;min-height:49px;margin:0 auto 8px;padding:5px 8px}.maker-plaque img{width:53px;height:35px}.maker-plaque span{font-size:7px;letter-spacing:1.1px}.logo-plaque{width:49px;height:40px}.welcome-copy h1{font-size:47px}.welcome-leather{padding:20px 18px 18px}.brand>span:last-child{font-size:19px}.brand small{font-size:8px}.ticket-stack.sharepass-art-panel:before{inset:15% 17%}}
+@media(prefers-reduced-motion:reduce){.sharepass-hero-art{filter:none}}

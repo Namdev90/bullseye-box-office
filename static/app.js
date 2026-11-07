@@ -189,3 +189,22 @@ document.querySelectorAll('[data-filter]').forEach(button => {
 ['packets','activity','guide'].forEach(name => $(`#nav-${name}`).addEventListener('click',() => { ['packets','activity','guide'].forEach(view => { $(`#${view}-view`).classList.toggle('hidden',view !== name); $(`#nav-${view}`).classList.toggle('active',view === name); $(`#nav-${view}`).setAttribute('aria-current',view === name ? 'page' : 'false'); }); }));
 window.addEventListener('focus',refresh); setInterval(() => { if (!busy && !document.hidden) refresh(); },8000);
 updateOperator(); showPending(); refresh(); if (!operator) $('#operator-dialog').showModal();
+
+// Distinct browser/WebView sessions use one SQLite authority. Refresh only safe,
+// non-pending views; a recorded release is never replayed by a background refresh.
+const SHARED_DESK_REFRESH_MS = 4500;
+setInterval(() => {
+  if (document.visibilityState !== 'hidden' && !busy && !pending() &&
+      !document.querySelector('#desk-shell')?.classList.contains('hidden')) refresh();
+}, SHARED_DESK_REFRESH_MS);
+window.addEventListener('focus', () => { if (!busy && !pending()) refresh(); });
+window.SharePassLocalBridge = {
+  back() {
+    if (busy || pending()) return true; // Retain uncertain actions for recovery.
+    const open = [...document.querySelectorAll('dialog[open]')].at(-1);
+    if (open) { open.close(); return true; }
+    const home = document.querySelector('#home-button');
+    if (home && !document.querySelector('#desk-shell').classList.contains('hidden')) { home.click(); return true; }
+    return false;
+  }
+};
