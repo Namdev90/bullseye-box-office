@@ -1,4 +1,16 @@
 'use strict';
+// randomUUID is unavailable on the supported insecure emulator HTTP origin.
+// getRandomValues remains available there; never substitute Math.random.
+function newRequestId() {
+  const source = globalThis.crypto;
+  if (typeof source?.randomUUID === 'function') return source.randomUUID();
+  if (typeof source?.getRandomValues !== 'function') throw new Error('Secure random request IDs are unavailable. No action was sent.');
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0,8) + '-' + hex.slice(8,12) + '-' + hex.slice(12,16) + '-' + hex.slice(16,20) + '-' + hex.slice(20);
+}
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const categories = ['normal','vip','vvip'];
@@ -149,13 +161,13 @@ function showRecord(deposit,mode='review',collection=null) {
     try {
       if (!claim || claim.expiresAt <= Date.now() || claim.version !== deposit.version) throw new Error('Verification expired or the balance changed. Close this record and verify the code again.');
       const q = readQuantities(form); validateQuantities(q); if (categories.some(k => q[k] > deposit.remaining[k])) throw new Error('Requested quantities exceed the available balance.');
-      const result = await mutate(`/api/deposits/${encodeURIComponent(deposit.id)}/release`,{request_id:crypto.randomUUID(),operator,event_id:eventId,claim_token:claim.token,version:deposit.version,packet_id:form.get('packet_id'),quantities:q});
+      const result = await mutate(`/api/deposits/${encodeURIComponent(deposit.id)}/release`,{request_id:newRequestId(),operator,event_id:eventId,claim_token:claim.token,version:deposit.version,packet_id:form.get('packet_id'),quantities:q});
       clearSecrets(); const current = mergeResult(result); await presentRecord(current.deposit,'handover',current.collection); await refresh();
     } catch(error) { showError('#release-error',error); await refresh(); }
   });
   $('#handover-form')?.addEventListener('submit',async event => {
     event.preventDefault(); if (busy) return;
-    try { const result = await mutate(`/api/collections/${encodeURIComponent(collection.id)}/handover`,{request_id:crypto.randomUUID(),operator,event_id:eventId,version:collection.version,handover_confirmed:new FormData(event.currentTarget).get('handover_confirmed') === 'on'}); const current = mergeResult(result); await presentRecord(current.deposit,'complete',current.collection); await refresh(); }
+    try { const result = await mutate(`/api/collections/${encodeURIComponent(collection.id)}/handover`,{request_id:newRequestId(),operator,event_id:eventId,version:collection.version,handover_confirmed:new FormData(event.currentTarget).get('handover_confirmed') === 'on'}); const current = mergeResult(result); await presentRecord(current.deposit,'complete',current.collection); await refresh(); }
     catch(error) { showError('#handover-error',error); await refresh(); }
   });
   connection(online);
@@ -170,7 +182,7 @@ $('#operator-button').addEventListener('click',() => { if (busy || pending()) re
 $('#new-deposit').addEventListener('click',() => { if (!operator) { $('#operator-dialog').showModal(); return; } $('#deposit-form').reset(); $('#deposit-error').classList.add('hidden'); $('#deposit-dialog').showModal(); });
 $('#deposit-form').addEventListener('submit',async event => {
   event.preventDefault(); if (busy) return; const form = new FormData(event.currentTarget);
-  try { const q = readQuantities(form); validateQuantities(q); const result = await mutate('/api/deposits',{request_id:crypto.randomUUID(),operator,event_id:eventId,location:form.get('location'),quantities:q,custody_confirmed:form.get('custody_confirmed') === 'on'}); $('#deposit-dialog').close(); displayCode = result.collection_code; showRecord(result.deposit,'share-code'); await refresh(); }
+  try { const q = readQuantities(form); validateQuantities(q); const result = await mutate('/api/deposits',{request_id:newRequestId(),operator,event_id:eventId,location:form.get('location'),quantities:q,custody_confirmed:form.get('custody_confirmed') === 'on'}); $('#deposit-dialog').close(); displayCode = result.collection_code; showRecord(result.deposit,'share-code'); await refresh(); }
   catch(error) { showError('#deposit-error',error); } finally { connection(online); }
 });
 $('#collect-code').addEventListener('click',() => { if (!operator) { $('#operator-dialog').showModal(); return; } clearSecrets(); $('#code-form').reset(); $('#code-error').classList.add('hidden'); $('#code-dialog').showModal(); });
@@ -187,5 +199,24 @@ document.querySelectorAll('[data-filter]').forEach(button => {
   button.addEventListener('keydown',event => { if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return; event.preventDefault(); const tabs = Array.from(document.querySelectorAll('[data-filter]')), i = tabs.indexOf(button), next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; tabs[next].focus(); tabs[next].click(); });
 });
 ['packets','activity','guide'].forEach(name => $(`#nav-${name}`).addEventListener('click',() => { ['packets','activity','guide'].forEach(view => { $(`#${view}-view`).classList.toggle('hidden',view !== name); $(`#nav-${view}`).classList.toggle('active',view === name); $(`#nav-${view}`).setAttribute('aria-current',view === name ? 'page' : 'false'); }); }));
-window.addEventListener('focus',refresh); setInterval(() => { if (!busy && !document.hidden) refresh(); },8000);
 updateOperator(); showPending(); refresh(); if (!operator) $('#operator-dialog').showModal();
+
+// Distinct browser/WebView sessions use one SQLite authority. Refresh only safe,
+// non-pending views; a recorded release is never replayed by a background refresh.
+const SHARED_DESK_REFRESH_MS = 4500;
+function refreshSharedDesk() {
+  if (document.visibilityState !== 'hidden' && !busy && !pending() &&
+      !document.querySelector('#desk-shell')?.classList.contains('hidden')) return refresh();
+}
+setInterval(refreshSharedDesk, SHARED_DESK_REFRESH_MS);
+window.addEventListener('focus', refreshSharedDesk);
+window.SharePassLocalBridge = {
+  back() {
+    if (busy || pending()) return true; // Retain uncertain actions for recovery.
+    const open = [...document.querySelectorAll('dialog[open]')].at(-1);
+    if (open) { open.close(); return true; }
+    const home = document.querySelector('#home-button');
+    if (home && !document.querySelector('#desk-shell').classList.contains('hidden')) { home.click(); return true; }
+    return false;
+  }
+};

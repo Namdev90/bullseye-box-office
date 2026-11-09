@@ -1,0 +1,65 @@
+name: SharePass local integration checks
+on:
+  push:
+    branches:
+      - feature/sharepass-shared-local-emulator-20261108
+      - integration/sharepass-cloud-fixes-20261110
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend-and-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Python HTTP and concurrency checks
+        run: python -m unittest discover -s tests -p "test_*.py" -q
+      - name: Browser logic state-machine checks
+        run: |
+          node tests/ui_state_test.cjs
+          node public-demo/tests/demo-store.test.cjs
+          node public-demo/tests/tactile-flow.test.cjs
+          node public-demo/tests/short-code.test.cjs
+          for file in static/*.js public-demo/dist/*.js; do node --check "$file"; done
+  windows-launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Python fallback without py launcher
+        shell: pwsh
+        run: ./tests/windows_launcher.ps1
+  android-emulator-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Native URL policy checks
+        working-directory: android-shared-preview
+        run: ./run-policy-tests.sh
+      - name: Prepare Android SDK platform and build tools
+        run: |
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
+          fi
+      - name: Build separate emulator-only debug APK
+        working-directory: android-shared-preview
+        run: ./gradlew --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SharePass-0.3.0-emulator-debug-APK
+          path: android-shared-preview/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7

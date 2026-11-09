@@ -2,6 +2,7 @@
 """Local-only physical pass custody demo. Python 3.10+, standard library only."""
 from __future__ import annotations
 
+
 import argparse
 import base64
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, parse_qs
 
+
 ROOT = Path(__file__).resolve().parent
 CATEGORIES = ("normal", "vip", "vvip")
 CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -28,10 +30,14 @@ MAX_FAILED_ATTEMPTS = 5
 ATTEMPT_WINDOW_SECONDS = 60
 
 
+
+
 class DomainError(Exception):
     def __init__(self, message, status=400, code="INVALID_REQUEST", not_applied=True):
         super().__init__(message)
         self.status, self.code, self.not_applied = status, code, not_applied
+
+
 
 
 def required_text(data, key, maximum=100):
@@ -44,6 +50,8 @@ def required_text(data, key, maximum=100):
     return value
 
 
+
+
 def quantities(value):
     if not isinstance(value, dict) or set(value) != set(CATEGORIES):
         raise DomainError("Supply Normal, VIP and VVIP quantities.")
@@ -54,12 +62,18 @@ def quantities(value):
     return {k: value[k] for k in CATEGORIES}
 
 
+
+
 def encode_url(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+
+
 def decode_url(data):
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
 
 
 class Store:
@@ -127,6 +141,7 @@ class Store:
             for event_id, name in ((DEFAULT_EVENT, "Demo Night · Training"), ("training-event-002", "Demo Festival · Training")):
                 db.execute("INSERT OR IGNORE INTO events VALUES(?,?,1,?)", (event_id, name, self.clock() + 7 * 86400))
 
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -138,8 +153,10 @@ class Store:
         finally:
             db.close()
 
+
     def timestamp(self):
         return datetime.fromtimestamp(self.clock(), timezone.utc).isoformat(timespec="milliseconds")
+
 
     def event(self, event_id, db, require_open=False):
         row = db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
@@ -149,15 +166,18 @@ class Store:
             raise DomainError("This event is closed. Stop and contact the supervisor.", 409, "EVENT_CLOSED")
         return dict(row)
 
+
     def collection_code(self, deposit_id, event_id):
         digest = hmac.new(self.key, ("code\0" + event_id + "\0" + deposit_id).encode(), hashlib.sha256).digest()
         number = int.from_bytes(digest[:8], "big") >> 4
         raw = "".join(CODE_ALPHABET[(number >> (5 * i)) & 31] for i in reversed(range(12)))
         return "-".join(raw[i:i + 4] for i in range(0, 12, 4))
 
+
     def code_digest(self, code, event_id):
         normalized = "".join(c for c in code.upper() if c not in " -")
         return hmac.new(self.key, ("lookup\0" + event_id + "\0" + normalized).encode(), hashlib.sha256).hexdigest()
+
 
     def get_collection(self, collection_id, event_id, db):
         row = db.execute("SELECT * FROM collections WHERE id=? AND event_id=?", (collection_id, event_id)).fetchone()
@@ -166,6 +186,7 @@ class Store:
         data = dict(row)
         data["quantities"] = {key: data.pop(key) for key in CATEGORIES}
         return data
+
 
     def get_deposit(self, deposit_id, event_id, db):
         row = db.execute("SELECT * FROM deposits WHERE id=? AND event_id=?", (deposit_id, event_id)).fetchone()
@@ -179,6 +200,7 @@ class Store:
         data["pending_collection"] = self.get_collection(pending["id"], event_id, db) if pending else None
         return data
 
+
     def state(self, event_id=DEFAULT_EVENT):
         with self.connect() as db:
             db.execute("BEGIN")  # One consistent read snapshot for balances, collections and audit.
@@ -189,6 +211,7 @@ class Store:
             for row in db.execute("SELECT * FROM audit WHERE event_id=? ORDER BY seq DESC LIMIT 100", (event_id,)):
                 entry = dict(row); entry["details"] = json.loads(entry["details"]); audit.append(entry)
             return {"event_id":event_id, "event_name":event["name"], "events":[dict(row) for row in db.execute("SELECT * FROM events ORDER BY id")], "deposits":deposits, "collections":collections, "audit":audit, "counts":{"DEPOSITS":len(deposits), "PASSES_REMAINING":sum(sum(d["remaining"].values()) for d in deposits), "UNCONFIRMED":sum(c["status"]=="RELEASE_RECORDED" for c in collections), "HANDED_OVER":sum(sum(c["quantities"].values()) for c in collections if c["status"]=="HANDED_OVER")}}
+
 
     def verify(self, data):
         if not isinstance(data, dict):
@@ -221,6 +244,7 @@ class Store:
                 if db.in_transaction: db.rollback()
                 raise
 
+
     def check_claim(self, token, deposit_id, event_id):
         try:
             if not isinstance(token, str) or len(token)>1000: raise ValueError()
@@ -232,10 +256,12 @@ class Store:
         except (ValueError, TypeError, KeyError, UnicodeError):
             raise DomainError("Code verification expired or is invalid. Nothing was released by this request; verify the code again.", 401, "CLAIM_EXPIRED")
 
+
     def result(self, db, action, deposit_id, event_id, collection_id, replayed):
         response = {"deposit":self.get_deposit(deposit_id, event_id, db), "collection":self.get_collection(collection_id,event_id,db) if collection_id else None, "replayed":replayed}
         if action == "DEPOSIT": response["collection_code"] = self.collection_code(deposit_id,event_id)
         return response
+
 
     def mutate(self, action, data, target_id=None):
         if not isinstance(data, dict): raise DomainError("Expected a JSON object.")
@@ -313,9 +339,11 @@ class Store:
                 if db.in_transaction: db.rollback()
                 raise
 
+
     def seed(self):
         for index,(counts,location,event_id) in enumerate((({"normal":6,"vip":2,"vvip":1},"A-01",DEFAULT_EVENT),({"normal":3,"vip":0,"vvip":0},"A-02",DEFAULT_EVENT),({"normal":4,"vip":1,"vvip":0},"B-01","training-event-002"))):
             self.mutate("DEPOSIT",{"request_id":f"seed-code-demo-{index}","operator":"Demo setup","event_id":event_id,"location":location,"quantities":counts,"custody_confirmed":True})
+
 
     def backup(self,destination):
         destination=Path(destination); key_destination=destination.with_suffix(destination.suffix+".verification.key")
@@ -330,11 +358,18 @@ class Store:
         return destination,key_destination
 
 
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads=True
-    def __init__(self,address,store):
+    def __init__(self,address,store,allow_android_emulator=False):
         super().__init__(address,Handler)
+        # An Android emulator maps 10.0.2.2 to this host's loopback interface.
+        # This changes only Host validation; the socket stays bound to 127.0.0.1.
+        self.allow_android_emulator = allow_android_emulator
         self.store=store; self.session=secrets.token_urlsafe(32); self.csrf=secrets.token_urlsafe(32)
+
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -342,7 +377,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): pass  # No URLs, codes, tokens, phones or guest data in request logs.
     def valid_host(self):
         port=self.server.server_address[1]
-        return self.headers.get("Host") in (f"127.0.0.1:{port}",f"localhost:{port}")
+        hosts = (f"127.0.0.1:{port}", f"localhost:{port}")
+        if self.server.allow_android_emulator:
+            hosts += (f"10.0.2.2:{port}",)
+        return self.headers.get("Host") in hosts
     def authorized(self):
         cookie=SimpleCookie()
         try:
@@ -381,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.store.state(event_id); result["csrf"]=self.server.csrf
                 return self.send(200,result)
             except DomainError as error: return self.error(error.status,str(error),error.code,error.not_applied)
-        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css","/tactile.css":"tactile.css","/brand-palette.css":"brand-palette.css","/desk-enhancements.js":"desk-enhancements.js","/assets/bullseye-entertainment.jpg":"assets/bullseye-entertainment.jpg"}
+        files={"/":"index.html","/app.js":"app.js","/style.css":"style.css","/tactile.css":"tactile.css","/brand-palette.css":"brand-palette.css","/desk-enhancements.js":"desk-enhancements.js","/assets/bullseye-entertainment.jpg":"assets/bullseye-entertainment.jpg","/assets/sharepass-latest-lockup.webp":"assets/sharepass-latest-lockup.webp","/assets/sharepass-ticket-mark.webp":"assets/sharepass-ticket-mark.webp","/sharepass-brand.css":"sharepass-brand.css"}
         if path not in files: return self.error(404,"Not found.")
         filename=ROOT/"static"/files[path]
         content_type=mimetypes.guess_type(str(filename))[0] or "application/octet-stream"
@@ -413,9 +451,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception: self.error(500,"Outcome uncertain. Do not repeat a physical handover; recover the saved request and reconcile custody.","UNCERTAIN_OUTCOME",False)
 
 
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port",type=int,default=8765)
+    parser.add_argument("--android-emulator",action="store_true",help="Allow only the Android emulator's 10.0.2.2 Host alias; server remains bound to 127.0.0.1")
     parser.add_argument("--db",type=Path,default=ROOT/"_runtime"/"shared-code-training.sqlite3")
     parser.add_argument("--demo",action="store_true",help="Add synthetic example deposits without logging their collection codes.")
     parser.add_argument("--backup",type=Path,help="Save an integrity-checked database and matching secret verification key; then exit.")
@@ -425,12 +466,16 @@ def main():
         print("Backup saved with its secret verification-key companion. Protect both; reconcile every later handover before any restore.")
         return
     if args.demo: store.seed()
-    server=Server(("127.0.0.1",args.port),store)
+    server=Server(("127.0.0.1",args.port),store,allow_android_emulator=args.android_emulator)
     print(f"Training demo: http://127.0.0.1:{server.server_address[1]}",flush=True)
     print("One trusted laptop. Synthetic physical passes only. Codes and phones are never printed to request logs.",flush=True)
+    if args.android_emulator:
+        print(f"Android EMULATOR only: http://10.0.2.2:{server.server_address[1]}/ (separate Android source project)",flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()
+
+
 
 
 if __name__=="__main__": main()

@@ -1,5 +1,7 @@
 # Local operations and recovery
 
+> **Current integration branch:** The handbook below records the reviewed main snapshot. See [cloud reconciliation](CLOUD_RECONCILIATION.md) and [START_HERE](../START_HERE.md) for the newly combined emulator feature, fixes, verification and outstanding laptop comparison.
+
 [Documentation index](README.md) · [Development](DEVELOPMENT.md) · [Staff workflow](../README.md#staff-workflow)
 
 These instructions are for the synthetic training application on `main` at `4561791`. They are not authorization or a runbook for a live event. Keep the laptop trusted and the server on loopback.

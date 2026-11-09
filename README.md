@@ -1,3 +1,5 @@
+> **Shared local integration:** Desktop and Android emulator use one synthetic SQLite desk. See [START_HERE.md](START_HERE.md) and [cloud reconciliation](docs/CLOUD_RECONCILIATION.md). This is not a signed phone release or live service.
+
 # SharePass — brought to you by Bullseye Entertainment
 
 **Practice only; not production-ready.** See SHAREPASS_RELEASE.md for the latest tactile design, fictional Oktoberfest 2027 hosted fixture, and four-character public-practice codes. The local custody engine below retains its original long-code security model.

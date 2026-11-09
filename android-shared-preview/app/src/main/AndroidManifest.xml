@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Local emulator bridge ONLY. No cameras, location, microphone, contacts, storage or notifications. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:enableOnBackInvokedCallback="true" android:allowBackup="false" android:fullBackupContent="false"
+        android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/local_emulator_network"
+        android:label="SharePass Desk (Local Preview)" android:icon="@drawable/sharepass_icon"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+        </activity>
+    </application>
+</manifest>

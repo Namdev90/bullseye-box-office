@@ -1,5 +1,7 @@
 # SharePass documentation
 
+> **Current integration branch:** The handbook below records the reviewed main snapshot. See [cloud reconciliation](CLOUD_RECONCILIATION.md) and [START_HERE](../START_HERE.md) for the newly combined emulator feature, fixes, verification and outstanding laptop comparison.
+
 SharePass is a physical-pass custody **training prototype** in the `bullseye-box-office` repository. Use synthetic passes and staff labels only. It does not sell tickets, validate admission or provide a production event service.
 
 This handbook describes default-branch source at [`4561791`](https://github.com/Namdev90/bullseye-box-office/commit/456179176674d8576c4ba25cb8ff3e07853fbbda), reviewed on **9 November 2026 (UTC)**. It adds navigation and implementation detail without replacing the existing safety and design records.

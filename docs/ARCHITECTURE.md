@@ -1,5 +1,7 @@
 # Architecture
 
+> **Current integration branch:** The handbook below records the reviewed main snapshot. See [cloud reconciliation](CLOUD_RECONCILIATION.md) and [START_HERE](../START_HERE.md) for the newly combined emulator feature, fixes, verification and outstanding laptop comparison.
+
 [Documentation index](README.md) · [API](API.md) · [Operations](OPERATIONS.md)
 
 Scope: default-branch source at `4561791`. Source links below point to files in the same checkout.
