@@ -13,6 +13,8 @@ class PreviewContracts(unittest.TestCase):
         self.assertIn(".registerOnBackInvokedCallback(", source)
         self.assertIn(".unregisterOnBackInvokedCallback(backCallback)", source)
         self.assertIn("onBackPressed(){handleBack();}", source)
+        self.assertIn('@SuppressLint("GestureBackNavigation")\n    @Override public void onBackPressed()', source)
+        self.assertEqual(source.count('@SuppressLint("GestureBackNavigation")'), 1)
         manifest = (ROOT / "android-shared-preview/app/src/main/AndroidManifest.xml").read_text()
         self.assertIn('android:enableOnBackInvokedCallback="true"', manifest)
 

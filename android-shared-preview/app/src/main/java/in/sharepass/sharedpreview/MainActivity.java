@@ -1,5 +1,6 @@
 package in.sharepass.sharedpreview;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
@@ -114,6 +115,9 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("Close",(d,w)->finish()).setNegativeButton("Stay",null).show();
         });
     }
+    // API 24-32 fallback only. API 33+ uses the registered platform callback above.
+    // Lint flags every legacy override even when the modern path is implemented.
+    @SuppressLint("GestureBackNavigation")
     @Override public void onBackPressed(){handleBack();}
     @Override protected void onPause(){if(web!=null)web.onPause();super.onPause();}
     @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();}
