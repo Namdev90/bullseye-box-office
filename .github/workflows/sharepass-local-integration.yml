@@ -54,9 +54,9 @@ jobs:
           if [ -n "${ANDROID_HOME:-}" ]; then
             "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0"
           fi
-      - name: Build separate emulator-only debug APK
+      - name: Lint API compatibility and build emulator-only debug APK
         working-directory: android-shared-preview
-        run: ./gradlew --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:lintDebug :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: SharePass-0.3.0-emulator-debug-APK
