@@ -1,0 +1,10 @@
+{
+  "name": "sharepass-android",
+  "version": "0.9.6",
+  "private": true,
+  "scripts": {
+    "check": "node --check web/app.js && node --check web/demo-store.js && node --check web/desk-enhancements.js && node --check web/app-shell.js",
+    "test": "node --test tests/upstream/*.test.cjs tests/*.test.cjs",
+    "preview": "python3 -m http.server 8766 --bind 127.0.0.1 --directory web"
+  }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your phone · SharePass</title>
+<link rel="stylesheet" href="/counter.css">
+</head>
+<body><main class="shell">
+  <h1>Connect your phone</h1>
+  <div class="stack">
+    <p id="pair-status" role="status">Approve only if you just requested this connection and the code matches the one in SharePass.</p>
+    <p id="pair-code" class="code" hidden></p>
+    <button id="pair-submit" class="primary" type="button" hidden>Connect SharePass app</button>
+  </div>
+  <p id="pair-error" class="error" role="alert"></p>
+</main>
+<script defer src="/pair.js"></script>
+</body></html>

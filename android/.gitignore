@@ -1,0 +1,15 @@
+.gradle/
+**/build/
+local.properties
+.transfer/
+upstream/
+verification/screenshots/
+*.jks
+*.keystore
+google-services.json
+.env*
+private/
+*.apk
+*.aab
+.native-policy-classes/
+.android/

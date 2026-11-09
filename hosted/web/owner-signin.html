@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Owner sign-in · SharePass</title>
+<link rel="stylesheet" href="/counter.css">
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <div class="shell admin-shell">
+    <header><a class="menu-link" href="/connect">← Connect</a><strong>SharePass</strong></header>
+    <main>
+      <h1>Owner sign-in</h1>
+      <form class="admin-card" id="owner-credentials" data-action="login">
+        <label class="field">Owner ID <input name="username" autocomplete="username" autocapitalize="none" maxlength="40" required></label>
+        <label class="field">Password <input name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+        <button type="submit" class="primary">Sign in</button>
+        <p id="owner-credentials-status" role="status"></p>
+      </form>
+      <a class="menu-link" href="/signin-with-chatgpt?return_to=%2Faccount">Use verified ChatGPT sign-in</a>
+    </main>
+  </div>
+  <script defer src="/owner-signin.js"></script>
+</body>
+</html>

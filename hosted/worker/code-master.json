@@ -1,0 +1,20 @@
+[
+  ["1001","Number",1,64,"Standard","General",false,"Synthetic fixture"],
+  ["2002","Number",2,63,"Standard","General",false,"Synthetic fixture"],
+  ["3003","Number",3,62,"Standard","General",false,"Synthetic fixture"],
+  ["4004","Number",4,61,"Standard","General",false,"Synthetic fixture"],
+  ["5005","Number",5,60,"Standard","General",false,"Synthetic fixture"],
+  ["6006","Number",6,59,"Standard","General",false,"Synthetic fixture"],
+  ["7007","Number",7,58,"Standard","General",false,"Synthetic fixture"],
+  ["8008","Number",8,57,"Standard","General",false,"Synthetic fixture"],
+  ["MOCK","Word",1,65,"Featured","General",true,"Synthetic sensitivity check"],
+  ["ZING","Word",2,80,"Featured","Festival",false,"Synthetic fixture"],
+  ["SINQ","Word",3,79,"Featured","SinQ",false,"Synthetic fixture for brand eligibility"],
+  ["BULZ","Word",4,78,"Featured","Bullseye",false,"Synthetic fixture for brand eligibility"],
+  ["SOHO","Word",5,77,"Featured","Soho",false,"Synthetic fixture for brand eligibility"],
+  ["SORO","Word",6,76,"Featured","Soro",false,"Synthetic fixture for brand eligibility"],
+  ["SAKE","Word",7,75,"Featured","Sake",false,"Synthetic fixture for brand eligibility"],
+  ["BABY","Word",8,74,"Featured","Satiwa Baby",false,"Synthetic fixture for brand eligibility"],
+  ["SATI","Word",9,73,"Featured","Satiwa Baby",false,"Synthetic fixture for brand eligibility"],
+  ["Q5AZ","Mixed",1,71,"Standard","General",false,"Synthetic fixture"]
+]

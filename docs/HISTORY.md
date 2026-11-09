@@ -52,3 +52,7 @@ For branch-specific details, read the snapshot [START_HERE.md](https://github.co
 - No production deployment, software licence, trademark clearance, load capacity or live-event readiness is inferred from this history.
 
 When this documentation is updated after a merge, verify the new tree and PR state first. Preserve the dated snapshot rather than silently rewriting unmerged work as though it had always been on `main`.
+
+## Hosted register and native app source
+
+The hosted D1 implementation and native Android staff app evolved separately from the practice branch. They enter this repository as `hosted/` and `android/` so their history and release gates remain distinct from the loopback Python app and PR #1. The [source and release record](CURRENT_SOURCE.md) documents the evidence and current limits.

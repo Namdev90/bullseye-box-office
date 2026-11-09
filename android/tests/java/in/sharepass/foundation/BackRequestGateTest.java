@@ -1,0 +1,1 @@
+package in.sharepass.foundation; public final class BackRequestGateTest { public static void main(String[] args){BackRequestGate g=new BackRequestGate();if(!g.acquire())throw new AssertionError();for(int i=0;i<100;i++)if(g.acquire())throw new AssertionError();g.release();g.release();if(!g.acquire())throw new AssertionError();System.out.println("102 gate checks passed");}}
