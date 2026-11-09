@@ -2,6 +2,7 @@
     <!-- Local emulator bridge ONLY. No cameras, location, microphone, contacts, storage or notifications. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:enableOnBackInvokedCallback="true" android:allowBackup="false" android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/local_emulator_network"
         android:label="SharePass Desk (Local Preview)" android:icon="@drawable/sharepass_icon"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

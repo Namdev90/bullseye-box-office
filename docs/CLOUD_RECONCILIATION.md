@@ -35,3 +35,15 @@ Before any user-test-ready claim:
 4. Keep this PR draft until the reconciliation and test path are reviewed.
 
 This remains a synthetic shared local preview, never real multi-counter custody.
+
+## Android backup and device-transfer policy
+
+The Android wrapper enables WebView DOM storage for original-tab interrupted-mutation recovery and first-party cookies for the local Python session. WebView may persist profile data inside the app's private root. The authoritative SQLite database and verification key remain on the desktop running Python, not in this APK. Neither that desktop storage nor the disposable browser demo is changed by this policy.
+
+`AndroidManifest.xml` retains `allowBackup="false"` and `fullBackupContent="false"` for the legacy backup opt-out and now references `res/xml/data_extraction_rules.xml` for Android 12+ cloud backup and device transfer. Both transports exclude `.` in every supported domain: root, files, databases, preferences, app-specific external files, and the four device-protected counterparts. Separate domain exclusions are intentional: a root exclusion alone does not cover every named domain. This also covers future app files without depending on WebView implementation-specific filenames. No backup agent, permission or lint suppression was added.
+
+These are transport exclusions, not storage deletion or an in-app storage ban. Existing DOM storage, cookies, interrupted-operation recovery and desktop offline data remain unchanged while using the app. Android cache, code-cache and no-backup directories are already excluded by the platform. Reinstalling, clearing app data or moving to another device must not be treated as preserving the original operator's session/recovery state; reconcile pending physical handovers separately.
+
+Limits: manifest/resource contracts and Android lint/build can validate wiring and compatibility, not OEM compliance. Android documents that some manufacturers ignore `allowBackup=false` for device transfer, which is why explicit transfer exclusions are supplied. This is not a guarantee against privileged/root extraction, nonconforming OEM migration, manual exports, or copies that already exist. No real backup, restore, transfer or device tests were performed. The policy does not implement encrypted backups or change the desktop database retention policy.
+
+References: [Android backup opt-out and Android 12+ rules](https://developer.android.com/identity/data/autobackup), [data-extraction-rules format](https://developer.android.com/guide/topics/data/autobackup#xml-syntax-android-12), and [manifest backup attributes](https://developer.android.com/guide/topics/manifest/application-element#allowbackup).
