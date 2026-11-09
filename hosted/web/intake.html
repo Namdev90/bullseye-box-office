@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leave passes · SharePass</title>
+<link rel="stylesheet" href="/counter.css">
+</head>
+<body class="customer-page"><main class="shell">
+  <article class="intake-ticket">
+    <div class="ticket-head">
+      <div class="ticket-kicker"><span>SharePass</span><span id="customer-booth">Pass deposit</span></div>
+      <h1>Leave passes</h1>
+      <p id="intake-instruction" role="status">Opening your form…</p>
+      <p id="customer-reference" hidden></p>
+    </div>
+    <form id="customer-form" hidden>
+      <fieldset id="customer-details" data-wizard-page data-next-label="Continue to collector">
+        <legend>Your details</legend>
+        <label class="field"><span id="customer-name-label">First name (optional)</span>
+          <input name="name" autocomplete="section-depositor name" maxlength="80">
+        </label>
+        <div id="customer-counts"></div>
+        <div id="customer-contact" hidden>
+          <label class="field">Your WhatsApp number
+            <input name="phone" type="tel" inputmode="tel" autocomplete="section-depositor tel-national" aria-describedby="customer-phone-hint" placeholder="9876543210" maxlength="40" disabled>
+          </label>
+          <small id="customer-phone-hint">Enter your number last to continue. We add +91 to Indian mobiles.</small>
+        </div>
+      </fieldset>
+      <fieldset id="customer-pass-step" hidden>
+        <legend>Who will collect?</legend>
+        <div id="recipient-list" class="stack"></div>
+        <details id="more-recipients">
+          <summary>More options</summary>
+          <button id="add-recipient" class="outline-action" type="button">Add recipient</button>
+        </details>
+        <p id="allocation-balance" role="status" hidden></p>
+        <p id="customer-ready" class="customer-ready" role="status" hidden>✓ Ready to send</p>
+      </fieldset>
+      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send</button></div>
+    </form>
+    <section id="customer-receipt" class="stack" hidden aria-label="Deposit receipt">
+      <p id="receipt-state" role="status"></p>
+      <div id="receipt-share" class="stack"></div>
+      <button id="check-receipt" type="button">Check confirmation</button>
+      <button id="receipt-alerts" type="button" hidden>Enable receipt alerts</button>
+      <p id="receipt-alert-status" role="status" hidden></p>
+      <a id="finish-receipt" class="menu-link" href="/">Done</a>
+    </section>
+    <p id="customer-error" class="error" role="alert"></p>
+  </article>
+</main>
+<template id="recipient-fields">
+  <section class="recipient-fields stack">
+    <h3>Collector</h3>
+    <label class="field">Collector name <input name="recipient_name" autocomplete="off" maxlength="80"></label>
+    <label class="field">Collector WhatsApp number <input name="recipient_phone" autocomplete="off" type="tel" inputmode="tel" placeholder="9876543210" maxlength="40"></label>
+    <div class="allocation-fields" hidden></div>
+    <button type="button" class="outline-action remove-recipient" hidden>Remove recipient</button>
+  </section>
+</template>
+<script defer src="/phone.js"></script><script defer src="/steps.js"></script>
+<script defer src="/share-drafts.js"></script>
+<script defer src="/intake.js"></script>
+</body></html>

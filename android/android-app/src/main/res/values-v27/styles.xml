@@ -1,0 +1,6 @@
+<resources>
+    <style name="AppTheme" parent="SharePassBase">
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:navigationBarColor">#EFE0CB</item>
+    </style>
+</resources>

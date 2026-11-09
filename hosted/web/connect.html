@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect to SharePass</title>
+<link rel="stylesheet" href="/counter.css">
+</head>
+<body>
+  <main class="shell">
+    <h1>Connect to SharePass</h1>
+    <a class="menu-link primary" id="open-sharepass" hidden>Open SharePass app</a>
+    <form id="connect-form">
+      <p id="connect-help">Ask your booth supervisor for the one-use setup code.</p>
+      <label class="field" id="setup-code-field">Four-digit setup code
+        <input id="setup-code" name="code" type="text" inputmode="numeric" maxlength="4" minlength="4" pattern="[0-9]{4}" autocomplete="one-time-code" aria-describedby="connect-help" required>
+      </label>
+      <button type="submit" class="primary" id="connect-submit">Next</button>
+    </form>
+    <p id="connect-error" class="error" role="alert"></p>
+    <a class="menu-link" href="/owner-signin">Owner sign-in</a>
+  </main>
+  <script defer src="/connect.js"></script>
+</body>
+</html>

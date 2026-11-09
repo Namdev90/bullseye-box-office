@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account · SharePass</title>
+<link rel="stylesheet" href="/counter.css">
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <div class="shell admin-shell">
+    <header><a class="menu-link" href="/staff">← Staff desk</a><strong>SharePass</strong></header>
+    <main>
+      <h1>Account</h1>
+      <div class="account-tools">
+      <nav class="account-nav" aria-label="Account">
+        <button type="button" data-account="overview" aria-pressed="true">Overview</button>
+        <button type="button" data-account="administration" aria-pressed="false">Administration</button>
+        <button type="button" data-account="reports" aria-pressed="false">Reports</button>
+      </nav>
+      <section id="account-overview" class="admin-card">
+        <h2 tabindex="-1">Owner account</h2>
+        <a class="menu-link" href="/owner-password">Set owner password</a>
+        <a class="menu-link" id="owner-sign-out" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a>
+        <p id="owner-sign-out-status" role="status"></p>
+      </section>
+      <div id="account-administration" hidden>
+      <h2 tabindex="-1">Administration</h2>
+      <nav class="admin-nav" aria-label="Administration">
+        <button type="button" data-panel="booths" aria-pressed="true" aria-controls="booths">Booths</button>
+        <button type="button" data-panel="staff" aria-pressed="false" aria-controls="staff">Staff and devices</button>
+        <button type="button" data-panel="reissue" aria-pressed="false" aria-controls="reissue">Replace expired code</button>
+        <button type="button" data-panel="code-policy" aria-pressed="false" aria-controls="code-policy">Code catalogue</button>
+      </nav>
+      <p id="setup-status" role="status"></p>
+      <section class="admin-card" id="booths" aria-labelledby="booths-heading">
+        <h2 id="booths-heading" tabindex="-1">Booths</h2>
+        <ul id="booth-list" class="admin-list"></ul>
+        <button type="button" id="open-booth-form" class="primary">Add booth</button>
+        <form id="booth-form" class="admin-wizard" hidden novalidate>
+          <fieldset data-step><legend>Booth details</legend>
+            <label class="field">Booth name <input name="name" maxlength="80" required></label>
+            <label class="field">Pickup location <input name="location" maxlength="100" required></label>
+          </fieldset>
+          <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create booth</button></div>
+        </form>
+      </section>
+      <section class="admin-card" id="staff" aria-labelledby="staff-heading" hidden>
+        <h2 id="staff-heading" tabindex="-1">Staff and devices</h2>
+        <ul id="device-list" class="admin-list"></ul>
+        <button type="button" id="open-invite-form" class="primary" disabled>Set up a staff device</button>
+        <button type="button" id="refresh-devices">Refresh devices</button>
+        <form id="invite-form" class="admin-wizard" hidden novalidate>
+          <fieldset data-step><legend>Staff device details</legend>
+            <div class="field"><label for="invite-booth">Booth</label><select id="invite-booth" name="booth_id" required></select></div>
+            <label class="field">Staff name <input name="staff_name" maxlength="80" autocomplete="off" required></label>
+            <label class="field">Device label <input name="device_label" maxlength="80" placeholder="e.g. Front counter phone" autocomplete="off" required></label>
+            <label class="field">Designation
+              <select name="designation" aria-describedby="designation-help"><option>Counter staff</option><option>Deposit desk</option><option>Collection desk</option></select>
+            </label>
+            <small id="designation-help">A staff label for this device. Access is assigned by booth.</small>
+          </fieldset>
+          <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create setup QR</button></div>
+        </form>
+        <div id="setup-invite" class="admin-wizard" hidden>
+          <h3 id="invite-heading" tabindex="-1">Connect the staff device</h3>
+          <p id="invite-expiry"></p>
+          <div id="invite-qr" class="intake-qr"></div>
+          <output id="invite-code" class="code" aria-label="Four-digit setup code" hidden></output>
+          <div class="wizard-actions"><button type="button" id="toggle-invite">Use setup code instead</button><button type="button" id="close-invite">Done</button></div>
+        </div>
+      </section>
+      <section class="admin-card" id="reissue" aria-labelledby="reissue-heading" hidden>
+        <h2 id="reissue-heading" tabindex="-1">Replace an expired code</h2>
+        <button class="info-trigger" type="button" aria-label="Before replacing a code" data-info="Find the physical packet and match its shelf and label before issuing a new code.">i</button>
+        <form id="reissue-form" class="admin-wizard" novalidate>
+          <fieldset data-step><legend>Match the physical packet</legend>
+            <div class="field"><label for="reissue-booth">Booth</label><select id="reissue-booth" name="booth_id" required></select></div>
+            <label class="field">Expired code <input name="collection_code" maxlength="4" minlength="4" pattern="[A-Za-z0-9]{4}" required autocapitalize="characters"></label>
+            <label class="field">Shelf or slot <input name="location" maxlength="30" required></label>
+            <label class="field">Physical packet label <input name="packet_id" placeholder="PKT-1234ABCD" maxlength="12" required autocapitalize="characters"></label>
+          </fieldset>
+          <fieldset data-step hidden><legend>Review replacement options</legend>
+            <label class="field">New code (optional) <input name="custom_code" maxlength="4" pattern="[A-Za-z0-9]{4}" autocapitalize="characters"></label>
+            <button class="info-trigger" type="button" aria-label="About the replacement code" data-info="Leave this blank to let SharePass choose an unused code.">i</button>
+            <label class="field">New code lifetime in minutes <input type="number" name="valid_minutes" min="5" max="2880" value="1440" required></label>
+          </fieldset>
+          <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Issue replacement</button></div>
+        </form>
+        <p id="reissue-status" role="status"></p>
+      </section>
+      <section class="admin-card" id="code-policy" aria-labelledby="code-policy-heading" hidden>
+        <h2 id="code-policy-heading" tabindex="-1">Code catalogue</h2>
+        <p>Changes apply to future automatic suggestions for the current event. Previously issued codes and manually entered codes keep their existing rules.</p>
+        <p id="code-policy-status" role="status"></p>
+        <button type="button" id="refresh-code-policy">Refresh catalogue</button>
+        <p id="code-policy-summary"></p>
+        <form id="code-theme-form" class="admin-wizard">
+          <fieldset disabled>
+            <legend>Event priorities</legend>
+            <label class="field">Event keywords <input name="theme" maxlength="160" placeholder="Example: Bullseye Soro 2810" aria-describedby="code-theme-help"></label>
+            <p id="code-theme-help">Add venue names, themes, and dates to give matching codes more weight. Leave blank for a general event.</p>
+            <div class="wizard-actions">
+              <button type="submit" class="primary">Save priorities</button>
+              <button type="button" id="reset-code-theme">Use site default</button>
+            </div>
+          </fieldset>
+        </form>
+        <form id="code-override-form" class="admin-wizard">
+          <fieldset disabled>
+            <legend>Adjust a catalogue code</legend>
+            <label class="field">Code <select name="code" required></select></label>
+            <p id="code-override-detail"></p>
+            <label class="field">Editorial score <input name="score" type="number" min="1" max="100" placeholder="Use catalogue score"></label>
+            <label><input name="enabled" type="checkbox"> Allow automatic suggestions when eligible</label>
+            <div class="wizard-actions"><button type="submit" class="primary">Save code</button></div>
+          </fieldset>
+        </form>
+      </section>
+      </div>
+      <section id="account-reports" class="admin-card" hidden>
+        <div class="report-heading"><h2 tabindex="-1">Booth reports</h2><button type="button" class="info-trigger" aria-label="About booth report totals" data-info="Available passes are ready for pickup. Pending passes have been reserved for a handover. Handed over means staff confirmed physical delivery.">i</button></div>
+        <p id="report-status" role="status"></p>
+        <p id="report-storage"></p>
+        <div class="report-table"><table><caption>Pass totals by booth</caption><thead><tr>
+          <th scope="col">Booth</th><th scope="col">Deposits</th><th scope="col">Received</th><th scope="col">Available</th><th scope="col">Pending</th><th scope="col">Handed over</th>
+        </tr></thead><tbody id="report-rows"></tbody></table></div>
+        <button type="button" id="refresh-report">Refresh report</button>
+      </section>
+      </div>
+    </main>
+  </div>
+  <script src="/vendor/sharepass-qr.js" defer></script>
+  <script defer src="/phone.js"></script><script src="/share-drafts.js" defer></script>
+  <script src="/info.js" defer></script>
+  <script src="/admin.js" defer></script>
+  <script defer src="/owner-signin.js"></script>
+</body></html>

@@ -1,6 +1,15 @@
 # SharePass — brought to you by Bullseye Entertainment
 
-**Practice only; not production-ready.** See SHAREPASS_RELEASE.md for the latest tactile design, fictional Oktoberfest 2027 hosted fixture, and four-character public-practice codes. The local custody engine below retains its original long-code security model.
+## Current hosted and Android source
+
+- [Hosted register](hosted/README.md) — Cloudflare Worker, browser desk, guest receipts and D1 migrations.
+- [Android app](android/README.md) — native staff desk and release build instructions.
+- [Source and release record](docs/CURRENT_SOURCE.md) — verified work, remaining gates and the distinction between public source and private release inputs.
+- [CI and release workflow](docs/sharepass-release-workflow.md) — check triggers and manual deployment gates.
+
+## Historical practice application
+
+**Practice only.** This section describes the original loopback Python application and disposable browser demo. See SHAREPASS_RELEASE.md for the historical tactile design and fictional Oktoberfest fixture. The local custody engine below retains its original long-code security model.
 
 A staff-only, **single-laptop prototype for physical event passes**. A depositor who is already inside leaves their friends' passes at the box office. Staff count them, store one packet, and issue one private collection code. Different friends can later use that same code to collect some or all remaining Normal, VIP and VVIP passes.
 

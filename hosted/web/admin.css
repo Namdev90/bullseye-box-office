@@ -1,0 +1,30 @@
+.admin-shell{width:min(100% - 2rem,80rem)}
+.admin-shell header{align-items:center;gap:1rem}
+.admin-shell header p{margin:0;text-align:right}
+.admin-shell main{padding-top:clamp(1.5rem,5vh,3.5rem)}
+.admin-nav,.wizard-actions{display:flex;gap:.7rem;flex-wrap:wrap}
+.admin-nav [aria-pressed=true]{border-color:#e893a6;background:#711c33}
+.admin-card{padding:clamp(1rem,3vw,2rem);border:1px solid #5c4d58;border-radius:1rem;background:linear-gradient(160deg,#292129,#171417);box-shadow:inset 0 1px #ffffff20,0 8px 20px #0006}
+.admin-card .admin-list{margin:1rem 0}
+.admin-card .admin-list li{padding:.6rem 0;border-bottom:1px solid #ffffff26}
+.admin-card .admin-list small{display:block;margin:.2rem 0;color:var(--muted)}
+.admin-wizard{max-width:35rem;margin-top:1rem;display:grid;gap:1rem}
+.admin-wizard fieldset{min-width:0;margin:0;padding:0;border:0}
+.admin-wizard legend{padding:0;margin-bottom:.8rem;font-size:1.2rem;font-weight:750}
+.admin-wizard input,.admin-wizard select{max-width:28rem}
+.admin-wizard select{min-height:48px;padding:.65rem;border:1px solid var(--line);border-radius:.5rem;background:#17171b;color:inherit;font:inherit}
+.admin-wizard .intake-qr svg{margin:0;width:min(100%,14rem)}
+#setup-status:empty,#reissue-status:empty{margin:0;height:.75rem}
+.account-nav{display:flex;flex-wrap:wrap;gap:.65rem;margin:0 0 1.4rem;padding-bottom:1rem;border-bottom:1px dashed #9b7f64}
+.account-nav [aria-pressed=true],.admin-nav [aria-pressed=true]{background:#852338;color:#fff6e6;border-color:#772033}
+.admin-card{background:#fbefd9;color:#261e1c;border-color:#ad9175;box-shadow:0 7px 17px #4f2d1920}
+.admin-card .admin-list li{border-bottom-color:#cfb798}
+.admin-wizard select{background:#fff9ee;color:#261e1c}
+.report-heading{display:flex;align-items:center;gap:.35rem}
+.report-table{overflow:auto;margin:0 0 1rem}
+.report-table table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.report-table caption{text-align:left;color:var(--muted);margin-bottom:.55rem}
+.report-table th,.report-table td{text-align:right;white-space:nowrap;padding:.6rem;border-bottom:1px solid #cfb798}
+.report-table th:first-child{text-align:left}
+.desktop-note{display:none}
+@media(max-width:767px){.admin-card{padding:.85rem}.admin-nav button,.account-nav button{min-height:44px}}

@@ -1,0 +1,98 @@
+name: SharePass CI
+
+on:
+  pull_request:
+    paths:
+      - 'hosted/**'
+      - 'android/**'
+      - '.github/workflows/sharepass-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'hosted/**'
+      - 'android/**'
+      - '.github/workflows/sharepass-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sharepass-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hosted:
+    name: Hosted build and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosted
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Build and verify worker
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; if (JSON.parse(fs.readFileSync('../public-demo/.openai/hosting.json')).project_id) throw Error('Legacy demo must stay unbound')"
+          node scripts/build.mjs
+          node --check dist/server/index.js
+          node --test tests/*.test.mjs tests/*.test.cjs
+
+  android:
+    name: Android build, lint and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5
+      - name: Run web asset and boundary checks
+        run: |
+          npm run check
+          npm test
+      - name: Verify pinned Android SDK packages
+        run: |
+          sdk_root="${ANDROID_HOME:?Android SDK unavailable on the runner}"
+          if [[ ! -f "$sdk_root/platforms/android-37.0/android.jar" || ! -x "$sdk_root/build-tools/36.0.0/aapt2" ]]; then
+            manager="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit)"
+            test -x "$manager"
+            "$manager" --sdk_root="$sdk_root" --install 'platforms;android-37.0' 'build-tools;36.0.0'
+          fi
+          test -f "$sdk_root/platforms/android-37.0/android.jar"
+          test -x "$sdk_root/build-tools/36.0.0/aapt2"
+      - name: Build and lint unsigned APK with synthetic Firebase configuration
+        run: |
+          fixture="$RUNNER_TEMP/sharepass-firebase-fixture.json"
+          cat > "$fixture" <<'EOF'
+          {"project_info":{"project_number":"000000000000","project_id":"sharepass-ci-fixture"},"client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000","android_client_info":{"package_name":"in.sharepass.foundation"}},"api_key":[{"current_key":"synthetic-ci-value"}]}]}
+          EOF
+          bash ./gradlew --no-daemon "-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease
+      - name: Run native policy, pairing and pickup recovery tests
+        run: |
+          test_classes="$RUNNER_TEMP/sharepass-native-tests"
+          classes='android-app/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes'
+          sdk_jar="$ANDROID_HOME/platforms/android-37.0/android.jar"
+          mkdir -p "$test_classes"
+          test_sources=(tests/java/WhatsAppDraftTest.java tests/java/in/sharepass/foundation/*Test.java)
+          javac -cp "$classes:$sdk_jar" -d "$test_classes" "${test_sources[@]}"
+          for test_file in "${test_sources[@]}"; do
+            java -cp "$test_classes:$classes:$sdk_jar" "in.sharepass.foundation.$(basename "$test_file" .java)"
+          done
