@@ -77,15 +77,25 @@ async function guestReceiptSubscription(request,env,poster,origin){
     return json({enabled:false});
   }
   if(!webPushSettings(env))return error('Receipt alerts are unavailable.',503);
-  const row=await db.prepare("SELECT expires_at FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=? AND payload->>'intake_version'=2")
+  const row=await db.prepare("SELECT expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=? AND payload->>'intake_version'=2")
     .bind(workspace,booth,ticket).first();
-  const now=Date.now(),expires=row&&row.expires_at+QUEUE_RECOVERY_MS;
-  if(!expires||expires<=now)return boothMissing();
+  if(!row)return boothMissing();
+  const now=Date.now(),consentDeadline=now+QUEUE_LIFETIME_MS+QUEUE_RECOVERY_MS;
+  let expires=row.expires_at+QUEUE_RECOVERY_MS;
+  if(row.confirmed){
+    const current=await ledgerReceipt(db,workspace,'booth-'+ticket);
+    const deposit=current?.deposit;
+    if(!deposit||deposit.booth_id!==booth)return boothMissing();
+    if(!current.pending&&!Object.values(deposit.remaining).some(Boolean))return boothMissing();
+    expires=current.pending?consentDeadline:Math.min(deposit.code_expires_at,consentDeadline);
+  }
+  if(expires<=now)return boothMissing();
   await db.prepare('DELETE FROM sharepass_receipt_push WHERE expires_at<=?').bind(now).run();
   const saved=await db.prepare(`INSERT INTO sharepass_receipt_push(ticket,workspace,booth_id,endpoint,expires_at)
     SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM sharepass_web_push WHERE endpoint=?)
     AND NOT EXISTS(SELECT 1 FROM sharepass_receipt_push WHERE endpoint=? AND ticket<>?)
-    ON CONFLICT(ticket) DO UPDATE SET endpoint=excluded.endpoint WHERE workspace=excluded.workspace AND booth_id=excluded.booth_id`)
+    ON CONFLICT(ticket) DO UPDATE SET endpoint=excluded.endpoint,expires_at=excluded.expires_at
+    WHERE workspace=excluded.workspace AND booth_id=excluded.booth_id`)
     .bind(ticket,workspace,booth,endpoint.href,expires,endpoint.href,endpoint.href,ticket).run();
   return saved.meta.changes===1?json({enabled:true,expires_at:expires}):error('Use a separate receipt alert subscription.',409);
 }

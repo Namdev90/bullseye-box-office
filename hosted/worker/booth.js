@@ -71,7 +71,17 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   if(update===false)return error('Enter a valid address for your chosen pickup update channel.',400);
   const payload=JSON.stringify({...contact,quantities,recipients,...(update?{update}:{}),...(current?{intake_version:2}:{})});
   const now=Date.now(),expires=now+QUEUE_LIFETIME_MS;
-  await db.prepare('DELETE FROM sharepass_booth_queue WHERE expires_at<=?').bind(now-QUEUE_RECOVERY_MS).run();
+  // Confirmed receipts can outlive their intake. Wait for legacy import before pruning them.
+  await db.prepare(`DELETE FROM sharepass_booth_queue AS q WHERE q.expires_at<=? AND (q.confirmed=0 OR (
+    EXISTS(SELECT 1 FROM sharepass_ledger_ready m WHERE m.owner=q.workspace)
+    AND NOT EXISTS(
+      SELECT 1 FROM sharepass_ledger_requests r
+      JOIN sharepass_ledger_deposits d ON d.owner=r.owner AND d.id=r.deposit_id
+      WHERE r.owner=q.workspace AND r.id='booth-'||q.token AND d.booth=q.booth_id AND q.payload->>'intake_version'=2
+        AND (EXISTS(SELECT 1 FROM sharepass_ledger_collections c WHERE c.owner=d.owner AND c.deposit_id=d.id AND c.pending=1)
+          OR (d.payload->>'code_expires_at'>? AND EXISTS(
+            SELECT 1 FROM json_each(d.payload,'$.remaining') amount WHERE amount.type='integer' AND amount.value>0)))
+    )))`).bind(now-QUEUE_RECOVERY_MS,now).run();
   const inserted=await db.prepare(`INSERT OR IGNORE INTO sharepass_booth_queue(token,workspace,booth_id,submitted_at,expires_at,payload)
     SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>?)<120`)
     .bind(input.request_id,poster.workspace,poster.booth_id,now,expires,payload,poster.workspace,poster.booth_id,now).run();

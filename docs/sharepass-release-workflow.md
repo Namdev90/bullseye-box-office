@@ -1,6 +1,6 @@
 # SharePass checks and releases
 
-The repository contains the legacy prototype at its root, the hosted worker in `hosted/`, and the Android app in `android/`. The SharePass CI workflow checks the newer web and Android source on relevant pull requests and pushes to main. It can also run on demand. It uses a read-only repository token, synthetic Firebase configuration and an unsigned Android build. Deployment and distribution happen separately after approval. Build approved releases from the protected release workspace with the approved artwork and code catalogue. The public repository contains fixture versions of those inputs.
+The repository contains the legacy prototype at its root, the hosted worker in `hosted/`, and the Android app in `android/`. The SharePass CI workflow runs on pull requests and pushes to main when the hosted source, Android source, legacy Site template, or workflow changes. It can also run on demand. It uses a read-only repository token, synthetic Firebase configuration and an unsigned Android build. Deployment and distribution happen separately after approval. Build approved releases from the protected release workspace with the approved artwork and code catalogue. The public repository contains fixture versions of those inputs.
 
 ## Hosted website
 

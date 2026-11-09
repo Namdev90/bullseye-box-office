@@ -2,6 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
+  'X-SharePass-Version':'19',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -338,7 +339,7 @@ export default {async fetch(request,env,ctx){
       const body=validate(await bodyJson(request),path,staff.operator,staff.booth_id||'B1');
       if(!body||/^(?:booth|intake)-/i.test(body.request_id||''))return error('Review the required packet details and quantities.',400);
       const legacy=!!deviceToken&&!request.headers.has('X-SharePass-Client');
-      const result=await mutate(env.DB,staff.workspace,path,body,staff.admin,false,legacy,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+      const result=await mutate(env.DB,staff.workspace,path,body,staff.admin,false,legacy,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse,!!deviceToken);
       return /\/(release|handover)$/.test(path)?await guestReceiptResult(result,env,ctx,staff):result;
     }
     const asset=request.method==='GET'&&!path.endsWith('.html')&&decodeAsset(path);
