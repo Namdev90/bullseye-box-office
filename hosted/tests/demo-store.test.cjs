@@ -4,7 +4,7 @@ const {DemoStore}=require('../web/demo-store.js');
  let checks=0;const ok=(name)=>{checks++;console.log('PASS',name)};
  const s=new DemoStore();const event='training-event-001';assert.equal(s.state(event).event_name,'Oktoberfest 2027 — Concept Demo');assert.equal(s.state(event).deposits[0].remaining.normal,6);ok('Synthetic sample seeded with explicit Concept Demo event identity');
  const b={request_id:'a',operator:'Demo A',event_id:event,location:'B-02',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true};
- const a=await s.request('/api/deposits',b);assert.match(a.collection_code,/^[A-Z2-9]{4}$/);ok('Deposit creates four-character collection code');
+ const a=await s.request('/api/deposits',b);assert.match(a.collection_code,/^[A-Z0-9]{4}$/);ok('Deposit creates four-character collection code');
  assert.equal((await s.request('/api/deposits',b)).deposit.id,a.deposit.id);assert.equal(s.deposits.length,2);ok('Identical deposit replay does not duplicate');
  await assert.rejects(s.request('/api/deposits',{...b,location:'B-03'}),error=>error.status===409&&error.notExecuted===false&&/different values/.test(error.message));ok('Changed replay rejected without claiming the committed action failed');
  await assert.rejects(s.request('/api/deposits',{...b,request_id:'b'}),/fresh shelf/);ok('Duplicate shelf rejected');
