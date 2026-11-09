@@ -2,7 +2,7 @@
 **/build/
 local.properties
 .transfer/
-upstream/
+/upstream/
 verification/screenshots/
 *.jks
 *.keystore

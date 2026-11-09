@@ -1,7 +1,5 @@
 # SharePass documentation
 
-For the current hosted Worker, native Android source and release gates, start with the [source and release record](CURRENT_SOURCE.md). The handbook below documents the earlier practice implementations.
-
 SharePass is a physical-pass custody **training prototype** in the `bullseye-box-office` repository. Use synthetic passes and staff labels only. It does not sell tickets, validate admission or provide a production event service.
 
 This handbook describes default-branch source at [`4561791`](https://github.com/Namdev90/bullseye-box-office/commit/456179176674d8576c4ba25cb8ff3e07853fbbda), reviewed on **9 November 2026 (UTC)**. It adds navigation and implementation detail without replacing the existing safety and design records.
