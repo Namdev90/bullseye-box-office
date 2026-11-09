@@ -121,3 +121,7 @@ The redesigned public demo was tested in the actual in-app browser at desktop an
 - Verify branding, asset rights and license choice. No software license is implied by public source visibility.
 
 Only source, synthetic fixtures, tests and documentation belong in the public repository. Never publish runtime databases, verification keys, code captures, logs, backups, guest data or real-event screenshots. `.gitignore` is a guardrail, not a substitute for reviewing every published file.
+
+## Documentation handbook
+
+See the [documentation index](docs/README.md) for development commands, architecture, the local API, recovery operations, contribution guidance and a source-linked project history. The handbook distinguishes the reviewed `main` application from the separate unmerged Android-emulator preview in [draft PR #1](https://github.com/Namdev90/bullseye-box-office/pull/1).
