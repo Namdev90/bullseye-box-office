@@ -262,9 +262,12 @@ byId('queue-alerts').onclick=async()=>{
   }catch{status.textContent='Browser alerts could not be enabled. Use Refresh / reconnect.';}
 };
 
+let deskQrLoading=false;
 async function showDeskQr(){
   const tile=byId('desk-deposit-qr');
-  if(!matchMedia('(min-width:900px)').matches||tile.firstChild)return;
+  if(view!=='desk'||!staff||register||deskQrLoading||tile.firstChild||
+      getComputedStyle(tile).getPropertyValue('--desk-qr').trim()!=='block')return;
+  deskQrLoading=true;
   try{
     const poster=await fetchJson('/api/booth');
     if(view!=='desk'||register)return;
@@ -273,8 +276,10 @@ async function showDeskQr(){
     tile.replaceChildren(draft.qrImage(url.href,'QR for the customer deposit form'));
     tile.hidden=false;
   }catch{/* Open deposit remains available for retry. */}
+  finally{deskQrLoading=false;}
 }
-matchMedia('(min-width:900px)').addEventListener('change',()=>{if(view==='desk'&&!register)showDeskQr();});
+if('ResizeObserver' in window)new ResizeObserver(showDeskQr).observe(byId('desk'));
+else window.addEventListener('resize',showDeskQr);
 
 async function openBoothPoster(){
   const link=byId('poster-link');

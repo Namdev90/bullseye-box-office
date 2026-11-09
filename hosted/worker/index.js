@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'20',
+  'X-SharePass-Version':'21',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
