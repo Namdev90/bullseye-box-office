@@ -67,7 +67,7 @@ async function guestReceiptSubscription(request,env,poster,origin){
   const input=await bodyJson(request);
   const endpoint=validPushEndpoint(input?.endpoint);
   const ticket=input?.ticket,action=input?.action;
-  if(!endpoint||typeof ticket!=='string'||!intakeTokenPattern.test(ticket)||!['enable','stop'].includes(action)){
+  if(!endpoint||typeof ticket!=='string'||!intakeTokenPattern.test(ticket)||!['enable','stop','status'].includes(action)){
     return error('Open your receipt to manage its alerts.',400);
   }
   const db=env.DB,workspace=poster.workspace,booth=poster.booth_id;
@@ -79,7 +79,20 @@ async function guestReceiptSubscription(request,env,poster,origin){
   if(!webPushSettings(env))return error('Receipt alerts are unavailable.',503);
   const row=await db.prepare("SELECT expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=? AND payload->>'intake_version'=2")
     .bind(workspace,booth,ticket).first();
-  if(!row)return boothMissing();
+  if(!row)return action==='status'?json({enabled:false}):boothMissing();
+  if(action==='status'){
+    // Proof of an existing opt-in only. This action never creates or extends it.
+    const saved=await db.prepare('SELECT expires_at FROM sharepass_receipt_push WHERE workspace=? AND booth_id=? AND ticket=? AND endpoint=? AND expires_at>?')
+      .bind(workspace,booth,ticket,endpoint.href,Date.now()).first();
+    if(!saved)return json({enabled:false});
+    let expires=saved.expires_at;
+    if(row.confirmed){
+      const current=await ledgerReceipt(db,workspace,'booth-'+ticket);
+      if(!current?.deposit||current.deposit.booth_id!==booth)return json({enabled:false});
+      if(!current.pending)expires=Math.min(expires,current.deposit.code_expires_at);
+    }else expires=Math.min(expires,row.expires_at+QUEUE_RECOVERY_MS);
+    return expires>Date.now()?json({enabled:true,expires_at:expires}):json({enabled:false});
+  }
   const now=Date.now(),consentDeadline=now+QUEUE_LIFETIME_MS+QUEUE_RECOVERY_MS;
   let expires=row.expires_at+QUEUE_RECOVERY_MS;
   if(row.confirmed){
@@ -87,7 +100,7 @@ async function guestReceiptSubscription(request,env,poster,origin){
     const deposit=current?.deposit;
     if(!deposit||deposit.booth_id!==booth)return boothMissing();
     if(!current.pending&&!Object.values(deposit.remaining).some(Boolean))return boothMissing();
-    expires=current.pending?consentDeadline:Math.min(deposit.code_expires_at,consentDeadline);
+    expires=current.pending?Math.max(consentDeadline,deposit.code_expires_at):deposit.code_expires_at;
   }
   if(expires<=now)return boothMissing();
   await db.prepare('DELETE FROM sharepass_receipt_push WHERE expires_at<=?').bind(now).run();
@@ -99,11 +112,31 @@ async function guestReceiptSubscription(request,env,poster,origin){
     .bind(ticket,workspace,booth,endpoint.href,expires,endpoint.href,endpoint.href,ticket).run();
   return saved.meta.changes===1?json({enabled:true,expires_at:expires}):error('Use a separate receipt alert subscription.',409);
 }
+async function reconcileGuestReceiptConsent(db,staff,data){
+  const now=Date.now();
+  // Receipt consent follows its current code, but only while the saved opt-in is
+  // still live. Read the ledger here rather than trusting a delayed response.
+  // UPDATE cannot recreate stopped, pruned or expired subscriptions.
+  await db.prepare(`UPDATE sharepass_receipt_push AS p SET expires_at=max(p.expires_at,(
+    SELECT d.payload->>'code_expires_at' FROM sharepass_ledger_deposits d
+    WHERE d.owner=p.workspace AND d.id=? AND d.booth=p.booth_id
+  )) WHERE p.workspace=? AND p.booth_id=? AND p.expires_at>? AND EXISTS(
+    SELECT 1 FROM sharepass_ledger_requests r
+    JOIN sharepass_booth_queue q ON q.token=p.ticket AND q.workspace=p.workspace AND q.booth_id=p.booth_id
+    JOIN sharepass_ledger_deposits d ON d.owner=r.owner AND d.id=r.deposit_id AND d.booth=p.booth_id
+    WHERE r.owner=p.workspace AND r.id='booth-'||p.ticket AND r.deposit_id=?
+      AND q.confirmed=1 AND q.payload->>'intake_version'=2
+      AND d.payload->>'code_expires_at'>? AND d.payload->>'code_expires_at'>p.expires_at AND (
+        EXISTS(SELECT 1 FROM json_each(d.payload,'$.remaining') WHERE value>0)
+        OR EXISTS(SELECT 1 FROM sharepass_ledger_collections c WHERE c.owner=d.owner AND c.deposit_id=d.id AND c.pending=1)
+      )
+  )`).bind(data.deposit.id,staff.workspace,data.deposit.booth_id,now,data.deposit.id,now).run();
+}
 async function guestReceiptResult(result,env,ctx,staff){
   const config=webPushSettings(env);
   if(!config||!result.ok)return result;
   const data=await result.clone().json();
-  if(data.replayed||!data.deposit?.id)return result;
+  if(!data.deposit?.id)return result;
   const db=env.DB;
   const deliver=async()=>{
     const rows=await db.prepare(`SELECT p.ticket,p.endpoint FROM sharepass_ledger_requests r
@@ -114,6 +147,10 @@ async function guestReceiptResult(result,env,ctx,staff){
     await sendWebPush(config,rows.results,'sharepass-receipt',(endpoint,row)=>
       db.prepare('DELETE FROM sharepass_receipt_push WHERE ticket=? AND endpoint=?').bind(row.ticket,endpoint).run());
   };
+  // Reconcile separately from delivery, including replay after a prior
+  // post-commit failure. Only still-live consent can be repaired.
+  await reconcileGuestReceiptConsent(db,staff,data).catch(()=>{});
+  if(data.replayed)return result;
   const pending=deliver().catch(()=>{});
   if(typeof ctx?.waitUntil==='function')ctx.waitUntil(pending);
   else await pending;
