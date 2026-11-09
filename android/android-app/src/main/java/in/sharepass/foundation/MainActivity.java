@@ -9,11 +9,12 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.*;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.ByteArrayInputStream;
@@ -34,6 +35,7 @@ public final class MainActivity extends Activity {
     private static final String PUBLIC_SHOWCASE = "https://sharepass.example.test/staff";
     private boolean connectedShowcase;
     private WebView web;
+    private DeskWindow viewport;
     private final BackRequestGate backGate = new BackRequestGate();
     private AlertDialog exitDialog;
 
@@ -68,14 +70,7 @@ public final class MainActivity extends Activity {
         catch (RuntimeException failure) { showUnavailable(); return; }
         Matcher version = Pattern.compile("Chrome/(\\d+)").matcher(web.getSettings().getUserAgentString());
         if (!version.find() || Integer.parseInt(version.group(1)) < 109) { web.destroy(); web = null; showUnavailable(); return; }
-        FrameLayout frame = new FrameLayout(this);
-        frame.addView(web, new FrameLayout.LayoutParams(-1, -1));
-        frame.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets.consumeSystemWindowInsets();
-        });
-        setContentView(frame); frame.requestApplyInsets();
+        showSurface(web, 0);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(false);
@@ -152,11 +147,11 @@ public final class MainActivity extends Activity {
     }
 
     private void showOpening() {
-        int pad = DeskSurface.dp(this, 24);
+        int pad = DeskSurface.dp(this, 16);
         LinearLayout stage = new LinearLayout(this);
         stage.setOrientation(LinearLayout.VERTICAL);
         stage.setGravity(android.view.Gravity.CENTER);
-        stage.setBackground(DeskSurface.backdrop(this));
+        stage.setPadding(pad, pad, pad, pad);
         TextView masthead = new TextView(this);
         masthead.setText("BULLSEYE ENTERTAINMENT");
         masthead.setTextColor(DeskSurface.BRASS);
@@ -166,7 +161,13 @@ public final class MainActivity extends Activity {
         masthead.setGravity(android.view.Gravity.CENTER);
         masthead.setPadding(0, 0, 0, DeskSurface.dp(this, 10));
         stage.addView(masthead, new LinearLayout.LayoutParams(-1, -2));
-        ImageView artwork = new ImageView(this);
+        ImageView artwork = new ImageView(this) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), viewport.paneHeight(),
+                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 200));
+                super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+            }
+        };
         artwork.setContentDescription("SharePass by Bullseye Entertainment");
         artwork.setScaleType(ImageView.ScaleType.FIT_CENTER);
         try (java.io.InputStream image = getAssets().open("assets/sharepass-approved-logo.jpg")) {
@@ -174,7 +175,7 @@ public final class MainActivity extends Activity {
         } catch (IOException error) {
             artwork.setContentDescription("SharePass");
         }
-        LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-1, 0, 1);
+        LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-1, -2);
         stage.addView(artwork, art);
         LinearLayout pass = new LinearLayout(this);
         pass.setOrientation(LinearLayout.VERTICAL);
@@ -200,19 +201,24 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2);
         passLayout.topMargin = DeskSurface.dp(this, 12);
         stage.addView(pass, passLayout);
-        stage.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft()+pad, insets.getSystemWindowInsetTop()+pad,
-                insets.getSystemWindowInsetRight()+pad, insets.getSystemWindowInsetBottom()+pad);
-            return insets.consumeSystemWindowInsets();
-        });
-        setContentView(stage);
-        stage.requestApplyInsets();
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(stage);
+        showSurface(scroll, 560);
         if (Build.VERSION.SDK_INT >= 26 && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             artwork.setAlpha(0f);
             artwork.animate().alpha(1f).setDuration(380).start();
             pass.setTranslationY(DeskSurface.dp(this, 10));
             pass.animate().translationY(0).setDuration(280).start();
         }
+    }
+
+    private void showSurface(View content, int maxWidthDp) {
+        if (viewport == null) {
+            viewport = new DeskWindow(this);
+            setContentView(viewport);
+        }
+        viewport.show(content, maxWidthDp);
     }
 
     private static boolean isShowcaseOrigin(Uri uri) {
@@ -268,6 +274,9 @@ public final class MainActivity extends Activity {
     private void showUnavailable() {
         TextView notice = new TextView(this); notice.setTextColor(Color.WHITE); notice.setBackgroundColor(Color.rgb(37,37,32));
         notice.setPadding(36,80,36,36); notice.setText("SharePass Foundation could not open.\n\nUpdate Android System WebView / Chrome to version 109 or newer and reopen. This prototype resets its synthetic practice session after a process restart.");
-        setContentView(notice);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(notice);
+        showSurface(scroll, 560);
     }
 }

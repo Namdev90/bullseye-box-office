@@ -87,12 +87,13 @@ jobs:
           {"project_info":{"project_number":"000000000000","project_id":"sharepass-ci-fixture"},"client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000","android_client_info":{"package_name":"in.sharepass.foundation"}},"api_key":[{"current_key":"synthetic-ci-value"}]}]}
           EOF
           bash ./gradlew --no-daemon "-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease
-      - name: Run native policy, pairing and pickup recovery tests
+      - name: Run native policy, pairing, pickup recovery and window geometry tests
         run: |
           test_classes="$RUNNER_TEMP/sharepass-native-tests"
           classes='android-app/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes'
           sdk_jar="$ANDROID_HOME/platforms/android-37.0/android.jar"
           mkdir -p "$test_classes"
+          test -f tests/java/in/sharepass/foundation/DeskGeometryTest.java
           test_sources=(tests/java/WhatsAppDraftTest.java tests/java/in/sharepass/foundation/*Test.java)
           javac -cp "$classes:$sdk_jar" -d "$test_classes" "${test_sources[@]}"
           for test_file in "${test_sources[@]}"; do

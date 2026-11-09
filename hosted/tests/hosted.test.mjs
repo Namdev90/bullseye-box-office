@@ -206,7 +206,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'19');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'20');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));

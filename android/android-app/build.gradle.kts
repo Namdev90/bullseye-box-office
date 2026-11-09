@@ -52,8 +52,8 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 16
-        versionName = "0.9.6"
+        versionCode = 17
+        versionName = "0.9.7"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -74,8 +74,9 @@ android {
     }
 }
 
-if (firebaseConfig != null) {
-    dependencies {
+dependencies {
+    implementation("androidx.window:window-java:1.5.1")
+    if (firebaseConfig != null) {
         add("releaseImplementation", platform("com.google.firebase:firebase-bom:35.1.0"))
         add("releaseImplementation", "com.google.firebase:firebase-messaging")
     }

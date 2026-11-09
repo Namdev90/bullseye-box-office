@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>Account · SharePass</title>
 <link rel="stylesheet" href="/counter.css">
 <link rel="stylesheet" href="/admin.css">
@@ -122,7 +122,7 @@
         <div class="report-heading"><h2 tabindex="-1">Booth reports</h2><button type="button" class="info-trigger" aria-label="About booth report totals" data-info="Available passes are ready for pickup. Pending passes have been reserved for a handover. Handed over means staff confirmed physical delivery.">i</button></div>
         <p id="report-status" role="status"></p>
         <p id="report-storage"></p>
-        <div class="report-table"><table><caption>Pass totals by booth</caption><thead><tr>
+        <div class="report-table" tabindex="0" role="region" aria-label="Booth totals, scroll horizontally if needed"><table><caption>Pass totals by booth</caption><thead><tr>
           <th scope="col">Booth</th><th scope="col">Deposits</th><th scope="col">Received</th><th scope="col">Available</th><th scope="col">Pending</th><th scope="col">Handed over</th>
         </tr></thead><tbody id="report-rows"></tbody></table></div>
         <button type="button" id="refresh-report">Refresh report</button>

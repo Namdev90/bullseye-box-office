@@ -22,6 +22,7 @@ import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -51,6 +52,7 @@ public final class HostedDeskActivity extends Activity {
     private HostedRegisterClient client;
     private JSONObject context;
     private LinearLayout content;
+    private DeskWindow viewport;
     private TextView status;
     private WebView qr;
     private Runnable back;
@@ -66,6 +68,7 @@ public final class HostedDeskActivity extends Activity {
     private String deskCode = "";
     private EditText deskInput;
     private float deskTouchX, deskTouchY;
+    private boolean deskSwipeStarted;
     private final ArrayList<Recipient> recipients = new ArrayList<>();
     private String sharingCode;
 
@@ -223,21 +226,20 @@ public final class HostedDeskActivity extends Activity {
         back = goBack;
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackground(DeskSurface.backdrop(this));
         queueButton = null;
         queueRows = null;
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        int sidePadding = getResources().getConfiguration().screenWidthDp < 400 ? 14 : 22;
-        content.setPadding(dp(sidePadding), dp(12), dp(sidePadding), dp(24));
+        int sidePadding = dp(14);
+        content.setPadding(sidePadding, dp(12), sidePadding, dp(24));
         scroll.addView(content);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets.consumeSystemWindowInsets();
-        });
-        setContentView(scroll);
-        scroll.requestApplyInsets();
+        if (viewport == null) {
+            viewport = new DeskWindow(this);
+            setContentView(viewport);
+        }
+        viewport.show(scroll, 680);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);
         if (goBack != null) {
@@ -256,13 +258,17 @@ public final class HostedDeskActivity extends Activity {
         label.setTypeface(Typeface.DEFAULT_BOLD);
         label.setLetterSpacing(.12f);
         label.setPadding(goBack == null ? 0 : dp(12), 0, dp(12), 0);
+        int labelIndex = toolbar.getChildCount();
         toolbar.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        View spacer = new View(this);
+        spacer.setVisibility(View.GONE);
+        toolbar.addView(spacer, new LinearLayout.LayoutParams(0, 0, 1));
         if ("desk".equals(name)) {
             Button account = new Button(this);
             account.setText("Account");
             DeskSurface.button(account, false);
             account.setOnClickListener(view -> deskOptions());
-            toolbar.addView(account, new LinearLayout.LayoutParams(-2, dp(48)));
+            toolbar.addView(account, new LinearLayout.LayoutParams(-2, -2));
         } else if (!"opening".equals(name)) {
             Button help = new Button(this);
             help.setText("?");
@@ -272,7 +278,22 @@ public final class HostedDeskActivity extends Activity {
                 .setMessage(helpText(title, name)).setPositiveButton("Got it", null).show());
             toolbar.addView(help, new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
-        content.addView(toolbar);
+        header.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
+        header.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            boolean stacked = right - left < dp(260) || getResources().getConfiguration().fontScale > 1.3f;
+            if (stacked && label.getParent() == toolbar) {
+                toolbar.removeView(label);
+                spacer.setVisibility(View.VISIBLE);
+                label.setPadding(0, 0, 0, dp(8));
+                header.addView(label, 0, new LinearLayout.LayoutParams(-1, -2));
+            } else if (!stacked && label.getParent() == header) {
+                header.removeView(label);
+                spacer.setVisibility(View.GONE);
+                label.setPadding(goBack == null ? 0 : dp(12), 0, dp(12), 0);
+                toolbar.addView(label, labelIndex, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+        });
+        content.addView(header);
         content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(15)));
         TextView heading = line(title, 32, true);
         heading.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
@@ -497,8 +518,8 @@ public final class HostedDeskActivity extends Activity {
         collectTab.setSelected(collectPane);
         DeskSurface.button(depositTab, !collectPane);
         DeskSurface.button(collectTab, collectPane);
-        tabs.addView(depositTab, new LinearLayout.LayoutParams(0, dp(52), 1));
-        tabs.addView(collectTab, new LinearLayout.LayoutParams(0, dp(52), 1));
+        tabs.addView(depositTab, new LinearLayout.LayoutParams(0, -2, 1));
+        tabs.addView(collectTab, new LinearLayout.LayoutParams(0, -2, 1));
         depositTab.setOnClickListener(view -> switchDeskPane(false));
         collectTab.setOnClickListener(view -> switchDeskPane(true));
         content.addView(tabs);
@@ -540,7 +561,11 @@ public final class HostedDeskActivity extends Activity {
         if ("desk".equals(screen) && !busy && client!=null && !client.hasPending() && client.handover()==null) {
             if (event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                 deskTouchX=event.getX();deskTouchY=event.getY();
-            } else if (event.getActionMasked()==MotionEvent.ACTION_UP) {
+                deskSwipeStarted=viewport.contains(deskTouchX,deskTouchY);
+            } else if (event.getActionMasked()==MotionEvent.ACTION_CANCEL) {
+                deskSwipeStarted=false;
+            } else if (event.getActionMasked()==MotionEvent.ACTION_UP && deskSwipeStarted) {
+                deskSwipeStarted=false;
                 float dx=event.getX()-deskTouchX,dy=event.getY()-deskTouchY;
                 if (Math.abs(dx)>dp(64) && Math.abs(dx)>1.6f*Math.abs(dy) && (dx<0)!=collectPane) {
                     MotionEvent cancel=MotionEvent.obtain(event);
@@ -837,21 +862,14 @@ public final class HostedDeskActivity extends Activity {
         scheduleIntake(1000);
     }
     private void showQr(String value, String label) throws Exception {
-        qr = QrPreview.create(this, value, label);
+        qr = QrPreview.create(this, value, label, viewport::paneHeight);
         content.addView(qr, qrBounds());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private LinearLayout.LayoutParams qrBounds() {
-        int size = Math.min(dp(350), Math.min(getResources().getDisplayMetrics().widthPixels - dp(52),
-            getResources().getDisplayMetrics().heightPixels - dp(90)));
-        size = Math.max(dp(96), size);
-        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(size, size);
+        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, -2);
         bounds.gravity = android.view.Gravity.CENTER_HORIZONTAL;
         return bounds;
-    }
-    @Override public void onConfigurationChanged(android.content.res.Configuration configuration) {
-        super.onConfigurationChanged(configuration);
-        if (qr != null) qr.setLayoutParams(qrBounds());
     }
     private void scheduleIntake(long delay) {
         if (delay>=2000 && context!=null && context.optBoolean("push_first")) return;
@@ -1034,15 +1052,25 @@ public final class HostedDeskActivity extends Activity {
     private void drawKeypad(LinearLayout keypad, EditText input, boolean letters) {
         keypad.removeAllViews();
         String keys = letters ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "1234567890";
-        int columns = letters ? 5 : 3;
-        LinearLayout row = null;
+        int preferredColumns = letters ? 5 : 3;
+        GridLayout keysGrid = new GridLayout(this);
+        keysGrid.setColumnCount(preferredColumns);
+        keypad.addView(keysGrid, new LinearLayout.LayoutParams(-1, -2));
+        keysGrid.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            int columns = DeskGeometry.keypadColumns(right - left, dp(48), preferredColumns);
+            if (keysGrid.getColumnCount() == columns) return;
+            // Clear GridLayout's resolved indices before reducing its column count.
+            keysGrid.setColumnCount(GridLayout.UNDEFINED);
+            for (int i=0; i<keysGrid.getChildCount(); i++) keysGrid.getChildAt(i).setLayoutParams(keyBounds());
+            keysGrid.setColumnCount(columns);
+        });
         for (int i=0; i<keys.length(); i++) {
-            if (i%columns==0) { row=new LinearLayout(this);keypad.addView(row); }
             String key=keys.substring(i,i+1);
-            addKey(row,key,key,() -> {
+            Button button = keypadButton(key,key,() -> {
                 input.requestFocus();
                 if (input.length()<4) { input.append(key);input.setSelection(input.length()); }
             });
+            keysGrid.addView(button, keyBounds());
         }
         LinearLayout controls = new LinearLayout(this);
         keypad.addView(controls);
@@ -1052,13 +1080,23 @@ public final class HostedDeskActivity extends Activity {
             if (input.length()>0) input.getText().delete(input.length()-1,input.length());
         });
     }
+    private GridLayout.LayoutParams keyBounds() {
+        GridLayout.LayoutParams bounds = new GridLayout.LayoutParams();
+        bounds.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        bounds.width = 0;
+        bounds.height = dp(50);
+        return bounds;
+    }
     private void addKey(LinearLayout row, String key, String label, Runnable action) {
+        row.addView(keypadButton(key,label,action),new LinearLayout.LayoutParams(0,dp(50),1));
+    }
+    private Button keypadButton(String key, String label, Runnable action) {
         Button button = new Button(this);
         button.setText(key);
         button.setContentDescription(label);
         DeskSurface.button(button,false);
-        row.addView(button,new LinearLayout.LayoutParams(0,dp(50),1));
         button.setOnClickListener(view -> {if(!busy)action.run();});
+        return button;
     }
     private void prepare(JSONObject result, String code) throws Exception {
         JSONObject deposit = result.getJSONObject("deposit");
