@@ -206,6 +206,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'19');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -650,6 +651,80 @@ test('competing confirmation requests cannot both confirm the same physical hand
   }finally{f.close();}
 });
 
+test('a native device reconciles the same completed handover without writing or offering another physical pickup',async()=>{
+  const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'P-256'});
+  const pub=publicKey.export({format:'jwk'});
+  const vapid=Buffer.concat([Buffer.from([4]),Buffer.from(pub.x,'base64url'),Buffer.from(pub.y,'base64url')]).toString('base64url');
+  const scheduled=[];
+  const f=fixture({env:{SHAREPASS_WEB_PUSH_PRIVATE_JWK:JSON.stringify(privateKey.export({format:'jwk'})),
+    SHAREPASS_WEB_PUSH_PUBLIC_KEY:vapid},ctx:{waitUntil:work=>scheduled.push(work)}});
+  async function pair(label,verifier){
+    const invite=await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:label,device_label:label});
+    assert.equal(invite.status,200);
+    const paired=await f.call('/api/device/connect',{code:invite.body.code,verifier},'');
+    assert.equal(paired.status,200);
+    return {operator:paired.body.session_key,headers:{'X-SharePass-Session':verifier,'X-SharePass-Client':'0.9.6'}};
+  }
+  const native=(device,path,body)=>f.call(path,body,'','https://test.example',device.headers);
+  try{
+    const original=await pair('Fixture original operator','A'.repeat(43));
+    const peer=await pair('Fixture peer','B'.repeat(43));
+    const {body:created}=await f.call('/api/deposits',deposit);
+    const {body:claim}=await native(original,'/api/verify',{collection_code:created.collection_code});
+    const releasePath='/api/deposits/'+created.deposit.id+'/release';
+    const release={request_id:'old-native-release',claim_token:claim.claim_token,packet_id:created.deposit.packet_id,
+      version:claim.deposit.version,quantities:{normal:2,vip:1,vvip:0}};
+    const reserved=await native(original,releasePath,release);
+    assert.equal(reserved.status,200);
+    const collection=reserved.body.collection;
+    assert.equal((await native(original,releasePath,release)).body.replayed,true);
+    const confirmPath='/api/collections/'+collection.id+'/handover';
+    const confirm={request_id:'supervisor-handover',version:collection.version,handover_confirmed:true};
+    const committed=await f.call(confirmPath,confirm);
+    assert.equal(committed.status,200);
+    assert.equal(committed.body.collection.status,'HANDED_OVER');
+    await Promise.all(scheduled);
+    const priorAlerts=scheduled.length;
+    const snapshot=()=>f.sqlite.prepare(`SELECT d.revision,
+      (SELECT count(*) FROM sharepass_ledger_requests) AS requests,
+      (SELECT count(*) FROM sharepass_ledger_audit) AS audit
+      FROM sharepass_ledger_deposits d WHERE d.id=?`).get(created.deposit.id);
+    const originalState=snapshot();
+    const staleRelease=await native(original,releasePath,release);
+    assert.equal(staleRelease.status,409);
+    assert.equal(staleRelease.body.notExecuted,true);
+    assert.match(staleRelease.body.error,/Do not hand over the passes again/);
+    assert.equal((await native(original,confirmPath,{...confirm,request_id:release.request_id})).status,409);
+    const retry={...confirm,request_id:'native-saved-confirm'};
+    const recovered=await native(original,confirmPath,retry);
+    assert.equal(recovered.status,200);
+    assert.equal(recovered.body.replayed,true);
+    assert.equal(recovered.body.collection.id,collection.id);
+    assert.equal(recovered.body.collection.status,'HANDED_OVER');
+    assert.equal(recovered.body.collection.version,collection.version+1);
+    assert.deepEqual(recovered.body.deposit.remaining,{normal:2,vip:1,vvip:0});
+    assert.equal(recovered.body.deposit.pending_collection,null);
+    assert.equal(recovered.body.depositor_update,undefined);
+    assert.equal((await native(peer,confirmPath,{...retry,request_id:'peer-confirm'})).status,403);
+    assert.equal((await native(original,confirmPath,{...retry,version:collection.version+1})).status,409);
+    assert.equal((await native(original,'/api/collections/'+crypto.randomUUID()+'/handover',retry)).status,404);
+
+    const verifier='C'.repeat(43);
+    const challenge=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))).toString('hex');
+    assert.equal((await f.call('/api/mobile/authorize',{challenge})).status,200);
+    const supervisor=await native({headers:{'X-SharePass-Session':verifier}},confirmPath,{...retry,request_id:'native-admin-confirm'});
+    assert.equal(supervisor.status,200);
+    assert.equal(supervisor.body.replayed,true);
+
+    const setup=await f.call('/api/admin/setup',{action:'booth',name:'Other fixture booth',location:'Side door'});
+    const other=setup.body.booths.find(row=>row.name==='Other fixture booth');
+    f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run(other.id,original.operator);
+    assert.equal((await native(original,confirmPath,{...retry,request_id:'wrong-booth-confirm'})).status,409);
+    assert.deepEqual(snapshot(),originalState);
+    assert.equal(scheduled.length,priorAlerts);
+  }finally{await Promise.all(scheduled);f.close();}
+});
+
 test('failed legacy import rolls back every ledger row and does not fence the old snapshot',async()=>{
   const f=fixture();
   try{
@@ -758,6 +833,116 @@ test('a recycled code requires the new receipt and never redirects an old messag
     assert.equal((await reserve(current,lastClaim,1)).status,409);
     assert.equal((await reserve(current,lookup.body,1,old.packet_id)).status,400);
     assert.equal((await reserve(current,lookup.body,1)).status,200);
+  }finally{f.close();}
+});
+
+test('aged booth receipts retain live or pending custody and expire unused or finished receipts',async t=>{
+  const hour=60*60*1000,started=Date.now();
+  let now=started;
+  t.mock.method(Date,'now',()=>now);
+  const f=fixture();
+  try{
+    const poster=new URL((await f.call('/api/booth')).body.url).pathname,path='/api/public'+poster;
+    const quantities={normal:1,vip:0,vvip:0};
+    const draft={name:'Fixture guest',phone:'+12025550101',quantities,intake_version:2,
+      recipients:[{name:'Fixture collector',phone:'+12025550102',quantities}]};
+    const submit=async()=>{
+      const ticket=crypto.randomUUID();
+      assert.equal((await f.call(path,{...draft,request_id:ticket},'')).status,200);
+      return ticket;
+    };
+    const confirm=async(location,valid_minutes)=>{
+      const ticket=await submit();
+      const response=await f.call('/api/queue/'+ticket+'/confirm',{location,valid_minutes,custody_confirmed:true});
+      assert.equal(response.status,200);
+      return {ticket,...response.body};
+    };
+    const read=async ticket=>f.call(path+'?ticket='+ticket,undefined,'');
+    const reserve=async(data,id)=>{
+      const found=(await f.call('/api/verify',{collection_code:data.collection_code})).body;
+      const result=await f.call('/api/deposits/'+data.deposit.id+'/release',{
+        request_id:id,version:found.deposit.version,claim_token:found.claim_token,packet_id:data.deposit.packet_id,quantities
+      });
+      assert.equal(result.status,200);
+      return result.body.collection;
+    };
+    const handover=async(collection,id)=>f.call('/api/collections/'+collection.id+'/handover',{
+      request_id:id,version:collection.version,handover_confirmed:true
+    });
+    const unconfirmed=await submit();
+    const long=await confirm('Receipt-long',2880);
+    const refresh=await confirm('Receipt-refresh',1440);
+    const expired=await confirm('Receipt-expired',1440);
+    const finished=await confirm('Receipt-finished',2880);
+    const pending=await confirm('Receipt-pending',60);
+    const pendingCollection=await reserve(pending,'receipt-pending-reserve');
+    assert.equal((await handover(await reserve(finished,'receipt-finished-reserve'),'receipt-finished-handover')).status,200);
+    now=started+23*hour;
+    const renewed=await f.call('/api/codes/refresh',{
+      request_id:crypto.randomUUID(),collection_code:refresh.collection_code,packet_id:refresh.deposit.packet_id
+    });
+    assert.equal(renewed.status,200);
+    assert.notEqual(renewed.body.collection_code,refresh.collection_code);
+    now=started+27*hour;
+    await submit(); // Sweep on a different guest's new submission.
+    assert.equal((await read(long.ticket)).body.collection_code,long.collection_code);
+    assert.equal((await read(refresh.ticket)).body.collection_code,renewed.body.collection_code);
+    assert.deepEqual((await read(pending.ticket)).body,{status:'checking',queue_ref:pending.ticket.slice(-6).toUpperCase()});
+    for(const ticket of [unconfirmed,expired.ticket,finished.ticket])assert.equal((await read(ticket)).status,404);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,5);
+    assert.equal((await handover(pendingCollection,'receipt-pending-handover')).status,200);
+    now=started+48*hour;
+    await submit();
+    for(const ticket of [long.ticket,refresh.ticket,pending.ticket])assert.equal((await read(ticket)).status,404);
+  }finally{f.close();}
+});
+
+test('a retained active receipt can renew opt-in after its draft alert expires',async t=>{
+  const hour=60*60*1000,started=Date.now();
+  let now=started;
+  t.mock.method(Date,'now',()=>now);
+  const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const key=Buffer.from(await crypto.subtle.exportKey('raw',pair.publicKey)).toString('base64url');
+  const f=fixture({env:{SHAREPASS_WEB_PUSH_PUBLIC_KEY:key,SHAREPASS_WEB_PUSH_PRIVATE_JWK:JSON.stringify(await crypto.subtle.exportKey('jwk',pair.privateKey))}});
+  t.mock.method(globalThis,'fetch',async()=>new Response(null,{status:201}));
+  try{
+    const poster=new URL((await f.call('/api/booth')).body.url).pathname,path='/api/public'+poster;
+    const ticket=crypto.randomUUID(),quantities={normal:1,vip:0,vvip:0};
+    const draft={name:'Fixture guest',phone:'+12025550101',quantities,intake_version:2,request_id:ticket,
+      recipients:[{name:'Fixture collector',phone:'+12025550102',quantities}]};
+    assert.equal((await f.call(path,draft,'')).status,200);
+    const enable=async()=>f.call(path+'/alerts',{action:'enable',ticket,endpoint:'https://fcm.googleapis.com/fcm/send/aged-receipt-fixture'},'');
+    assert.equal((await enable()).body.expires_at,started+26*hour);
+    assert.equal((await f.call('/api/queue/'+ticket+'/confirm',{location:'Receipt-alert',valid_minutes:2880,custody_confirmed:true})).status,200);
+    now=started+hour;
+    assert.equal((await enable()).body.expires_at,started+27*hour);
+    assert.equal(f.sqlite.prepare('SELECT expires_at FROM sharepass_receipt_push WHERE ticket=?').get(ticket).expires_at,started+27*hour);
+    now=started+28*hour;
+    assert.equal((await f.call(path,{...draft,request_id:crypto.randomUUID()},'')).status,200);
+    assert.equal((await enable()).body.expires_at,started+48*hour);
+    now=started+48*hour;
+    assert.equal((await enable()).status,404);
+  }finally{f.close();}
+});
+
+test('aged confirmed queue rows wait for their workspace ledger import before pruning',async()=>{
+  const f=fixture();
+  try{
+    const poster=new URL((await f.call('/api/booth')).body.url).pathname,path='/api/public'+poster;
+    const confirmed=crypto.randomUUID(),unconfirmed=crypto.randomUUID();
+    const insert=f.sqlite.prepare('INSERT INTO sharepass_booth_queue(token,workspace,booth_id,submitted_at,expires_at,payload,confirmed) VALUES(?,?,?,?,?,?,?)');
+    insert.run(confirmed,'account-one','B1',0,0,'{}',1);
+    insert.run(unconfirmed,'account-one','B1',0,0,'{}',0);
+    const quantities={normal:1,vip:0,vvip:0};
+    const submit=()=>f.call(path,{name:'Fixture guest',phone:'+12025550101',quantities,intake_version:2,request_id:crypto.randomUUID(),
+      recipients:[{name:'Fixture collector',phone:'+12025550102',quantities}]},'');
+    const row=f.sqlite.prepare('SELECT confirmed FROM sharepass_booth_queue WHERE token=?');
+    assert.equal((await submit()).status,200);
+    assert.equal(row.get(confirmed).confirmed,1);
+    assert.equal(row.get(unconfirmed),undefined);
+    assert.equal((await f.call(state)).status,200);
+    assert.equal((await submit()).status,200);
+    assert.equal(row.get(confirmed),undefined);
   }finally{f.close();}
 });
 

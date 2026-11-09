@@ -114,7 +114,7 @@ async function ledgerVerify(db,owner,body,legacy,model){
   return writes[1].meta.changes===1?json(result):error('The balance changed. Verify the code again.',409);
 }
 
-async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false){
+async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false){
   await ensureLedger(db,owner);
   const model=ledgerModel();
   if(!model.booths.some(booth=>booth.id===body.booth_id)){
@@ -180,10 +180,32 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
     catch(exception){
       if(!exception.status)throw exception;
       if(!previous&&await read('SELECT id FROM sharepass_ledger_requests WHERE owner=? AND id=?',body.request_id))continue;
+      if(reconcileHandover&&!previous&&exception.status===409&&path.endsWith('/handover')){
+        // Read a single committed snapshot before clearing an old device's saved handover.
+        const completed=await ledgerStatement(db,`SELECT d.payload AS deposit,c.payload AS collection,
+          (SELECT payload FROM sharepass_ledger_collections WHERE owner=d.owner AND deposit_id=d.id AND pending=1) AS pending,
+          EXISTS(SELECT 1 FROM sharepass_ledger_requests WHERE owner=d.owner AND id=?) AS request_exists
+          FROM sharepass_ledger_collections c JOIN sharepass_ledger_deposits d ON d.owner=c.owner AND d.id=c.deposit_id
+          WHERE c.owner=? AND c.id=? AND c.booth=? AND d.booth=c.booth AND c.pending=0 AND d.event=?
+            AND c.payload->>'event_id'=d.event AND c.payload->>'status'='HANDED_OVER'
+            AND c.payload->>'version'=? AND (c.payload->>'created_by'=? OR ?)`,
+          body.request_id,owner,collectionId,body.booth_id,body.event_id,body.version+1,body.operator,Number(admin)).first();
+        if(completed?.request_exists)continue;
+        if(completed){
+          const handedOver=JSON.parse(completed.collection);
+          model.collections=completed.pending?[JSON.parse(completed.pending)]:[];
+          return json({deposit:model.publicDeposit(JSON.parse(completed.deposit)),collection:handedOver,replayed:true});
+        }
+      }
       if(exception.status===409&&body.request_id.startsWith('booth-')&&previous)return error('This deposit was already confirmed. Refresh the booth queue.',409);
       return error(exception.message,exception.status,exception.notExecuted!==false);
     }
-    if(result.replayed)return json(result);
+    if(result.replayed){
+      if(path.endsWith('/release')&&result.collection?.status==='HANDED_OVER'){
+        return error('This handover was already confirmed. Do not hand over the passes again.',409);
+      }
+      return json(result);
+    }
     const d=model.deposits.find(item=>item.id===result.deposit.id);
     const statements=[];
     if(row){

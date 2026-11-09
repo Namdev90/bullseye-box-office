@@ -5,12 +5,14 @@ on:
     paths:
       - 'hosted/**'
       - 'android/**'
+      - 'public-demo/.openai/hosting.json'
       - '.github/workflows/sharepass-ci.yml'
   push:
     branches: [main]
     paths:
       - 'hosted/**'
       - 'android/**'
+      - 'public-demo/.openai/hosting.json'
       - '.github/workflows/sharepass-ci.yml'
   workflow_dispatch:
 

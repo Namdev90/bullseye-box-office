@@ -34,3 +34,5 @@ Certificate SHA-256 for the review channel: `0a8b400966fd754c6db2b33b94f78c98988
 ## Release boundaries
 
 CI checks code, fixtures and unsigned builds. Hosted deploys and signed Android distribution require a separate approved release and readback. A passing fixture suite does not establish real phone behavior, production push delivery, cloud capacity or event readiness. Deferred design choices and physical-device checks remain separately tracked. The [release workflow](sharepass-release-workflow.md) describes how to record and verify subsequent releases.
+
+The v19 backend candidate includes the `X-SharePass-Version: 19` response header so release checks can distinguish the new worker at the live alias. An authorized native device can reconcile the exact previously completed handover without a new stock mutation or guest notification. A delayed release retry for already handed-over stock tells staff that the handover was already confirmed. Confirmed guest receipts and their opted-in alerts remain available for the active code lifetime, including extensions.
