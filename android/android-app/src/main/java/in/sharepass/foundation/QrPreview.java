@@ -10,9 +10,14 @@ import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.util.function.IntSupplier;
 
 final class QrPreview {
     static WebView create(Context context, String value, String label) throws Exception {
+        return create(context, value, label, null);
+    }
+
+    static WebView create(Context context, String value, String label, IntSupplier viewportHeight) throws Exception {
         String encoder;
         try (InputStream in = context.getAssets().open("vendor/sharepass-qr.js")) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -20,7 +25,15 @@ final class QrPreview {
             for (int n; (n = in.read(buffer)) != -1; ) out.write(buffer, 0, n);
             encoder = out.toString("UTF-8");
         }
-        WebView qr = new WebView(context);
+        WebView qr = viewportHeight == null ? new WebView(context) : new WebView(context) {
+            @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                int maxSize = DeskSurface.dp(context, 350);
+                int width = MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED ? maxSize : MeasureSpec.getSize(widthSpec);
+                int side = DeskGeometry.qrSize(width, viewportHeight.getAsInt(), maxSize);
+                int square = MeasureSpec.makeMeasureSpec(side, MeasureSpec.EXACTLY);
+                super.onMeasure(square, square);
+            }
+        };
         qr.setContentDescription(label);
         qr.setBackgroundColor(Color.WHITE);
         qr.getSettings().setJavaScriptEnabled(true);
