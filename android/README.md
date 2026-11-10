@@ -12,7 +12,7 @@ npm test
 ```
 
 `npm test` stays portable and does not require Java. CI's Java stage also
-generates two fixtures from the exact production updater/inset methods and runs
+generates three fixtures from the exact production updater/inset/staff-inbox methods and runs
 them with deterministic fake Android values and queues. To run those fixtures
 locally with a JDK, from this directory:
 
@@ -22,6 +22,7 @@ node tools/prepare-source-harnesses.mjs "$fixtures"
 javac -d "$fixtures/classes" android-app/src/main/java/in/sharepass/foundation/DeskGeometry.java "$fixtures"/*Test.java
 java -cp "$fixtures/classes" in.sharepass.foundation.AppUpdatesFocusTest
 java -cp "$fixtures/classes" in.sharepass.foundation.DeskWindowInsetsTest
+java -cp "$fixtures/classes" in.sharepass.foundation.StaffMessageInboxTest
 python3 -m unittest discover -s tests -p 'test_apk_assets.py'
 ```
 
@@ -58,3 +59,7 @@ Use `gradlew.bat` on Windows. The release build above is unsigned. The public cl
 For a private build, set `-PsharepassOrigin=https://your-authorized-site.example`. Optionally set `-PsharepassFirebaseConfig=/path/to/google-services.json` for the approved Firebase Android client. Use the private release workspace to provide the approved artwork and sign with the established SharePass review certificate. Keep the Firebase configuration, keystore, credentials and APKs out of Git.
 
 See the [release workflow](../docs/sharepass-release-workflow.md) for alignment, signing and distribution. The public CI build does not touch a phone or contact the live register.
+
+### Staff message inbox
+
+The Staff messages button lists the pending messages returned by the server, including ones deferred with Later or Back. The server currently returns the oldest 20; pagination beyond that batch is not provided. Select any listed message to reply; closing the list or a message sends nothing. Automatic prompts still show each message once per session, avoid unfinished code entry, and respect pending custody recovery and handovers. Selection and reply callbacks recheck session, foreground, busy state, current screen, custody, and expiry. The exact-source JVM fixture covers deferred-message access and stale/cancelled callbacks, but does not certify Android rendering, accessibility, or physical device behavior.

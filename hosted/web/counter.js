@@ -8,7 +8,8 @@ let receipt, match, pending, view, demoIndex = 0, timer, playing = false, busy =
 let intakeToken, intakeCounts, intakeView = 0;
 let queueToken, queueView=0, queueSignature, suggestion, refreshSequence=0, viewRevision=0;
 let staffMessages=[], openStaffMessage, replying=false;
-const seenStaffMessages=new Set();
+const seenStaffMessages=new Set(), uncertainStaffReplies=new Map();
+let staffMessageCursor;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -32,6 +33,7 @@ const wizards=Object.fromEntries(['queue-review','intake-review','deposit','coll
 
 function show(id){
   viewRevision++;
+  if(id!=='desk'&&byId('staff-message').open)byId('staff-message').close();
   if(view==='intake'){
     intakeView++;
   }
@@ -193,8 +195,21 @@ function request(path,body){
   return submit(action);
 }
 
+function clearLegacyStaffReply(){
+  if(recovery?.path!=='/api/staff-messages/reply')return false;
+  const {id,reply}=recovery.body||{};
+  setRecovery(null); // Replies never changed custody; do not replay old intent.
+  if(typeof id==='string'&&id&&['done','working','help'].includes(reply)){
+    uncertainStaffReplies.set(id,reply);
+  }
+  return true;
+}
+
 async function recover(){
   const action=recovery;
+  if(clearLegacyStaffReply()){
+    return refreshQueue(++queueView);
+  }
   if(action.path==='/api/codes/refresh')return recoverRefresh(action);
   const result=await submit(action);
   if(action.path==='/api/deposits'||action.path.endsWith('/confirm'))showReceipt(result,action.path.startsWith('/api/intakes/'));
@@ -251,36 +266,79 @@ async function refreshQueue(generation,manual=false){
 }
 
 function showStaffMessage(manual){
-  const message=staffMessages.find(item=>manual||!seenStaffMessages.has(item.id));
+  const cursor=staffMessages.findIndex(item=>item.id===staffMessageCursor);
+  const message=manual?staffMessages[(cursor+1)%staffMessages.length]:
+    staffMessages.find(item=>!seenStaffMessages.has(item.id));
   if(!message||register)return;
   const dialog=byId('staff-message');
-  if(view!=='desk'||recovery||busy||dialog.open||(!manual&&
-    (document.hidden||document.querySelector('dialog[open]')||byId('desk-code-form').elements.code.value)))return;
+  if(view!=='desk'||busy||replying||dialog.open||(!manual&&
+    (recovery||document.hidden||document.querySelector('dialog[open]')||byId('desk-code-form').elements.code.value)))return;
   openStaffMessage=message;
+  staffMessageCursor=message.id;
   seenStaffMessages.add(message.id);
   byId('staff-message-text').textContent=message.message;
-  byId('staff-message-status').textContent='';
+  renderStaffReplyChoices();
   dialog.showModal();
 }
+function renderStaffReplyChoices(){
+  const retry=uncertainStaffReplies.get(openStaffMessage?.id);
+  for(const choice of byId('staff-message').querySelectorAll('[data-staff-reply]')){
+    choice.disabled=Boolean(replying)||Boolean(retry&&retry!==choice.dataset.staffReply);
+  }
+  byId('staff-message-next').disabled=Boolean(replying)||staffMessages.length<2;
+  byId('staff-message-later').disabled=Boolean(replying);
+  byId('staff-message-status').textContent=retry?
+    'Reply not confirmed. Retry the same response to check it safely, or return later.':'';
+}
 byId('staff-message-open').onclick=()=>showStaffMessage(true);
+byId('staff-message-next').onclick=()=>{
+  if(replying)return;
+  byId('staff-message').close();
+  showStaffMessage(true);
+};
 byId('staff-message-later').onclick=()=>{if(!replying)byId('staff-message').close();};
 byId('staff-message').addEventListener('cancel',event=>{if(replying)event.preventDefault();});
 for(const button of document.querySelectorAll('[data-staff-reply]'))button.onclick=async()=>{
-  if(!openStaffMessage||replying)return;
-  replying=true;
-  const dialog=byId('staff-message');
-  const buttons=dialog.querySelectorAll('button');
-  for(const choice of buttons)choice.disabled=true;
+  const dialog=byId('staff-message'),message=openStaffMessage,reply=button.dataset.staffReply;
+  const previous=uncertainStaffReplies.get(message?.id);
+  if(!message||replying||register||view!=='desk'||!dialog.open||previous&&previous!==reply)return;
+  const attempt={session:staff,generation:viewRevision,message};
+  replying=attempt;
+  const current=()=>staff===attempt.session&&replying===attempt;
+  const visible=()=>current()&&viewRevision===attempt.generation&&view==='desk'&&dialog.open&&openStaffMessage===message&&!register;
+  renderStaffReplyChoices();
+  let refresh=false,conflict=false;
   try{
-    await request('/api/staff-messages/reply',{id:openStaffMessage.id,reply:button.dataset.staffReply});
-    dialog.close();
-    await refreshQueue(++queueView);
+    // This endpoint is idempotent by message, response and staff. Never place a
+    // reply in the custody journal, even when a custody action is already pending.
+    await fetchJson('/api/staff-messages/reply',{id:message.id,reply},AbortSignal.timeout(10000));
+    if(!current())return;
+    uncertainStaffReplies.delete(message.id);
+    staffMessages=staffMessages.filter(item=>item.id!==message.id);
+    if(visible()){dialog.close();refresh=true;}
   }catch(error){
-    byId('staff-message-status').textContent=error.message;
-    if(error.status===409)refreshQueue(++queueView);
+    if(!current())return;
+    // A later rejection does not prove an earlier uncertain attempt never landed.
+    if(!error.notExecuted||previous)uncertainStaffReplies.set(message.id,reply);
+    if(visible()){
+      renderStaffReplyChoices();
+      byId('staff-message-status').textContent=error.status===409?
+        'This message was already answered or expired. Refresh the inbox.':
+        uncertainStaffReplies.has(message.id)?'Reply not confirmed. Retry the same response to check it safely, or return later.':error.message;
+      if(error.status===409){dialog.close();refresh=true;conflict=true;}
+    }
   }finally{
-    replying=false;
-    for(const choice of buttons)choice.disabled=false;
+    if(current()){
+      replying=false;
+      // Do not overwrite an error or a newer dialog after an asynchronous result.
+      const status=byId('staff-message-status').textContent;
+      renderStaffReplyChoices();
+      byId('staff-message-status').textContent=status;
+      if(refresh)await refreshQueue(++queueView);
+      if(conflict&&staff===attempt.session&&viewRevision===attempt.generation&&view==='desk'&&!register){
+        byId('error').textContent='The message was already answered or expired. Check the inbox; no new reply was confirmed.';
+      }
+    }
   }
 };
 
@@ -824,6 +882,13 @@ for(const [id,action] of [['deposit-form',saveDeposit],['lookup-form',findPasses
   });
 }
 function ready(context){
+  if(byId('staff-message').open)byId('staff-message').close();
+  staffMessages=[];
+  openStaffMessage=undefined;
+  staffMessageCursor=undefined;
+  replying=false;
+  seenStaffMessages.clear();
+  uncertainStaffReplies.clear();
   staff=context;
   byId('admin-link').hidden=!staff.admin;
   if(staff.booth_label)byId('desk').querySelector('.eyebrow').textContent='SharePass · '+staff.booth_label;
@@ -838,6 +903,7 @@ function ready(context){
   };
   if(!staff.staff_label){show('profile');return;}
   recovery=JSON.parse(sessionStorage.getItem('sharepass-pending:'+staff.session_key)||'null');
+  clearLegacyStaffReply();
   intakeToken=sessionStorage.getItem('sharepass-intake:'+staff.session_key);
   show('desk');
 }
