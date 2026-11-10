@@ -312,7 +312,7 @@ public final class HostedDeskActivity extends Activity {
         });
         content.addView(header);
         content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(15)));
-        TextView heading = line(title, 32, true);
+        TextView heading = line(title, 30, true);
         heading.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
         if (!name.equals("share-qr") && !name.equals("opening") && Build.VERSION.SDK_INT >= 26
@@ -530,7 +530,6 @@ public final class HostedDeskActivity extends Activity {
             button("Resume handover", () -> handover(client.handover()), true);
             return;
         }
-        if (!boothLabel().isEmpty()) line(boothLabel(), 16, false);
         LinearLayout tabs = new LinearLayout(this);
         Button depositTab = new Button(this);
         Button collectTab = new Button(this);
@@ -538,21 +537,19 @@ public final class HostedDeskActivity extends Activity {
         collectTab.setText("Collect");
         depositTab.setSelected(!collectPane);
         collectTab.setSelected(collectPane);
-        DeskSurface.button(depositTab, !collectPane);
-        DeskSurface.button(collectTab, collectPane);
+        DeskSurface.button(depositTab, false);
+        DeskSurface.button(collectTab, false);
         tabs.addView(depositTab, new LinearLayout.LayoutParams(0, -2, 1));
         tabs.addView(collectTab, new LinearLayout.LayoutParams(0, -2, 1));
         depositTab.setOnClickListener(view -> switchDeskPane(false));
         collectTab.setOnClickListener(view -> switchDeskPane(true));
         content.addView(tabs);
-        button("Refresh / reconnect", this::refreshQueueNow, false);
         addStaffMessageButton();
-        content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(14)));
         if (collectPane) {
-            line("Collect passes", 27, true);
+            line("Collect passes", 23, true);
             collectionEntry(deskCode);
         } else {
-            line("Deposit passes", 27, true);
+            line("Deposit passes", 23, true);
             line("Let the depositor scan the form. Review it when it reaches the queue.", 16, false);
             LinearLayout depositView = content;
             int qrPosition = depositView.getChildCount();
@@ -573,6 +570,7 @@ public final class HostedDeskActivity extends Activity {
             queueButton = button(queueLabel(), this::queue, false);
             queueButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_ticket_layers, 0, 0, 0);
         }
+        button("Refresh / reconnect", this::refreshQueueNow, false);
         showStaffMessage(false);
     }
     private void switchDeskPane(boolean collecting) {
@@ -1066,17 +1064,19 @@ public final class HostedDeskActivity extends Activity {
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
                 button("Open depositor WhatsApp draft", () -> compose(
-                    update.optString("address"), update.optString("message")), true);
+                    update.optString("address"), update.optString("message")), false);
             }
             button("Done", this::desk, true);
         } else receipt(result);
     }
     private void receipt(JSONObject result) {
         page("Passes deposited", "receipt", this::desk);
-        line("Collection code", 16, false);
+        line("Collection code", 15, true);
         TextView code = line(result.optString("collection_code"), 44, true);
         code.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         code.setTextColor(DeskSurface.BRASS);
+        code.setBackground(DeskSurface.panel(this));
+        code.setPadding(dp(14), dp(9), dp(14), dp(9));
         JSONObject deposit = result.optJSONObject("deposit");
         line("Packet label · " + deposit.optString("packet_id"), 17, false);
         if (deposit.optLong("code_expires_at") > 0) {
@@ -1085,8 +1085,8 @@ public final class HostedDeskActivity extends Activity {
             line("Code expires " + time, 15, false);
         }
         JSONObject proof = result.optJSONObject("depositor_receipt");
-        if (proof != null) button("Send receipt to depositor", () -> compose(proof.optString("address"), proof.optString("message")), true);
         button("Share code", () -> sharing(result), true);
+        if (proof != null) button("Send receipt to depositor", () -> compose(proof.optString("address"), proof.optString("message")), false);
         button("Pickup updates", () -> pickupPreferences(result), false);
         if (context.optBoolean("ticket_receipts")) button("Refresh code", () -> refreshCode(result), false);
         button("Done", this::desk, false);
@@ -1249,7 +1249,9 @@ public final class HostedDeskActivity extends Activity {
     private void handover(JSONObject result) {
         JSONObject collection = result.optJSONObject("collection");
         page("Hand over passes", "handover", this::desk);
-        line(balance(collection.optJSONObject("quantities")), 21, true);
+        TextView quantities = line(balance(collection.optJSONObject("quantities")), 23, true);
+        quantities.setBackground(DeskSurface.panel(this));
+        quantities.setPadding(dp(14), dp(12), dp(14), dp(12));
         line("Confirm only after the collector has the passes. If they already received them, confirm without handing them over again.", 17, false);
         button("Confirm handover", () -> run(() -> client.stockChange("/api/collections/" + collection.getString("id") + "/handover",
             new JSONObject().put("version", collection.getInt("version")).put("handover_confirmed", true)), this::stockResult), true);
