@@ -106,7 +106,7 @@ test('Show WhatsApp QR opens the named recipient draft, navigates privately and 
   const label='Private WhatsApp QR for '+recipients[index].name;
   assert.equal(images[0].attributes.role,'img');
   assert.equal(images[0].attributes['aria-label'],label);
-  const expected=p.drafts.qrImage(p.drafts.depositDraft({...example,...recipients[index]}).url,label);
+  const expected=p.drafts.qrImage(p.drafts.depositDraft({...example,...recipients[index],scope:'group'}).url,label);
   assert.equal(images[0].querySelectorAll('path')[0].attributes.d,expected.querySelectorAll('path')[0].attributes.d);
   assert.equal(dialog.querySelectorAll('p')[0].textContent,'WhatsApp · '+recipients[index].name);
  }
