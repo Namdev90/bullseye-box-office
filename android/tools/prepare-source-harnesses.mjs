@@ -45,6 +45,11 @@ export function sourceHarnesses() {
     ['DeskWindowInsetsTest', 'DeskWindow', [
       'boolean contains(float x, float y)', 'private DeskGeometry.Area insets(int height)',
     ]],
+    ['StaffMessageInboxTest', 'HostedDeskActivity', [
+      'private boolean staffMessagesAllowed()', 'private JSONObject pendingStaffMessage(String id)',
+      'private void presentStaffDialog(AlertDialog next)', 'private void showStaffMessage(boolean manual)',
+      'private void openStaffMessage(String id, String session)', 'private static boolean validQueueToken(String token)',
+    ]],
   ].map(([name, production, signatures]) => {
     const source = readFileSync(join(root, 'android-app/src/main/java/in/sharepass/foundation', `${production}.java`), 'utf8');
     const template = readFileSync(join(root, 'tests/source-harnesses', `${name}.java.in`), 'utf8');

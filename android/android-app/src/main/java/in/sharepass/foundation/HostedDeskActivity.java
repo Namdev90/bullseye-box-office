@@ -733,29 +733,79 @@ public final class HostedDeskActivity extends Activity {
         staffMessageButton.setText("Staff messages (" + staffMessages.length() + ")");
     }
 
-    private void showStaffMessage(boolean manual) {
-        if (!foreground || busy || !hasWindowFocus() || !("desk".equals(screen) || "queue".equals(screen)) || staffMessageDialog != null
-                || client.hasPending() || client.handover() != null
-                || !manual && deskInput != null && deskInput.length() > 0) return;
+    private boolean staffMessagesAllowed() {
+        return foreground && !busy && ("desk".equals(screen) || "queue".equals(screen))
+            && !client.hasPending() && client.handover() == null;
+    }
+
+    private JSONObject pendingStaffMessage(String id) {
         for (int i = 0; i < staffMessages.length(); i++) {
             JSONObject message = staffMessages.optJSONObject(i);
-            if (message == null || message.optLong("expires_at") <= System.currentTimeMillis()) continue;
-            String id = message.optString("id");
-            if (!validQueueToken(id) || !manual && seenStaffMessages.contains(id)) continue;
-            seenStaffMessages.add(id);
-            String[] replies = {"done", "working", "help"};
-            staffMessageDialog = new AlertDialog.Builder(this).setTitle("Message from admin\n\n" + message.optString("message"))
-                .setItems(new String[]{"Done", "Working on it", "Need help"}, (dialog, choice) ->
-                    run(() -> client.request("/api/staff-messages/reply",
-                        new JSONObject().put("id", id).put("reply", replies[choice])), result -> {
-                            note("Reply sent.");
-                            scheduleQueue(0);
-                        }))
-                .setNegativeButton("Later", null).create();
-            staffMessageDialog.setOnDismissListener(dialog -> staffMessageDialog = null);
-            staffMessageDialog.show();
-            return;
+            if (message != null && validQueueToken(id) && id.equals(message.optString("id"))
+                    && message.optLong("expires_at") > System.currentTimeMillis()) return message;
         }
+        return null;
+    }
+
+    private void presentStaffDialog(AlertDialog next) {
+        staffMessageDialog = next;
+        next.setOnDismissListener(dialog -> {
+            if (staffMessageDialog == next) staffMessageDialog = null;
+        });
+        next.show();
+    }
+
+    private void showStaffMessage(boolean manual) {
+        if (!staffMessagesAllowed() || !hasWindowFocus() || staffMessageDialog != null
+                || !manual && deskInput != null && deskInput.length() > 0) return;
+        String session = client.token();
+        ArrayList<String> ids = new ArrayList<>();
+        ArrayList<String> labels = new ArrayList<>();
+        for (int i = 0; i < staffMessages.length(); i++) {
+            JSONObject message = staffMessages.optJSONObject(i);
+            if (message == null) continue;
+            String id = message.optString("id");
+            if (pendingStaffMessage(id) == null) continue;
+            if (!manual) {
+                if (seenStaffMessages.contains(id)) continue;
+                openStaffMessage(id, session);
+                return;
+            }
+            ids.add(id);
+            labels.add(message.optString("message"));
+        }
+        if (!manual) return;
+        if (ids.isEmpty()) { note("No pending staff messages."); return; }
+        presentStaffDialog(new AlertDialog.Builder(this).setTitle("Pending staff messages")
+            .setItems(labels.toArray(new String[0]), (dialog, choice) -> {
+                if (dialog != staffMessageDialog) return;
+                // Dismiss the picker before opening the chosen message. Its delayed
+                // dismiss callback must not clear the new dialog's ownership.
+                dialog.dismiss();
+                openStaffMessage(ids.get(choice), session);
+            }).setNegativeButton("Close", null).create());
+    }
+
+    private void openStaffMessage(String id, String session) {
+        if (!staffMessagesAllowed() || !session.equals(client.token())) return;
+        JSONObject message = pendingStaffMessage(id);
+        if (message == null) { note("This staff message is no longer pending."); return; }
+        seenStaffMessages.add(id);
+        String[] replies = {"done", "working", "help"};
+        presentStaffDialog(new AlertDialog.Builder(this).setTitle("Message from admin\n\n" + message.optString("message"))
+            .setItems(new String[]{"Done", "Working on it", "Need help"}, (dialog, choice) -> {
+                if (dialog != staffMessageDialog || !staffMessagesAllowed() || !session.equals(client.token())) return;
+                if (pendingStaffMessage(id) == null) {
+                    note("This staff message is no longer pending.");
+                    return;
+                }
+                run(() -> client.request("/api/staff-messages/reply",
+                    new JSONObject().put("id", id).put("reply", replies[choice])), result -> {
+                        if (!staffMessagesAllowed() || !session.equals(client.token())) return;
+                        note("Reply sent.");
+                        scheduleQueue(0);
+                    });
+            }).setNegativeButton("Later", null).create());
     }
     private static boolean validQueueToken(String token) { return token.matches("[a-f0-9-]{36}"); }
     private boolean notificationsAllowed() {

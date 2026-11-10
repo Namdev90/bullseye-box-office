@@ -1,0 +1,174 @@
+package in.sharepass.foundation;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.function.Consumer;
+
+/** Exact Activity inbox methods; lightweight dialog/client doubles, no Android UI or network. */
+public final class StaffMessageInboxTest {
+    static final String FIRST = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    static final String SECOND = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    static final class JSONObject extends HashMap<String, Object> {
+        public JSONObject put(String key, Object value) { super.put(key, value); return this; }
+        String optString(String key) { return String.valueOf(getOrDefault(key, "")); }
+        long optLong(String key) { return ((Number) getOrDefault(key, 0L)).longValue(); }
+    }
+    static final class JSONArray extends ArrayList<JSONObject> {
+        int length() { return size(); }
+        JSONObject optJSONObject(int i) { return get(i); }
+    }
+    interface Click { void click(AlertDialog dialog, int choice); }
+    static final class AlertDialog {
+        String title, negative;
+        String[] items;
+        Click click;
+        Consumer<AlertDialog> dismissListener;
+        boolean shown, dismissed;
+        void setOnDismissListener(Consumer<AlertDialog> listener) { dismissListener = listener; }
+        void show() { shown = true; }
+        // Android can deliver OnDismiss after a replacement dialog is created.
+        void dismiss() { dismissed = true; }
+        void deliverDismiss() { if (dismissListener != null) dismissListener.accept(this); }
+        void choose(int index) { click.click(this, index); dismiss(); }
+        static final class Builder {
+            final AlertDialog dialog = new AlertDialog();
+            Builder(StaffMessageInboxTest owner) {}
+            Builder setTitle(String title) { dialog.title = title; return this; }
+            Builder setItems(String[] labels, Click callback) { dialog.items = labels; dialog.click = callback; return this; }
+            Builder setNegativeButton(String label, Click callback) { dialog.negative = label; return this; }
+            AlertDialog create() { return dialog; }
+        }
+    }
+    static final class Client {
+        boolean pending;
+        Object handover;
+        String session = "synthetic-session";
+        final ArrayList<JSONObject> replies = new ArrayList<>();
+        boolean hasPending() { return pending; }
+        Object handover() { return handover; }
+        String token() { return session; }
+        Object request(String path, JSONObject body) {
+            require(path.equals("/api/staff-messages/reply"), "Inbox must not mutate custody");
+            replies.add(body); return null;
+        }
+    }
+    interface Work { Object run(); }
+    final Client client = new Client();
+    boolean foreground = true, busy, focus = true;
+    String screen = "desk", deskInput;
+    JSONArray staffMessages = new JSONArray();
+    final HashSet<String> seenStaffMessages = new HashSet<>();
+    AlertDialog staffMessageDialog;
+    int refreshes;
+    String lastNote;
+    boolean hasWindowFocus() { return focus; }
+    void note(String text) { lastNote = text; }
+    void scheduleQueue(long delay) { require(delay == 0, "Refresh immediately"); refreshes++; }
+    boolean delayCompletion;
+    Runnable completion;
+    void run(Work work, Consumer<Object> done) {
+        if (busy) return;
+        busy = true;
+        Object result = work.run();
+        completion = () -> { busy = false; done.accept(result); };
+        if (!delayCompletion) completion.run();
+    }
+
+    /* PRODUCTION_METHODS */
+
+    static void require(boolean value, String label) { if (!value) throw new AssertionError(label); }
+    static JSONObject message(String id) {
+        return new JSONObject().put("id", id).put("message", "Synthetic " + id)
+            .put("expires_at", System.currentTimeMillis() + 60000);
+    }
+    static StaffMessageInboxTest fixture() {
+        var p = new StaffMessageInboxTest(); p.staffMessages.add(message(FIRST)); p.staffMessages.add(message(SECOND)); return p;
+    }
+    void close() { var old = staffMessageDialog; old.dismiss(); old.deliverDismiss(); }
+    void selectSecond() {
+        showStaffMessage(true);
+        var picker = staffMessageDialog;
+        require(picker.items.length == 2, "Every pending message is selectable");
+        focus = false; // Activity loses window focus while its modal has focus.
+        picker.choose(1);
+        var detail = staffMessageDialog;
+        require(detail != picker && detail.title.contains(SECOND), "Second pending message opens directly");
+        picker.deliverDismiss();
+        picker.choose(0);
+        require(staffMessageDialog == detail, "Late picker dismissal cannot clear the detail");
+    }
+    public static void main(String[] args) {
+        var p = fixture();
+        p.showStaffMessage(false); require(p.staffMessageDialog.title.contains(FIRST), "Auto opens oldest unseen");
+        require("Later".equals(p.staffMessageDialog.negative), "Later is a dismiss-only action"); p.close();
+        p.showStaffMessage(false); require(p.staffMessageDialog.title.contains(SECOND), "Auto advances unseen messages"); p.close();
+        p.showStaffMessage(false); require(p.staffMessageDialog == null, "Deferred messages do not nag");
+        p.selectSecond(); p.staffMessageDialog.choose(2);
+        require(p.client.replies.size() == 1 && SECOND.equals(p.client.replies.get(0).optString("id"))
+            && "help".equals(p.client.replies.get(0).optString("reply")), "Reply targets second without a false first reply");
+        require(p.refreshes == 1, "Successful reply refreshes queue");
+        p.busy = true; p.staffMessageDialog.choose(2); require(p.client.replies.size() == 1, "Busy blocks repeated reply");
+
+        p = fixture(); p.showStaffMessage(true); var cancelledPicker = p.staffMessageDialog; p.close();
+        cancelledPicker.choose(1);
+        require(p.staffMessageDialog == null, "Cancelled picker callback cannot reopen a dialog");
+        require(p.seenStaffMessages.isEmpty() && p.client.replies.isEmpty(), "Picker close/back/cancel changes no message");
+        p.showStaffMessage(true); p.staffMessageDialog.choose(0); p.close(); p.focus = true; p.selectSecond(); p.close();
+        require(p.client.replies.isEmpty(), "Later/back/cancel never send acknowledgements");
+        p.focus = true; p.showStaffMessage(true); require(p.staffMessageDialog.items.length == 2, "Dismissed messages remain reachable");
+
+        for (int guard = 0; guard < 7; guard++) {
+            p = fixture(); p.selectSecond();
+            switch (guard) {
+                case 0 -> p.busy = true;
+                case 1 -> p.foreground = false;
+                case 2 -> p.screen = "handover";
+                case 3 -> p.client.pending = true;
+                case 4 -> p.client.handover = new Object();
+                case 5 -> p.client.session = "different-session";
+                case 6 -> p.staffMessages.clear();
+            }
+            p.staffMessageDialog.choose(0);
+            require(p.client.replies.isEmpty(), "Reply rechecks busy, lifecycle, custody, session and latest pending state " + guard);
+        }
+        for (int guard = 0; guard < 7; guard++) {
+            p = fixture(); p.showStaffMessage(true); var picker = p.staffMessageDialog;
+            switch (guard) {
+                case 0 -> p.busy = true;
+                case 1 -> p.foreground = false;
+                case 2 -> p.screen = "handover";
+                case 3 -> p.client.pending = true;
+                case 4 -> p.client.handover = new Object();
+                case 5 -> p.client.session = "different-session";
+                case 6 -> p.staffMessages.clear();
+            }
+            picker.choose(1); picker.deliverDismiss();
+            require(p.staffMessageDialog == null && p.seenStaffMessages.isEmpty(), "Stale picker cannot open or consume message " + guard);
+        }
+        p = fixture(); p.selectSecond(); var cancelledDetail = p.staffMessageDialog; p.close();
+        cancelledDetail.choose(0); require(p.client.replies.isEmpty(), "Cancelled detail callback cannot send a reply");
+        for (int guard = 0; guard < 3; guard++) {
+            p = fixture(); p.selectSecond(); p.delayCompletion = true; p.staffMessageDialog.choose(0);
+            switch (guard) {
+                case 0 -> p.foreground = false;
+                case 1 -> p.client.session = "different-session";
+                case 2 -> p.screen = "handover";
+            }
+            p.completion.run();
+            require(p.refreshes == 0 && !"Reply sent.".equals(p.lastNote), "Delayed success cannot update a different context " + guard);
+        }
+        p = fixture(); p.staffMessages.get(0).put("expires_at", 0L); p.staffMessages.get(1).put("id", "invalid");
+        p.staffMessages.add(null); p.showStaffMessage(true);
+        require(p.staffMessageDialog == null && p.lastNote.contains("No pending"), "Invalid/expired messages are not selectable");
+        p = fixture(); p.selectSecond(); p.staffMessages.get(1).put("expires_at", 0L); p.staffMessageDialog.choose(0);
+        require(p.client.replies.isEmpty(), "Expiry is rechecked at reply time");
+        p = fixture(); p.deskInput = "unfinished code"; p.showStaffMessage(false);
+        require(p.staffMessageDialog == null, "Automatic prompt cannot interrupt code entry");
+        p.showStaffMessage(true); require(p.staffMessageDialog != null, "Manual inbox remains available during code entry");
+        p = fixture(); p.focus = false; p.showStaffMessage(true); require(p.staffMessageDialog == null, "No prompt over other windows");
+        p = fixture(); p.showStaffMessage(true); var first = p.staffMessageDialog; p.showStaffMessage(true);
+        require(p.staffMessageDialog == first, "Repeated open cannot stack inboxes");
+        System.out.println("StaffMessageInboxTest passed (exact-source JVM callbacks; not Android UI acceptance)");
+    }
+}
