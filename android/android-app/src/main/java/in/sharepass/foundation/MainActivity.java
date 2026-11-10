@@ -150,24 +150,13 @@ public final class MainActivity extends Activity {
     }
 
     private void showOpening() {
-        int pad = DeskSurface.dp(this, 16);
+        int gap = DeskSurface.dp(this, 8);
         LinearLayout stage = new LinearLayout(this);
         stage.setOrientation(LinearLayout.VERTICAL);
-        stage.setGravity(android.view.Gravity.CENTER);
-        stage.setPadding(pad, pad, pad, pad);
-        TextView masthead = new TextView(this);
-        masthead.setText("BULLSEYE ENTERTAINMENT");
-        masthead.setTextColor(DeskSurface.BRASS);
-        masthead.setTextSize(11);
-        masthead.setLetterSpacing(.12f);
-        masthead.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        masthead.setGravity(android.view.Gravity.CENTER);
-        masthead.setPadding(0, 0, 0, DeskSurface.dp(this, 10));
-        stage.addView(masthead, new LinearLayout.LayoutParams(-1, -2));
         ImageView artwork = new ImageView(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), viewport.paneHeight(),
-                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 240));
+                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 210));
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
             }
         };
@@ -182,6 +171,7 @@ public final class MainActivity extends Activity {
         stage.addView(artwork, art);
         LinearLayout pass = new LinearLayout(this);
         pass.setOrientation(LinearLayout.VERTICAL);
+        pass.setGravity(android.view.Gravity.CENTER_VERTICAL);
         pass.setBackground(DeskSurface.panel(this));
         pass.setPadding(DeskSurface.dp(this, 14), DeskSurface.dp(this, 10), DeskSurface.dp(this, 14), DeskSurface.dp(this, 14));
         TextView caption = new TextView(this);
@@ -199,7 +189,7 @@ public final class MainActivity extends Activity {
         DeskSurface.button(open, true);
         open.setOnClickListener(view -> startActivity(new android.content.Intent(this, HostedDeskActivity.class)));
         LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-1, -2);
-        action.topMargin = DeskSurface.dp(this, 8);
+        action.topMargin = gap;
         pass.addView(open, action);
         updates = new AppUpdates(this, () -> true);
         if (updates.isEnabled()) {
@@ -207,10 +197,12 @@ public final class MainActivity extends Activity {
             updatesButton.setText("App updates");
             DeskSurface.button(updatesButton, false);
             updatesButton.setOnClickListener(view -> updates.options());
-            pass.addView(updatesButton, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout.LayoutParams updateAction = new LinearLayout.LayoutParams(-1, -2);
+            updateAction.topMargin = gap;
+            pass.addView(updatesButton, updateAction);
         }
-        LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2);
-        passLayout.topMargin = DeskSurface.dp(this, 12);
+        LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2, 1f);
+        passLayout.setMargins(gap, gap, gap, gap);
         stage.addView(pass, passLayout);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
