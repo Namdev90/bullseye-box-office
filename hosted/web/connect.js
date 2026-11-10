@@ -3,8 +3,9 @@ const form=document.getElementById('connect-form');
 const code=document.getElementById('setup-code');
 const submit=document.getElementById('connect-submit');
 const errorLine=document.getElementById('connect-error');
-const invite=new URLSearchParams(location.search).get('invite');
-const hasInvite=/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(invite||'');
+const inviteParams=new URLSearchParams(location.search);
+const invites=inviteParams.getAll('invite'),invite=invites[0];
+const hasInvite=invites.length===1&&[...inviteParams.keys()].every(key=>key==='invite')&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(invite||'');
 let attempt;
 
 if(hasInvite){

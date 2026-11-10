@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'21',
+  'X-SharePass-Version':'22',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -140,7 +140,14 @@ export default {async fetch(request,env,ctx){
       if(session){owner=session.id;email=session.email;passwordOwner=true;}
     }
     if(request.method==='GET'&&(path==='/'||path==='/index.html'))return page('/opening.html');
-    if(path==='/connect'&&request.method==='GET')return page('/connect.html');
+    if(path==='/.well-known/assetlinks.json'&&request.method==='GET'){
+      return json([{
+        relation:['delegate_permission/common.handle_all_urls'],
+        target:{namespace:'android_app',package_name:'in.sharepass.foundation',
+          sha256_cert_fingerprints:['0A:8B:40:09:66:FD:75:4C:6D:B2:B3:3B:94:F7:8C:98:98:80:3A:FF:37:71:8F:A3:4C:34:AE:F7:7B:64:2C:12']}
+      }]);
+    }
+    if((path==='/connect'||path==='/app-setup')&&request.method==='GET')return page('/connect.html');
     if(path==='/disconnect'&&request.method==='GET'){
       return new Response(null,{status:302,headers:{...security,Location:'/connect','Set-Cookie':staffCookieHeader('',0)}});
     }

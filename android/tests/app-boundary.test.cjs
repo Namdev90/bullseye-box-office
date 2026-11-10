@@ -5,7 +5,9 @@ const root=path.join(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 test('Android launcher opens a native desk with internet and optional notifications',()=>{
  const manifest=read('android-app/src/main/AndroidManifest.xml');
- assert.deepEqual([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match=>match[1]),['android.permission.INTERNET','android.permission.POST_NOTIFICATIONS']);
+ assert.deepEqual([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match=>match[1]),['android.permission.INTERNET','android.permission.POST_NOTIFICATIONS','android.permission.REQUEST_INSTALL_PACKAGES']);
+ assert(manifest.includes('android:autoVerify="true"')&&manifest.includes('android:path="/app-setup"'));
+ assert(manifest.includes('android:authorities="${applicationId}.updates" android:exported="false"'));
  assert(manifest.includes('android:allowBackup="false"'));
  assert(manifest.includes('android:usesCleartextTraffic="false"'));
  const host=read('android-app/src/main/java/in/sharepass/foundation/MainActivity.java');
@@ -23,6 +25,7 @@ test('Android launcher opens a native desk with internet and optional notificati
  assert(!manifest.includes('android.permission.SEND_SMS'));
  assert(desk.includes('client.connectDevice("code", value)'));
  assert(host.includes('HostedRegisterClient.setupInvite(incoming.toString())'));
+ assert(host.includes('"/app-setup".equals(incoming.getEncodedPath())'));
  assert(desk.includes('page("Pass desk"'));
  assert(desk.includes('I received the passes'));
  assert(desk.includes('"/api/intakes/" + token + "/confirm"'));

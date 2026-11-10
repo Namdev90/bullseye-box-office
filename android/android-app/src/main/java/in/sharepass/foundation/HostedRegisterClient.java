@@ -72,7 +72,8 @@ final class HostedRegisterClient {
         try {
             URI url = URI.create(value);
             String query = url.getRawQuery();
-            boolean httpsLink = value.startsWith(ORIGIN + "/connect?") && "/connect".equals(url.getPath());
+            boolean httpsLink = value.startsWith(ORIGIN + "/connect?") && "/connect".equals(url.getRawPath())
+                || value.startsWith(ORIGIN + "/app-setup?") && "/app-setup".equals(url.getRawPath());
             boolean appLink = value.startsWith("sharepass://connect?") && "connect".equals(url.getRawAuthority()) && url.getPath().isEmpty();
             if ((!httpsLink && !appLink) || url.getFragment() != null || query == null
                     || !query.matches("invite=[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) return "";

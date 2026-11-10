@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>SharePass · Bullseye Entertainment</title>
 <link rel="stylesheet" href="/counter.css">
+<link rel="manifest" href="/staff.webmanifest">
+<link rel="apple-touch-icon" href="/assets/desk-icon-192.png">
 </head>
 <body><div class="shell" id="shell">
   <header>
     <button class="home" id="home">← Desk</button>
-    <details id="menu"><summary>Account</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo">Run demo</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a></div></details>
+    <details id="menu"><summary>Account</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo">Run demo</button><button id="install-staff-desk" hidden>Install staff desk</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a></div></details>
   </header>
   <div class="demo-bar" id="demo-bar" hidden>
     <span>Demo register</span><button id="pause">Pause</button><button id="replay">Replay</button><button id="leave">Exit demo</button>
@@ -166,4 +168,5 @@
 <script defer src="/phone.js"></script><script defer src="/steps.js"></script>
 <script defer src="/share-drafts.js"></script>
 <script defer src="/info.js"></script>
-<script defer src="/counter.js"></script></body></html>
+<script defer src="/counter.js"></script>
+<script defer src="/staff-install.js"></script></body></html>

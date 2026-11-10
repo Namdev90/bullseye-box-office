@@ -53,6 +53,7 @@ public final class HostedDeskActivity extends Activity {
     private JSONObject context;
     private LinearLayout content;
     private DeskWindow viewport;
+    private AppUpdates updates;
     private TextView status;
     private WebView qr;
     private Runnable back;
@@ -141,6 +142,7 @@ public final class HostedDeskActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        updates = new AppUpdates(this, this::updateIdle);
         requestedQueue = getIntent().getBooleanExtra("openBoothQueue", false);
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
             android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::goBack);
@@ -167,6 +169,7 @@ public final class HostedDeskActivity extends Activity {
         }
         scheduleIntake(0);
         scheduleQueue(0);
+        updates.start();
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -183,11 +186,18 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
+        updates.stop();
         QueuePush.counterVisible(false);
         QueuePush.listen(null);
         handler.removeCallbacks(intakePoll);
         handler.removeCallbacks(queuePoll);
         super.onPause();
+    }
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (updates == null) return;
+        updates.focusChanged(focused);
+        if (focused) updates.offerSetup();
     }
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
@@ -411,6 +421,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void run(Work action, Done done) {
         if (busy) return;
+        updates.cancelDownload();
         busy = true;
         note("");
         handler.postDelayed(slowAction, 350);
@@ -476,6 +487,10 @@ public final class HostedDeskActivity extends Activity {
             desk();
             scheduleQueue(0);
             QueuePush.sync(this, client.token());
+            if (foreground) {
+                updates.offerSetup();
+                updates.start();
+            }
         }
     }
     private void profile() {
@@ -558,6 +573,7 @@ public final class HostedDeskActivity extends Activity {
         desk();
     }
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (updates != null && event.getActionMasked() == MotionEvent.ACTION_DOWN) updates.cancelDownload();
         if ("desk".equals(screen) && !busy && client!=null && !client.hasPending() && client.handover()==null) {
             if (event.getActionMasked()==MotionEvent.ACTION_DOWN) {
                 deskTouchX=event.getX();deskTouchY=event.getY();
@@ -584,6 +600,7 @@ public final class HostedDeskActivity extends Activity {
         line("Staff · " + context.optString("staff_label", "Counter"), 18, true);
         if (!context.isNull("designation")) line(context.optString("designation"), 16, false);
         button("Administrator sign-in", this::openAdminAccount, false);
+        if (updates.isEnabled()) button("App updates", updates::options, false);
         JSONObject outstanding = client.intake();
         if (outstanding != null && outstanding.optLong("expires_at") > System.currentTimeMillis()) {
             button("Resume deposit", () -> {
@@ -597,6 +614,13 @@ public final class HostedDeskActivity extends Activity {
         button("Sign out", () -> new AlertDialog.Builder(this).setMessage("Sign out of SharePass on this phone?")
             .setNegativeButton("Stay", null).setPositiveButton("Sign out", (dialog, which) ->
                 run(() -> { client.logout(); return null; }, result -> { clearQueue(); login(); })).show(), false);
+    }
+    private boolean updateIdle() {
+        if (!foreground || busy || context == null || client == null || client.hasPending() || client.handover() != null
+                || !("desk".equals(screen) || "desk-options".equals(screen))) return false;
+        JSONObject intake = client.intake();
+        if (intake != null && intake.optLong("expires_at") > System.currentTimeMillis()) return false;
+        return !collectPane || (deskInput != null ? deskInput.length() == 0 : deskCode.isEmpty());
     }
     private void openAdminAccount() {
         try {

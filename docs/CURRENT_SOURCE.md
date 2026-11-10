@@ -28,6 +28,7 @@ The review channel uses the same development signing certificate for in-place up
 | --- | ---: | --- | --- |
 | 0.9.5 | 15 | `361bbc0451a018f0801e4043b391d5c8710f0b857130835e1549688d51eac781` | Released through the private download channel. Package, signature and signing compatibility with 0.9.4 verified. |
 | 0.9.6 | 16 | `7eccd3546985b03d48c91d23aa0d9f533e5aeaca7cdf638e7e22aebafb8afa18` | Owner-only download verified after distribution. Alignment, v2/v3 signatures and downloaded APK bytes checked. Receipt-reference entry and first-party owner sign-in included. Phone and emulator upgrade checks were not performed. |
+| 0.9.7 | 17 | `889ff35ae17d1e3dcbbd78e895cefbd3b74f53cba60a8dc7082db96b17857eac` | Owner-only download matched the reviewed APK. Android window adaptation and adaptive web source are covered below. Physical device and in-place upgrade checks were skipped. |
 
 Certificate SHA-256 for the review channel: `0a8b400966fd754c6db2b33b94f78c9898803aff37718fa34c34aef77b642c12`.
 
@@ -40,3 +41,7 @@ The v19 backend candidate includes the `X-SharePass-Version: 19` response header
 ## Adaptive source
 
 The v20 web and Android 0.9.7 source adapt to the usable app window. The web keeps controls inside reported safe areas, avoids a reported fold hinge, and stacks the register when the content area is narrow. Android uses current window insets and fold geometry to keep controls and QR previews in a usable area without restarting the staged workflow. Local verification covered Chromium and WebKit at phone and laptop sizes, Chromium cutout and fold overrides, long content, and native geometry fixtures. Physical curved-screen and foldable hardware checks remain open.
+
+## Platform and updates source
+
+Web v22 adds the staff browser install manifest and a Digital Asset Links statement for Android setup. Android 0.9.8 uses the verified HTTPS setup path and retains the earlier setup fallback. Its opt-in update check runs while the app is active, verifies the signed manifest and exact APK, and hands installation to Android. Historical APKs remain archive-only for the update feed. The [release workflow](sharepass-release-workflow.md) verifies the approved artifact before publication. The source record does not establish hosted App Link verification or a device upgrade.

@@ -98,7 +98,7 @@ async function adminSetup(request,db,workspace,origin){
     const code=String(crypto.getRandomValues(new Uint32Array(1))[0]%10000).padStart(4,'0');
     const result=await db.prepare('INSERT OR IGNORE INTO sharepass_configured_devices(workspace,id,staff_id,label,invite,setup_code,invite_expires,designation) VALUES(?,?,?,?,?,?,?,?)')
       .bind(workspace,id,staffId,label,invite,code,expires_at,designation).run();
-    if(result.meta.changes===1)return json({...await setupState(db,workspace),code,expires_at,qr_url:origin+'/connect?invite='+invite});
+    if(result.meta.changes===1)return json({...await setupState(db,workspace),code,expires_at,qr_url:origin+'/app-setup?invite='+invite});
   }
   return error('Could not issue a setup code. Try again.',409);
 }
