@@ -7,6 +7,8 @@ let staff, recovery = null;
 let receipt, match, pending, view, demoIndex = 0, timer, playing = false, busy = false;
 let intakeToken, intakeCounts, intakeView = 0;
 let queueToken, queueView=0, queueSignature, suggestion, refreshSequence=0, viewRevision=0;
+let staffMessages=[], openStaffMessage, replying=false;
+const seenStaffMessages=new Set();
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -48,6 +50,8 @@ function show(id){
   view = id;
   wizards[id]?.show(0,false);
   if(id === 'desk'){
+    byId('deposit-action').textContent=register?'New deposit':'Show deposit QR';
+    byId('staff-message-open').hidden=Boolean(register)||!staffMessages.length;
     renderRecovery().catch(error=>{if(view==='desk')byId('error').textContent=error.message;});
     byId('queue-panel').hidden=Boolean(register);
     if(!register)showDeskQr();
@@ -55,6 +59,13 @@ function show(id){
   if(id==='desk'&&staff&&!register)refreshQueue(queueView);
   byId(id).querySelector('h1, button')?.focus();
 }
+
+byId('menu').addEventListener('keydown',event=>{
+  if(event.key!=='Escape'||!byId('menu').open)return;
+  event.preventDefault();
+  byId('menu').open=false;
+  byId('menu').querySelector('summary').focus();
+});
 
 async function renderRecovery(){
   const current = register;
@@ -198,6 +209,11 @@ async function refreshQueue(generation,manual=false){
       const result=await fetchJson('/api/queue',null,AbortSignal.timeout(5500));
       if(generation!==queueView)return;
       const drafts=result.drafts||[];
+      staffMessages=result.messages||[];
+      const inbox=byId('staff-message-open');
+      inbox.hidden=!staffMessages.length;
+      inbox.textContent='Staff messages ('+staffMessages.length+')';
+      showStaffMessage(false);
       const signature=JSON.stringify(drafts);
       if(queueSignature!==signature){
         queueSignature=signature;
@@ -233,6 +249,40 @@ async function refreshQueue(generation,manual=false){
     }else byId('queue-status').textContent='Queue offline. Try Refresh / reconnect again.';
   }
 }
+
+function showStaffMessage(manual){
+  const message=staffMessages.find(item=>manual||!seenStaffMessages.has(item.id));
+  if(!message||register)return;
+  const dialog=byId('staff-message');
+  if(view!=='desk'||recovery||busy||dialog.open||(!manual&&
+    (document.hidden||document.querySelector('dialog[open]')||byId('desk-code-form').elements.code.value)))return;
+  openStaffMessage=message;
+  seenStaffMessages.add(message.id);
+  byId('staff-message-text').textContent=message.message;
+  byId('staff-message-status').textContent='';
+  dialog.showModal();
+}
+byId('staff-message-open').onclick=()=>showStaffMessage(true);
+byId('staff-message-later').onclick=()=>{if(!replying)byId('staff-message').close();};
+byId('staff-message').addEventListener('cancel',event=>{if(replying)event.preventDefault();});
+for(const button of document.querySelectorAll('[data-staff-reply]'))button.onclick=async()=>{
+  if(!openStaffMessage||replying)return;
+  replying=true;
+  const dialog=byId('staff-message');
+  const buttons=dialog.querySelectorAll('button');
+  for(const choice of buttons)choice.disabled=true;
+  try{
+    await request('/api/staff-messages/reply',{id:openStaffMessage.id,reply:button.dataset.staffReply});
+    dialog.close();
+    await refreshQueue(++queueView);
+  }catch(error){
+    byId('staff-message-status').textContent=error.message;
+    if(error.status===409)refreshQueue(++queueView);
+  }finally{
+    replying=false;
+    for(const choice of buttons)choice.disabled=false;
+  }
+};
 
 function refreshStaffQueue(){
   if(!register&&staff&&!['loading','profile'].includes(view))refreshQueue(++queueView);

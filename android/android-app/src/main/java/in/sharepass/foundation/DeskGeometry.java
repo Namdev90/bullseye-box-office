@@ -55,6 +55,10 @@ final class DeskGeometry {
         return Math.max(1, Math.min(preferredColumns, width / targetWidth));
     }
 
+    static int keypadSlot(int keyIndex, int columns) {
+        return columns == 3 && keyIndex >= 9 ? keyIndex + 1 : keyIndex;
+    }
+
     static int openingArtHeight(int width, int height, int minArt, int controls) {
         return Math.min(width, Math.max(minArt, height - controls));
     }

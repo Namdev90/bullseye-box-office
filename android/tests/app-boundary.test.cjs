@@ -90,7 +90,7 @@ test('Firebase is opt-in, authenticated, permission-aware, and opens only the qu
  assert(host.includes('startActivity(QueueNotifications.openQueue(this))'));
 });
 test('shared AndroidX APIs are compile dependencies even when Firebase is absent',()=>{
- const gradle=read('android-app/build.gradle.kts');
+ const gradle=read('android-app/build.gradle.kts').replaceAll('\r\n','\n');
  const dependencies=gradle.slice(gradle.indexOf('\ndependencies {'));
  // Only declarations directly inside dependencies are unconditional. A Core
  // declaration inside the Firebase branch must not satisfy this regression.
@@ -112,6 +112,16 @@ test('shared AndroidX APIs are compile dependencies even when Firebase is absent
  const ci=read('../.github/workflows/sharepass-ci.yml');
  assert(ci.includes('"-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease'));
  assert(ci.includes('bash ./gradlew --no-daemon :android-app:clean :android-app:assembleRelease :android-app:lintRelease :android-app:mergeDebugAssets :android-app:compileDebugJavaWithJavac :android-app:lintDebug'));
+});
+
+test('staff messages use the authorized queue and verified downloads are automatic before installer consent',()=>{
+ const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
+ const updates=read('android-app/src/main/java/in/sharepass/foundation/AppUpdates.java');
+ assert.match(desk,/queue\.optJSONArray\("messages"\)/);
+ assert.match(desk,/client\.hasPending\(\) \|\| client\.handover\(\) != null/);
+ assert.match(desk,/client\.request\("\/api\/staff-messages\/reply"/);
+ assert.match(updates,/prefs\.getBoolean\("automatic", true\) && offeredCode != candidate\.code\(\)\) \{\s*download\(candidate, manual\)/);
+ assert.match(updates,/private void install[\s\S]*?if \(!canInstall\(\)\) \{\s*showPermission\(\)/);
 });
 test('native polling has a separate executor and brief actions do not show loading text',()=>{
  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');

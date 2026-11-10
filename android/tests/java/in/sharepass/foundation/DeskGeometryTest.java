@@ -31,6 +31,10 @@ public final class DeskGeometryTest {
         require(DeskGeometry.keypadColumns(207, 48, 5), 4);
         require(DeskGeometry.keypadColumns(120, 48, 3), 2);
         require(DeskGeometry.keypadColumns(330, 48, 5), 5);
+        require(DeskGeometry.keypadSlot(8, 3), 8);
+        require(DeskGeometry.keypadSlot(9, 3), 10);
+        require(DeskGeometry.keypadSlot(10, 3), 11);
+        require(DeskGeometry.keypadSlot(9, 2), 9);
         require(DeskGeometry.qrSize(218, 530, 350), 218);
         require(DeskGeometry.qrSize(580, 135, 350), 135);
         require(DeskGeometry.qrSize(72, 86, 350), 72);

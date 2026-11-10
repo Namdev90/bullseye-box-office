@@ -126,7 +126,8 @@ async function queueList(db,staff){
   const rows=await db.prepare(`SELECT token,payload,submitted_at,expires_at FROM sharepass_booth_queue
     WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>? ORDER BY submitted_at,token LIMIT 120`)
     .bind(staff.workspace,staff.booth_id||'B1',Date.now()).all();
-  return json({drafts:rows.results.map(row=>queueFields(row))});
+  const messages=await pendingStaffPrompts(db,staff);
+  return json({drafts:rows.results.map(row=>queueFields(row)),...(messages.length?{messages}:{})});
 }
 
 async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){

@@ -37,7 +37,7 @@ public final class AppUpdatesFocusTest {
     final Queue WORK = new Queue(), handler = new Queue();
     boolean enabled = true, foreground = true, idleValue = true, permission = true;
     boolean journalSafe = true, valid = true, verificationThrows;
-    int installed = 18, opened, ticks;
+    int installed = 18, opened, ticks, permissionPrompts;
     final Runnable nextCheck = () -> ticks++;
     final BooleanSupplier idle = () -> idleValue;
     AtomicBoolean checkingTransfer, downloading;
@@ -52,6 +52,7 @@ public final class AppUpdatesFocusTest {
         return valid;
     }
     boolean canInstall() { return permission; }
+    void showPermission() { permissionPrompts++; }
     void openInstaller(File file) { opened++; onOpen.run(); }
     void message(String text) { messages.add(text); }
 
@@ -151,6 +152,7 @@ public final class AppUpdatesFocusTest {
             }
             p.install(new UpdatePolicy.Release(19), new File("not-read-synthetic.apk"));
             require(p.WORK.tasks.isEmpty(), "do not acquire install work when guarded: " + guard);
+            require(p.permissionPrompts == (guard == 1 ? 1 : 0), "only an install attempt prompts for permission");
         }
         p = new AppUpdatesFocusTest(); p.start(); p.start();
         require(p.handler.tasks.size() == 1, "repeated start coalesces the next check");

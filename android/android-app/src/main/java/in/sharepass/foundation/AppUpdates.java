@@ -109,8 +109,8 @@ final class AppUpdates {
         if (!ready() || prefs.getBoolean("asked", false) || prompt != null) return;
         prefs.edit().putBoolean("asked", true).apply();
         show(new AlertDialog.Builder(activity).setTitle("SharePass app updates")
-            .setMessage("SharePass can download verified updates while the desk is idle. Set up Android's install permission now or choose Not now. Android asks before every install.")
-            .setNegativeButton("Not now", null)
+            .setMessage("SharePass downloads verified updates while the desk is idle. Android asks before each install. You can turn off automatic downloads here.")
+            .setNegativeButton("Turn off automatic", (dialog, which) -> prefs.edit().putBoolean("automatic", false).apply())
             .setPositiveButton("Set up updates", (dialog, which) -> enableAutomatic()));
     }
 
@@ -120,10 +120,10 @@ final class AppUpdates {
             message("Finish or recover the current action first.");
             return;
         }
-        boolean automatic = prefs.getBoolean("automatic", false);
+        boolean automatic = prefs.getBoolean("automatic", true);
         show(new AlertDialog.Builder(activity).setTitle("App updates")
             .setMessage(automatic && canInstall() ? "Verified downloads are on while SharePass is open and idle."
-                : automatic ? "Verified downloads will start after you allow installs in Android settings."
+                : automatic ? "Verified downloads are on. Android install permission is needed when you choose to install."
                 : "Check for a newer signed SharePass build.")
             .setNegativeButton("Close", null)
             .setNeutralButton(automatic ? "Turn off automatic" : "Set up automatic", (dialog, which) -> {
@@ -152,6 +152,7 @@ final class AppUpdates {
     private void openInstallSettings() {
         if (Build.VERSION.SDK_INT < 26 || !ready()) return;
         try {
+            offeredCode = 0;
             activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:" + activity.getPackageName())));
         } catch (ActivityNotFoundException unavailable) {
@@ -213,9 +214,8 @@ final class AppUpdates {
                     if (manual) message(failed ? "Could not verify the SharePass update channel." : "No newer SharePass release.");
                     return;
                 }
-                if (manual || prefs.getBoolean("automatic", false) && canInstall() && offeredCode != candidate.code()) {
-                    if (canInstall()) download(candidate, manual);
-                    else showPermission();
+                if (manual || prefs.getBoolean("automatic", true) && offeredCode != candidate.code()) {
+                    download(candidate, manual);
                 }
             });
         });
@@ -251,7 +251,11 @@ final class AppUpdates {
     }
 
     private void install(UpdatePolicy.Release release, File file) {
-        if (!ready() || !canInstall() || downloading != null) return;
+        if (!ready() || downloading != null) return;
+        if (!canInstall()) {
+            showPermission();
+            return;
+        }
         AtomicBoolean cancelled = new AtomicBoolean();
         downloading = cancelled;
         WORK.execute(() -> {

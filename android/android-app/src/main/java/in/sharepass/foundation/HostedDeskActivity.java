@@ -49,6 +49,10 @@ public final class HostedDeskActivity extends Activity {
     private final Runnable queuePoll = this::checkQueue;
     private final Runnable slowAction = () -> note("Working…");
     private final HashSet<String> seenQueue = new HashSet<>();
+    private final HashSet<String> seenStaffMessages = new HashSet<>();
+    private JSONArray staffMessages = new JSONArray();
+    private Button staffMessageButton;
+    private AlertDialog staffMessageDialog;
     private HostedRegisterClient client;
     private JSONObject context;
     private LinearLayout content;
@@ -187,6 +191,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
+        if (staffMessageDialog != null) staffMessageDialog.dismiss();
         updates.stop();
         QueuePush.counterVisible(false);
         QueuePush.listen(null);
@@ -238,6 +243,7 @@ public final class HostedDeskActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         queueButton = null;
+        staffMessageButton = null;
         queueRows = null;
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -331,7 +337,7 @@ public final class HostedDeskActivity extends Activity {
             case "Custom code (optional)" -> "Use four digits. Leave it blank to let SharePass choose an available code.";
             case "Code lifetime (optional)" -> "Choose between 5 minutes and 2 days. Leave it blank for the register's default.";
             case "Confirm receipt" -> "Confirm after the customer's physical passes are in your hands.";
-            case "Collect passes" -> "Enter the four characters the collector shares. Looking up the code does not release passes.";
+            case "Collect passes" -> "Enter the four digits on the pickup receipt. Looking up the code does not release passes.";
             case "Prepare pickup", "Hand over passes" -> "Check the physical packet label and pass counts before confirming the handover.";
             case "Passes deposited", "WhatsApp recipient", "Share by WhatsApp" -> "Show the code or a share QR. Each message is a draft the sender can review.";
             default -> "share-qr".equals(screen)
@@ -540,6 +546,7 @@ public final class HostedDeskActivity extends Activity {
         collectTab.setOnClickListener(view -> switchDeskPane(true));
         content.addView(tabs);
         button("Refresh / reconnect", this::refreshQueueNow, false);
+        addStaffMessageButton();
         content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(14)));
         if (collectPane) {
             line("Collect passes", 27, true);
@@ -555,17 +562,18 @@ public final class HostedDeskActivity extends Activity {
                     runOnUiThread(() -> {
                         if (isDestroyed() || content != depositView || collectPane || !"desk".equals(screen)) return;
                         try {
-                            showQr(url, "QR for the depositor to fill in");
+                            showQr(url, "QR for the customer deposit form");
                             depositView.removeView(qr);
                             depositView.addView(qr, qrPosition, qrBounds());
                         } catch (Exception error) { note("Open the full-size deposit QR to retry."); }
                     });
                 } catch (Exception ignored) { /* The full-size QR button can retry. */ }
             });
-            button("Show full-size deposit QR", () -> run(() -> client.request("/api/booth", null), this::boothPoster), true);
+            button("Show deposit QR", () -> run(() -> client.request("/api/booth", null), this::boothPoster), true);
             queueButton = button(queueLabel(), this::queue, false);
             queueButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_ticket_layers, 0, 0, 0);
         }
+        showStaffMessage(false);
     }
     private void switchDeskPane(boolean collecting) {
         if (busy || collectPane==collecting) return;
@@ -640,6 +648,8 @@ public final class HostedDeskActivity extends Activity {
         requestedQueue = false;
         queueBaseline = false;
         seenQueue.clear();
+        seenStaffMessages.clear();
+        staffMessages = new JSONArray();
         queueDrafts = new JSONArray();
         handler.removeCallbacks(queuePoll);
         QueueNotifications.cancel(this);
@@ -668,7 +678,9 @@ public final class HostedDeskActivity extends Activity {
         String session = client.token();
         polling.execute(() -> {
             try {
-                JSONArray drafts = client.request("/api/queue", null).getJSONArray("drafts");
+                JSONObject queue = client.request("/api/queue", null);
+                JSONArray drafts = queue.getJSONArray("drafts");
+                JSONArray messages = queue.optJSONArray("messages");
                 runOnUiThread(() -> {
                     checkingQueue = false;
                     if (isDestroyed() || !foreground || context == null || !session.equals(client.token())) return;
@@ -686,6 +698,9 @@ public final class HostedDeskActivity extends Activity {
                     if (waiting.isEmpty()) QueueNotifications.cancel(this);
                     queueBaseline = true;
                     queueDrafts = drafts;
+                    staffMessages = messages == null ? new JSONArray() : messages;
+                    updateStaffMessageButton();
+                    showStaffMessage(false);
                     if (queueButton != null) queueButton.setText(queueLabel());
                     if (queueRows != null && !busy) renderQueueRows();
                     if (manualQueueRefresh) {
@@ -706,6 +721,41 @@ public final class HostedDeskActivity extends Activity {
                 });
             }
         });
+    }
+    private void addStaffMessageButton() {
+        staffMessageButton = button("Staff messages", () -> showStaffMessage(true), false);
+        updateStaffMessageButton();
+    }
+
+    private void updateStaffMessageButton() {
+        if (staffMessageButton == null) return;
+        staffMessageButton.setVisibility(staffMessages.length() == 0 ? View.GONE : View.VISIBLE);
+        staffMessageButton.setText("Staff messages (" + staffMessages.length() + ")");
+    }
+
+    private void showStaffMessage(boolean manual) {
+        if (!foreground || busy || !hasWindowFocus() || !("desk".equals(screen) || "queue".equals(screen)) || staffMessageDialog != null
+                || client.hasPending() || client.handover() != null
+                || !manual && deskInput != null && deskInput.length() > 0) return;
+        for (int i = 0; i < staffMessages.length(); i++) {
+            JSONObject message = staffMessages.optJSONObject(i);
+            if (message == null || message.optLong("expires_at") <= System.currentTimeMillis()) continue;
+            String id = message.optString("id");
+            if (!validQueueToken(id) || !manual && seenStaffMessages.contains(id)) continue;
+            seenStaffMessages.add(id);
+            String[] replies = {"done", "working", "help"};
+            staffMessageDialog = new AlertDialog.Builder(this).setTitle("Message from admin\n\n" + message.optString("message"))
+                .setItems(new String[]{"Done", "Working on it", "Need help"}, (dialog, choice) ->
+                    run(() -> client.request("/api/staff-messages/reply",
+                        new JSONObject().put("id", id).put("reply", replies[choice])), result -> {
+                            note("Reply sent.");
+                            scheduleQueue(0);
+                        }))
+                .setNegativeButton("Later", null).create();
+            staffMessageDialog.setOnDismissListener(dialog -> staffMessageDialog = null);
+            staffMessageDialog.show();
+            return;
+        }
     }
     private static boolean validQueueToken(String token) { return token.matches("[a-f0-9-]{36}"); }
     private boolean notificationsAllowed() {
@@ -758,6 +808,7 @@ public final class HostedDeskActivity extends Activity {
         button("Customer form QR", () -> run(() -> client.request("/api/booth", null), this::boothPoster), false);
         line("Match the customer and count their passes.", 16, false);
         if (context.optBoolean("push_first")) button("Refresh / reconnect", this::refreshQueueNow, false);
+        addStaffMessageButton();
         queueRows = new LinearLayout(this);
         queueRows.setOrientation(LinearLayout.VERTICAL);
         content.addView(queueRows);
@@ -1027,9 +1078,9 @@ public final class HostedDeskActivity extends Activity {
         }, result -> receipt(client.receipt()));
     }
     private void collectionEntry(String initial) {
+        line("Enter the 4 digits on the pickup receipt.", 16, false);
         EditText input = field("Collection code", InputType.TYPE_CLASS_NUMBER, 4);
         input.setText(initial);
-        input.setHint("0420");
         input.setTextSize(26);
         input.setShowSoftInputOnFocus(false);
         deskInput = input;
@@ -1039,12 +1090,9 @@ public final class HostedDeskActivity extends Activity {
             deskCode = code;
             verifyPickup(code, "");
         };
-        button("Find passes", find, true);
         autoAdvance(input, value -> value.matches("[0-9]{4}"), find);
-        LinearLayout keypad = new LinearLayout(this);
-        keypad.setOrientation(LinearLayout.VERTICAL);
-        content.addView(keypad);
-        drawKeypad(keypad, input);
+        drawKeypad(input);
+        button("Find passes", find, true);
     }
     private void verifyPickup(String code, String reference) {
         run(() -> {
@@ -1074,18 +1122,20 @@ public final class HostedDeskActivity extends Activity {
         };
         button("Find passes", check, true);
     }
-    private void drawKeypad(LinearLayout keypad, EditText input) {
+    private void drawKeypad(EditText input) {
         String keys = "1234567890";
         int preferredColumns = 3;
         GridLayout keysGrid = new GridLayout(this);
         keysGrid.setColumnCount(preferredColumns);
-        keypad.addView(keysGrid, new LinearLayout.LayoutParams(-1, -2));
+        content.addView(keysGrid, new LinearLayout.LayoutParams(-1, -2));
         keysGrid.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             int columns = DeskGeometry.keypadColumns(right - left, dp(48), preferredColumns);
             if (keysGrid.getColumnCount() == columns) return;
             // Clear GridLayout's resolved indices before reducing its column count.
             keysGrid.setColumnCount(GridLayout.UNDEFINED);
-            for (int i=0; i<keysGrid.getChildCount(); i++) keysGrid.getChildAt(i).setLayoutParams(keyBounds());
+            for (int i=0; i<keysGrid.getChildCount(); i++) {
+                keysGrid.getChildAt(i).setLayoutParams(keyBounds(i, columns));
+            }
             keysGrid.setColumnCount(columns);
         });
         for (int i=0; i<keys.length(); i++) {
@@ -1094,24 +1144,22 @@ public final class HostedDeskActivity extends Activity {
                 input.requestFocus();
                 if (input.length()<4) { input.append(key);input.setSelection(input.length()); }
             });
-            keysGrid.addView(button, keyBounds());
+            keysGrid.addView(button, keyBounds(i, preferredColumns));
         }
-        LinearLayout controls = new LinearLayout(this);
-        keypad.addView(controls);
-        addKey(controls,"⌫","Delete last digit",() -> {
+        Button erase = keypadButton("⌫","Delete last digit",() -> {
             input.requestFocus();
             if (input.length()>0) input.getText().delete(input.length()-1,input.length());
         });
+        keysGrid.addView(erase, keyBounds(keys.length(), preferredColumns));
     }
-    private GridLayout.LayoutParams keyBounds() {
+    private GridLayout.LayoutParams keyBounds(int keyIndex, int columns) {
         GridLayout.LayoutParams bounds = new GridLayout.LayoutParams();
-        bounds.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        int slot = DeskGeometry.keypadSlot(keyIndex, columns);
+        bounds.rowSpec = GridLayout.spec(slot / columns);
+        bounds.columnSpec = GridLayout.spec(slot % columns, 1f);
         bounds.width = 0;
         bounds.height = dp(50);
         return bounds;
-    }
-    private void addKey(LinearLayout row, String key, String label, Runnable action) {
-        row.addView(keypadButton(key,label,action),new LinearLayout.LayoutParams(0,dp(50),1));
     }
     private Button keypadButton(String key, String label, Runnable action) {
         Button button = new Button(this);
