@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'24',
+  'X-SharePass-Version':'26',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -240,7 +240,7 @@ export default {async fetch(request,env,ctx){
       if(!staff)return error('Ask the SharePass owner to grant access to your signed-in account.',403);
       const context={...staffContext(staff,env),internal:!!configured,owner_password_session:passwordOwner&&!configured};
       const allowCodeReuse=env.SHAREPASS_ALLOW_CODE_REUSE!=='0';
-      if(request.method==='GET'&&path==='/api/context')return json(context);
+      if(request.method==='GET'&&path==='/api/context')return json(staff.admin?{...context,pickup_code_reuse_enabled:allowCodeReuse}:context);
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);
       if(path==='/api/mobile/authorize'&&request.method==='POST'){
         if(deviceToken||configured||passwordOwner)return error('Use verified ChatGPT sign-in to approve this pairing link.',403);
