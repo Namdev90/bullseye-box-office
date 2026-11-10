@@ -159,7 +159,13 @@ final class AppUpdates {
     }
 
     private void check(boolean manual) {
-        if (!ready() || checking) return;
+        if (!ready()) return;
+        if (checking) {
+            if (manual) message(checkingTransfer != null && checkingTransfer.get()
+                ? "The previous update check is still stopping. Try again in a moment."
+                : "An update check is already running. Try again in a moment.");
+            return;
+        }
         checking = true;
         AtomicBoolean cancelled = new AtomicBoolean();
         checkingTransfer = cancelled;
