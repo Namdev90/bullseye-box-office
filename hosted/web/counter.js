@@ -6,7 +6,7 @@ let register = null;
 let staff, recovery = null;
 let receipt, match, pending, view, demoIndex = 0, timer, playing = false, busy = false;
 let intakeToken, intakeCounts, intakeView = 0;
-let queueToken, queueView=0, queueSignature, suggestion, refreshAttempt;
+let queueToken, queueView=0, queueSignature, suggestion, refreshSequence=0, viewRevision=0;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -29,6 +29,7 @@ const wizards=Object.fromEntries(['queue-review','intake-review','deposit','coll
 }));
 
 function show(id){
+  viewRevision++;
   if(view==='intake'){
     intakeView++;
   }
@@ -38,6 +39,11 @@ function show(id){
   for(const section of document.querySelectorAll('main>section')) section.hidden = section.id !== id;
   if(view === 'share' && id !== 'share') draft.clear();
   byId('error').textContent = '';
+  if(id==='saved'&&receipt){
+    const uncertain=!register&&recovery?.path==='/api/codes/refresh';
+    byId('saved-code').textContent=uncertain?'Refresh pending':receipt.collection_code;
+    if(uncertain)byId('error').textContent='Recover the last action before sharing a collection code.';
+  }
   byId('menu').open = false;
   view = id;
   wizards[id]?.show(0,false);
@@ -138,6 +144,7 @@ async function fetchJson(path,body,signal){
     const error=new Error(result.error||'The shared register is unavailable.');
     error.notExecuted=result.notExecuted===true;
     error.status=response.status;
+    error.refreshResolved=result.refreshResolved===true;
     error.pickupReferenceRequired=result.pickup_reference_required===true;
     throw error;
   }
@@ -145,6 +152,9 @@ async function fetchJson(path,body,signal){
 }
 
 function setRecovery(action){
+  if(action?.path==='/api/codes/refresh'&&Object.hasOwn(action.body,'collection_code')){
+    throw new Error('Collection codes must not enter recovery storage.');
+  }
   const key='sharepass-pending:'+staff.session_key;
   if(action) sessionStorage.setItem(key,JSON.stringify(action));
   else sessionStorage.removeItem(key);
@@ -174,6 +184,7 @@ function request(path,body){
 
 async function recover(){
   const action=recovery;
+  if(action.path==='/api/codes/refresh')return recoverRefresh(action);
   const result=await submit(action);
   if(action.path==='/api/deposits'||action.path.endsWith('/confirm'))showReceipt(result,action.path.startsWith('/api/intakes/'));
   else if(action.path.endsWith('/release'))showHandover(result);
@@ -490,6 +501,8 @@ function showReceipt(result,privateIntake=false){
 }
 
 function openShare(){
+  if(!receipt){show('desk');return;}
+  if(!register&&recovery?.path==='/api/codes/refresh')return perform(()=>recoverRefresh(recovery));
   show('share');
   const {deposit,collection_code:code} = receipt;
   draft.renderDeposit(byId('share-content'),{code,reference:register?undefined:deposit.packet_id,booth:register?'Box office':staff.booth_label||'Box office',location:register?'Main entrance':staff.pickup_location,quantities:deposit.remaining,recipients:receipt.recipients,expiresAt:deposit.code_expires_at,saveRecipients:people=>{receipt.recipients=people;}});
@@ -655,17 +668,90 @@ byId('one-time-intake').onclick=()=>perform(openIntake);
 byId('share-action').onclick = demoAction(openShare);
 byId('share-back').onclick=()=>show('saved');
 const refreshForm=byId('refresh-code-form');
-byId('refresh-saved-code').onclick=()=>{refreshForm.reset();refreshAttempt=undefined;show('refresh-code');};
-byId('cancel-refresh').onclick=()=>show('saved');
+function openRefresh(action=null){
+  refreshForm.reset();
+  const needsCode=Boolean(action)&&receipt?.deposit.packet_id!==action.body.packet_id;
+  byId('refresh-original-code').hidden=!needsCode;
+  refreshForm.elements.code.required=needsCode;
+  refreshForm.elements.packet.readOnly=Boolean(action);
+  if(action)refreshForm.elements.packet.value=action.body.packet_id;
+  show('refresh-code');
+}
+
+// Only packet/request identifiers enter the existing per-staff, per-tab journal.
+// The original collection code stays in memory, never in recovery storage.
+async function recoverRefresh(action){
+  return runRefresh(action,()=>fetchJson('/api/codes/refresh/recover',action.body),true);
+}
+
+async function runRefresh(action,send,recovering=false){
+  const generation=viewRevision,session=staff,sequence=++refreshSequence,original=receipt;
+  const current=()=>recovery===action&&staff===session&&sequence===refreshSequence;
+  const visible=()=>current()&&generation===viewRevision&&receipt===original&&!register;
+  try{
+    const result=await send();
+    if(!visible())return; // Keep the journal so a later recovery can display the result.
+    if(result.refresh_pending){
+      openRefresh(action);
+      byId('error').textContent='No completed refresh was found yet. Retry the same packet with its original code.';
+      return;
+    }
+    setRecovery(null);
+    showReceipt({...((original?.deposit.packet_id===action.body.packet_id)?original:{}),...result});
+    byId('error').textContent='Code refreshed. Share the replacement with the collectors.';
+  }catch(error){
+    // A failed lookup/auth check cannot prove the original request did not commit.
+    // Only the initial response or a confirmed terminal replay can release the journal.
+    const resolved=error.notExecuted&&(!recovering||error.refreshResolved);
+    const display=visible();
+    if(current()&&resolved){
+      setRecovery(null);
+      if(view==='saved'&&receipt)byId('saved-code').textContent=receipt.collection_code;
+      if(error.refreshResolved&&receipt===original){
+        const stale=receipt?.deposit.packet_id===action.body.packet_id;
+        if(stale){
+          receipt=undefined;
+          byId('saved-code').textContent='';
+          byId('depositor-receipt').replaceChildren();
+          draft.clear();
+          refreshForm.reset();
+        }
+        if(display||stale&&['saved','share','refresh-code','pickup-updates'].includes(view)){
+          show('desk');
+          byId('error').textContent=error.message;
+          return;
+        }
+      }
+    }
+    if(display)throw resolved?error:new Error('The refresh result is uncertain. Recover the last action from the desk before handling more passes.');
+  }
+}
+
+byId('refresh-saved-code').onclick=()=>{
+  if(recovery)return perform(recover);
+  openRefresh();
+};
+byId('cancel-refresh').onclick=()=>show(receipt?'saved':'desk');
 refreshForm.onsubmit=event=>{
   event.preventDefault();
-  perform(async()=>{
+  return perform(async()=>{
     const packet=refreshForm.elements.packet.value.trim().toUpperCase();
-    if(refreshAttempt?.packet!==packet)refreshAttempt={packet,id:crypto.randomUUID()};
-    const result=await fetchJson('/api/codes/refresh',{request_id:refreshAttempt.id,
-      packet_id:packet,collection_code:receipt.collection_code});
-    showReceipt({...receipt,...result});
-    byId('error').textContent='Code refreshed. Share the replacement with the collectors.';
+    const action=recovery;
+    if(action&&(action.path!=='/api/codes/refresh'||action.body.packet_id!==packet)){
+      throw new Error('Recover the last action from the desk first.');
+    }
+    if(!action&&packet!==receipt?.deposit.packet_id)throw new Error('Match the label on the physical packet.');
+    const code=byId('refresh-original-code').hidden?receipt?.collection_code:refreshForm.elements.code.value.trim().toUpperCase();
+    if(!/^[A-Z0-9]{4}$/.test(code||''))throw new Error('Enter the original four-character collection code.');
+    const attempt=action||{path:'/api/codes/refresh',body:{request_id:crypto.randomUUID(),packet_id:packet}};
+    if(!action)setRecovery(attempt); // Persist before sending. A storage failure prevents the mutation.
+    await runRefresh(attempt,async()=>{
+      if(action){
+        const result=await fetchJson('/api/codes/refresh/recover',action.body);
+        if(!result.refresh_pending)return result;
+      }
+      return fetchJson(attempt.path,{...attempt.body,collection_code:code});
+    },Boolean(action));
   });
 };
 byId('poster-open').onclick = ()=>perform(openBoothPoster);

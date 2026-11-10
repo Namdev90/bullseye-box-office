@@ -311,6 +311,14 @@ export default {async fetch(request,env,ctx){
         const code=await ledgerCode(env.DB,staff.workspace,env.SHAREPASS_CODE_THEME||'',url.searchParams.get('exclude')||'','',allowCodeReuse);
         return code?json({code}):error('Could not allocate a collection code. Try again.',409);
       }
+      if(path==='/api/codes/refresh/recover'&&request.method==='POST'){
+        const input=await bodyJson(request);
+        const packet=setupText(input?.packet_id,40).toUpperCase();
+        if(!/^PKT-[A-F0-9]{8}$/.test(packet)||!intakeTokenPattern.test(input?.request_id||'')){
+          return error('Recover the saved refresh from this staff session.',400,false);
+        }
+        return await recoverCodeRefresh(env.DB,staff,input.request_id,packet);
+      }
       if(path==='/api/codes/refresh'&&request.method==='POST'){
         const input=await bodyJson(request);
         const packet=setupText(input?.packet_id,40).toUpperCase();
