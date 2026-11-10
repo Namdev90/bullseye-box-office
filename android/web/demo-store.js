@@ -9,7 +9,7 @@ class DemoStore {
     this.booths=[{id:'B1',label:'Booth 1'},{id:'B2',label:'Booth 2'}];
     this.codes=new Map(); this.claims=new Map(); this.requests=new Map(); this.failures=[];
     this.events=[{id:'training-event-001',name:eventName},...(singleEvent?[]:[{id:'training-event-002',name:'Oktoberfest 2027 — Concept Demo · isolation fixture'}])];
-    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Kenneth',depositor_label:'Aria',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'K7M4','PKT-DEMO-001');
+    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Kenneth',depositor_label:'Aria',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'0420','PKT-DEMO-001');
   }
   clone(value){return JSON.parse(JSON.stringify(value));}
   error(message,status=400,notExecuted=true){const e=new Error(message);e.status=status;e.notExecuted=notExecuted;throw e;}
@@ -74,7 +74,7 @@ class DemoStore {
   publicDeposit(d){return {...this.clone(d),pending_collection:this.clone(this.collections.find(c=>c.deposit_id===d.id&&c.status==='RELEASE_RECORDED')||null)};}
   state(event_id){this.event(event_id);this.purgeEvidence();return {event_id,event_name:this.events.find(e=>e.id===event_id).name,events:this.clone(this.events),passTypes:this.clone(this.passTypes),booths:this.clone(this.booths),deposits:this.deposits.filter(d=>d.event_id===event_id).map(d=>this.publicDeposit(d)),collections:this.clone(this.collections.filter(c=>c.event_id===event_id)),audit:this.clone(this.audit.filter(a=>a.event_id===event_id).slice(0,100)),outbox:this.clone(this.outbox.filter(intent=>intent.event_id===event_id)),evidence:{end_at:Number.isFinite(this.endAt)?new Date(this.endAt).toISOString():null,status:this.evidenceRetentionEnded?'expired':Number.isFinite(this.endAt)?'active':'event_end_not_configured'},counts:{},csrf:'browser-demo-only'};}
   normalize(code){return String(code||'').toUpperCase().replace(/[\s-]/g,'');}
-  code(){const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';const bytes=crypto.getRandomValues(new Uint8Array(4));const s=Array.from(bytes,b=>alphabet[b%alphabet.length]).join('');return s;}
+  code(){const sample=new Uint16Array(1);do{crypto.getRandomValues(sample);}while(sample[0]>=60000);return String(sample[0]%10000).padStart(4,'0');}
   create(b,fixedCode=null,fixedPacket=null){
     this.purgeEvidence();this.event(b.event_id);const operator=this.operator(b.operator);this.qty(b.quantities);
     if(b.depositor_label!==undefined&&(typeof b.depositor_label!=='string'||b.depositor_label.trim().length>80))this.error('Use an optional depositor label of up to 80 characters.');
@@ -84,7 +84,7 @@ class DemoStore {
     if(b.custody_confirmed!==true)this.error('Confirm the simulated custody first.');
     if(this.deposits.some(d=>d.event_id===b.event_id&&d.location.toUpperCase()===location.toUpperCase()))this.error('Use a fresh shelf slot for this event.');
     const d={id:this.id(),event_id:b.event_id,packet_id:fixedPacket||'PKT-'+this.id().slice(0,8).toUpperCase(),location,depositor_label,booth_id,notification_channels,evidence_status:'none',...(evidence||{}),created_by:operator,created_at:this.stamp(),version:1,initial:{...b.quantities},remaining:{...b.quantities}};
-    let code=fixedCode||this.code();while(this.codes.has(b.event_id+':'+this.normalize(code)))code=this.code();
+    let code=fixedCode||this.code();const start=Number(code);for(let offset=0;this.codes.has(b.event_id+':'+code);offset++){if(offset>=9999)this.error('No collection codes are available.',409);code=String((start+offset+1)%10000).padStart(4,'0');}
     this.deposits.push(d);this.codes.set(b.event_id+':'+this.normalize(code),d.id);
     this.record('CODE_GENERATED',d,operator,{quantities:{...b.quantities},location,booth_id});
     this.intent('DEPOSIT_CREATED',d,d.id,notification_channels,evidence);
@@ -93,7 +93,8 @@ class DemoStore {
   verify(b){
     this.purgeEvidence();this.event(b.event_id);this.failures=this.failures.filter(t=>t>this.now()-60000);
     if(this.failures.length>=5)this.error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
-    const id=this.codes.get(b.event_id+':'+this.normalize(b.collection_code));const d=this.deposits.find(d=>d.id===id);
+    const code=typeof b.collection_code==='string'?b.collection_code.trim():'';if(!/^[0-9]{4}$/.test(code))this.error('Enter four digits.');
+    const id=this.codes.get(b.event_id+':'+code);const d=this.deposits.find(d=>d.id===id);
     if(!d){this.failures.push(this.now());this.error('Collection code not found in this event.',404);}
     if(this.collections.some(c=>c.deposit_id===id&&c.status==='RELEASE_RECORDED'))this.error('A handover is unconfirmed. Review the existing record before another collection.',409);
     if(!Object.values(d.remaining).some(n=>n>0))this.error('All passes for this demo code have already been collected.',409);

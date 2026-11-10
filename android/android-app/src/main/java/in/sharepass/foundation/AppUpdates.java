@@ -53,6 +53,7 @@ final class AppUpdates {
     private int offeredCode;
     private AtomicBoolean checkingTransfer, downloading;
     private AlertDialog prompt;
+    private Runnable installWhenFocused;
 
     AppUpdates(Activity activity, BooleanSupplier idle) {
         this.activity = activity;
@@ -79,12 +80,16 @@ final class AppUpdates {
     }
 
     void cancelDownload() {
+        installWhenFocused = null;
         if (checkingTransfer != null) checkingTransfer.set(true);
         if (downloading != null) downloading.set(true);
     }
 
     void focusChanged(boolean focused) {
         if (foreground && focused) {
+            Runnable install = installWhenFocused;
+            installWhenFocused = null;
+            if (install != null) install.run();
             handler.removeCallbacks(nextCheck);
             handler.post(nextCheck);
         }
@@ -257,9 +262,15 @@ final class AppUpdates {
             boolean valid = verified;
             handler.post(() -> {
                 downloading = null;
-                if (!ready() || cancelled.get()) return;
-                if (valid && canInstall()) openInstaller(file);
-                else message("The update is no longer ready. Check for it again when the desk is idle.");
+                if (!foreground || cancelled.get()) return;
+                Runnable finish = () -> {
+                    if (!ready()) return;
+                    if (valid && canInstall()) openInstaller(file);
+                    else message("The update is no longer ready. Check for it again when the desk is idle.");
+                };
+                // The confirmation dialog can close before Android returns focus to the activity.
+                if (activity.hasWindowFocus()) finish.run();
+                else installWhenFocused = finish;
             });
         });
     }

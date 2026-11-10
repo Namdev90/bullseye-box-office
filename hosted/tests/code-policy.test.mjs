@@ -19,11 +19,12 @@ test('the loaded catalogue has unique four-character strings and consecutive num
   assert.deepEqual(rows.filter(([,kind,rank])=>kind==='Number'&&rank>=1&&rank<=8).map(row=>row[2]).sort((a,b)=>a-b),
     [1,2,3,4,5,6,7,8]);
 });
-test('event matches gate brands and raise the weight of matched dates',()=>{
+test('only numeric codes are ranked and matching dates get higher weight',()=>{
   const general=new Map(codeWeights('Festival'));
   assert.ok(!general.has('SINQ')&&!general.has('BULZ')&&!general.has('SATI')&&!general.has(restrictedCode));
   const event=new Map(codeWeights('SinQ Soho Soro Saké Bullseye Satiwa Baby '+dateCode));
-  for(const code of ['SINQ','SOHO','SORO','SAKE','BULZ','BABY','SATI'])assert.ok(event.has(code),code);
+  assert.ok([...event.keys()].every(code=>/^[0-9]{4}$/.test(code)));
+  assert.ok(event.get('1337')>general.get(dateCode));
   assert.ok(event.get(dateCode)>general.get(dateCode));
 });
 test('owner overrides weight and eligibility without bypassing event safeguards',()=>{
@@ -38,14 +39,14 @@ test('owner overrides weight and eligibility without bypassing event safeguards'
 });
 test('a reserved or excluded candidate falls back to a fresh secure code',()=>{
   const model=new DemoStore({seed:false});
-  model.preferredCodes=[['SINQ',4],['BULZ',8]];
+  model.preferredCodes=[['0420',4],['1337',8]];
   const event='training-event-001';
-  model.codes.set(event+':SINQ','already-issued');
-  for(let i=0;i<32;i++)assert.equal(model.availableCode(event),'BULZ');
+  model.codes.set(event+':0420','already-issued');
+  for(let i=0;i<32;i++)assert.equal(model.availableCode(event),'1337');
   for(let i=0;i<32;i++){
-    const code=model.availableCode(event,'BULZ');
-    assert.match(code,/^[A-Z0-9]{4}$/);
-    assert.notEqual(code,'SINQ');
-    assert.notEqual(code,'BULZ');
+    const code=model.availableCode(event,'1337');
+    assert.match(code,/^[0-9]{4}$/);
+    assert.notEqual(code,'0420');
+    assert.notEqual(code,'1337');
   }
 });

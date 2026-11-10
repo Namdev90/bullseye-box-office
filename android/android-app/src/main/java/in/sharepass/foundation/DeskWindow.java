@@ -50,7 +50,13 @@ final class DeskWindow extends FrameLayout {
     int paneHeight() { return paneHeight; }
 
     boolean contains(float x, float y) {
-        return x >= location[0] + getPaddingLeft() && x < location[0] + getWidth() - getPaddingRight()
+        int left = getPaddingLeft(), right = getPaddingRight();
+        if (Build.VERSION.SDK_INT >= 30 && windowInsets != null) {
+            Insets gestures = windowInsets.getInsets(WindowInsets.Type.systemGestures());
+            left = Math.max(left, gestures.left);
+            right = Math.max(right, gestures.right);
+        }
+        return x >= location[0] + left && x < location[0] + getWidth() - right
             && y >= location[1] + getPaddingTop() && y < location[1] + getHeight() - getPaddingBottom();
     }
 
@@ -139,10 +145,9 @@ final class DeskWindow extends FrameLayout {
         }
         if (Build.VERSION.SDK_INT >= 30) {
             Insets safe = current.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
-            Insets gestures = current.getInsets(WindowInsets.Type.systemGestures());
-            left = Math.max(left, Math.max(safe.left, gestures.left));
+            left = Math.max(left, safe.left);
             top = Math.max(top, safe.top);
-            right = Math.max(right, Math.max(safe.right, gestures.right));
+            right = Math.max(right, safe.right);
             bottom = Math.max(bottom, safe.bottom);
         }
         if (Build.VERSION.SDK_INT >= 31) {

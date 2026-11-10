@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'22',
+  'X-SharePass-Version':'24',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -57,7 +57,7 @@ function validate(body,path,operator,booth='B1'){
   if(path==='/api/verify'){
     const code=typeof body.collection_code==='string'?body.collection_code.trim().toUpperCase():'';
     const reference=typeof body.collection_reference==='string'?body.collection_reference.trim().toUpperCase():'';
-    if(!/^[A-Z0-9]{4}$/.test(code)||(body.collection_reference!==undefined&&!/^PKT-[A-F0-9]{8}$/.test(reference)))return null;
+    if(!/^[0-9]{4}$/.test(code)||(body.collection_reference!==undefined&&!/^PKT-[A-F0-9]{8}$/.test(reference)))return null;
     return {...scope,collection_code:code,...(reference?{collection_reference:reference}:{})};
   }
   if(typeof body.request_id!=='string'||!/^[a-zA-Z0-9-]{8,100}$/.test(body.request_id))return null;
@@ -239,7 +239,7 @@ export default {async fetch(request,env,ctx){
       const staff=configured||await access(email,env,owner);
       if(!staff)return error('Ask the SharePass owner to grant access to your signed-in account.',403);
       const context={...staffContext(staff,env),internal:!!configured,owner_password_session:passwordOwner&&!configured};
-      const allowCodeReuse=env.SHAREPASS_ALLOW_CODE_REUSE==='1';
+      const allowCodeReuse=env.SHAREPASS_ALLOW_CODE_REUSE!=='0';
       if(request.method==='GET'&&path==='/api/context')return json(context);
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);
       if(path==='/api/mobile/authorize'&&request.method==='POST'){
@@ -265,7 +265,7 @@ export default {async fetch(request,env,ctx){
         const code=typeof input?.collection_code==='string'?input.collection_code.trim().toUpperCase():'';
         const packet=typeof input?.packet_id==='string'?input.packet_id.trim().toUpperCase():'';
         const location=typeof input?.location==='string'?input.location.trim():'';
-        if(!options?.valid_minutes||!/^[A-Z0-9]{4}$/.test(code)||!/^PKT-[A-F0-9]{8}$/.test(packet)||
+        if(!options?.valid_minutes||!/^[0-9]{4}$/.test(code)||!/^PKT-[A-F0-9]{8}$/.test(packet)||
            !location||location.length>30||/[\u0000-\u001f\u007f]/.test(location)||
            !intakeTokenPattern.test(input.request_id||''))return error('Enter the expired reference, shelf, and packet label.',400);
         const booth=input.booth_id||'B1';
@@ -315,7 +315,7 @@ export default {async fetch(request,env,ctx){
         const input=await bodyJson(request);
         const packet=setupText(input?.packet_id,40).toUpperCase();
         const code=setupText(input?.collection_code,4).toUpperCase();
-        if(!/^PKT-[A-F0-9]{8}$/.test(packet)||!/^[A-Z0-9]{4}$/.test(code)||
+        if(!/^PKT-[A-F0-9]{8}$/.test(packet)||!/^[0-9]{4}$/.test(code)||
           !intakeTokenPattern.test(input?.request_id||''))return error('Enter the current code and match the physical packet.',400);
         await ensureLedger(env.DB,staff.workspace);
         const row=await ledgerDepositByCode(env.DB,staff.workspace,code);

@@ -234,6 +234,6 @@ updateOperator(); showPending(); refresh(); if (!operator) $('#operator-dialog')
 $('#try-demo').addEventListener('click', async () => {
   if (busy || pending()) return;
   if (eventId !== 'training-event-001') { eventId='training-event-001'; clearSecrets(); await refresh(); }
-  if (window.sharePassNavigate) await window.sharePassNavigate('packets'); else document.querySelector('#nav-packets').click(); $('#collect-code').click(); $('#collection-code').value='K7M4';
+  if (window.sharePassNavigate) await window.sharePassNavigate('packets'); else document.querySelector('#nav-packets').click(); $('#collect-code').click(); $('#collection-code').value='0420';
 });
 $('#reset-demo').addEventListener('click', () => { if (!busy && window.confirm('Start fresh? All demo deposits and collections in this tab will be cleared. No real data is involved.')) window.location.reload(); });

@@ -41,6 +41,22 @@ const scope={event_id:'training-event-001',booth_id:'B1'};
 const state='/api/state?event_id=training-event-001';
 const deposit={...scope,request_id:'deposit-0001',location:'A-01',custody_confirmed:true,quantities:{normal:4,vip:2,vvip:0}};
 
+test('the allocator finds the last available four-digit code and reports exhaustion',async t=>{
+  const f=fixture();
+  t.after(f.close);
+  const existing=await f.call('/api/deposits',{...deposit,custom_code:'0000'});
+  assert.equal(existing.status,200);
+  const code=f.sqlite.prepare('SELECT owner,event,deposit_id FROM sharepass_ledger_codes WHERE code=?').get('0000');
+  f.sqlite.prepare(`WITH RECURSIVE digits(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM digits WHERE n<9999)
+    INSERT INTO sharepass_ledger_codes(owner,event,code,deposit_id)
+    SELECT ?,?,printf('%04d',n),? FROM digits WHERE n<>87`).run(code.owner,code.event,code.deposit_id);
+  const last=await f.call('/api/codes/suggest');
+  assert.equal(last.status,200);
+  assert.equal(last.body.code,'0087');
+  const full=await f.call('/api/codes/suggest?exclude=0087');
+  assert.equal(full.status,409);
+});
+
 test('guest receipt alerts are consented, booth scoped, private, and sent once per committed change',async()=>{
   const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'P-256'});
   const pub=publicKey.export({format:'jwk'});
@@ -200,13 +216,13 @@ test('concurrent pickups cannot double reserve; exact retry and confirmation pre
 test('unsuccessful code checks survive across requests and rate-limit lookup',async()=>{
   const f=fixture();
   try{
-    for(let i=0;i<5;i++)assert.equal((await f.call('/api/verify',{...scope,collection_code:'ZZZZ'})).status,404);
-    assert.equal((await f.call('/api/verify',{...scope,collection_code:'ZZZZ'})).status,429);
+    for(let i=0;i<5;i++)assert.equal((await f.call('/api/verify',{...scope,collection_code:'9998'})).status,404);
+    assert.equal((await f.call('/api/verify',{...scope,collection_code:'9998'})).status,429);
   }finally{f.close();}
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'22');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'24');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -350,13 +366,13 @@ test('custom references accept leading zeroes and expire without removing stock 
     const retained={deposits:[JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE owner=? AND id=?').get('account-one',item.id).payload)]};
     assert.deepEqual(retained.deposits[0].remaining,deposit.quantities);
     const replace={request_id:crypto.randomUUID(),collection_code:'0000',packet_id:created.body.deposit.packet_id,
-      location:created.body.deposit.location,custom_code:'funn',valid_minutes:60};
+      location:created.body.deposit.location,custom_code:'0133',valid_minutes:60};
     assert.equal((await f.call('/api/admin/reissue',{...replace,packet_id:'PKT-AAAAAAAA'})).status,404);
     const reissued=await f.call('/api/admin/reissue',replace);
-    assert.equal(reissued.body.collection_code,'FUNN');
-    assert.equal((await f.call('/api/admin/reissue',replace)).body.collection_code,'FUNN');
+    assert.equal(reissued.body.collection_code,'0133');
+    assert.equal((await f.call('/api/admin/reissue',replace)).body.collection_code,'0133');
     assert.equal((await f.call('/api/verify',{collection_code:'0000'})).status,409);
-    const updated=await f.call('/api/verify',{collection_code:'FUNN'});
+    const updated=await f.call('/api/verify',{collection_code:'0133'});
     assert.deepEqual(updated.body.deposit.remaining,deposit.quantities);
     assert.equal(updated.body.deposit.active_collection_code,undefined);
   }finally{f.close();}
@@ -391,11 +407,11 @@ test('owner creates a separate booth and staff pairs once, sees only their booth
     assert.equal(post.status,200);
     assert.deepEqual((await f.call('/api/queue')).body.drafts,[]);
     assert.equal((await f.call('/api/queue',undefined,'',undefined,headers)).body.drafts.length,1);
-    const confirmed=await f.call('/api/queue/'+draft.request_id+'/confirm',{location:'A1',custody_confirmed:true,custom_code:'W3ST'},'',undefined,headers);
+    const confirmed=await f.call('/api/queue/'+draft.request_id+'/confirm',{location:'A1',custody_confirmed:true,custom_code:'3705'},'',undefined,headers);
     assert.equal(confirmed.status,200);
     assert.equal(confirmed.body.deposit.booth_id,booth.id);
-    assert.equal((await f.call('/api/verify',{collection_code:'W3ST'})).status,409);
-    assert.equal((await f.call('/api/verify',{collection_code:'W3ST'},'',undefined,headers)).status,200);
+    assert.equal((await f.call('/api/verify',{collection_code:'3705'})).status,409);
+    assert.equal((await f.call('/api/verify',{collection_code:'3705'},'',undefined,headers)).status,200);
     assert.equal((await f.call('/api/admin/setup',{action:'revoke',device_id:device.id})).status,200);
     assert.equal((await f.call('/api/context',undefined,'',undefined,headers)).status,401);
   }finally{f.close();}
@@ -773,7 +789,7 @@ test('a recycled code requires the new receipt and never redirects an old messag
   try{
     const {url}= (await f.call('/api/booth')).body;
     const publicPath='/api/public'+new URL(url).pathname;
-    const ticket=crypto.randomUUID(),code='7K9Q',quantities={normal:2,vip:0,vvip:0};
+    const ticket=crypto.randomUUID(),code='1337',quantities={normal:2,vip:0,vvip:0};
     const guest={request_id:ticket,intake_version:2,name:'Fixture guest',phone:'+12025550120',quantities,
       recipients:[{name:'Fixture collector',phone:'+12025550121',quantities}]};
     assert.equal((await f.call(publicPath,guest,'')).status,200);
@@ -803,9 +819,9 @@ test('a recycled code requires the new receipt and never redirects an old messag
     assert.equal((await f.call(receiptPath,undefined,'')).body.status,'checking');
     assert.equal((await create('reuse-pending','reuse-pending')).status,409);
     assert.equal((await finish(last.body.collection,'last-handover')).status,200);
-    delete env.SHAREPASS_ALLOW_CODE_REUSE;
+    env.SHAREPASS_ALLOW_CODE_REUSE='0';
     assert.equal((await create('reuse-disabled','reuse-disabled')).status,409);
-    env.SHAREPASS_ALLOW_CODE_REUSE='1';
+    delete env.SHAREPASS_ALLOW_CODE_REUSE;
     const attempts=await Promise.all([create('reuse-candidate-A','reuse-candidate-A'),create('reuse-candidate-B','reuse-candidate-B')]);
     assert.deepEqual(attempts.map(r=>r.status).sort(),[200,409]);
     const current=attempts.find(r=>r.status===200).body.deposit;
