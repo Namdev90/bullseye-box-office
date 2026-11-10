@@ -64,8 +64,8 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 19
-        versionName = "0.9.9"
+        versionCode = 20
+        versionName = "0.9.10"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
         manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
     }
