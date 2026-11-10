@@ -52,10 +52,13 @@ final class DeskSurface {
     }
 
     private static Drawable buttonFace(Context context, boolean primary, int edge, boolean pressed) {
-        int[] colors = primary ? new int[]{0xff9a2742, 0xff771d32} : new int[]{0xfffffcf5, 0xfff5e8d4};
-        if (pressed) colors = primary ? new int[]{0xff811e34, 0xff65182a} : new int[]{0xffefe0ca, 0xffe8d6be};
+        if (!primary) {
+            int face = pressed ? 0xfff0e2ce : 0xfffff9ee;
+            return plate(context, new int[]{face, face}, 12, edge);
+        }
+        int[] colors = pressed ? new int[]{0xff811e34, 0xff65182a} : new int[]{0xff9a2742, 0xff771d32};
         LayerDrawable material = new LayerDrawable(new Drawable[]{
-            plate(context, primary ? new int[]{0xff5c1828, 0xff4b1422} : new int[]{0xffdecab2, 0xffc7ac94}, 15, 0),
+            plate(context, new int[]{0xff5c1828, 0xff4b1422}, 15, 0),
             plate(context, colors, 14, edge)
         });
         material.setLayerInset(1, 0, dp(context, pressed ? 2 : 0), 0, dp(context, pressed ? 1 : 4));
@@ -68,6 +71,8 @@ final class DeskSurface {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed}, buttonFace(context, primary, edge, true));
         states.addState(new int[]{android.R.attr.state_focused}, buttonFace(context, primary, ACCENT, false));
+        if (!primary) states.addState(new int[]{android.R.attr.state_selected},
+            plate(context, new int[]{0xfff5ddd9, 0xfff5ddd9}, 12, ACCENT));
         states.addState(new int[0], buttonFace(context, primary, edge, false));
         button.setBackgroundTintList(null);
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(primary ? 0x33fff0d9 : 0x1f871e35), states, null));
@@ -76,8 +81,8 @@ final class DeskSurface {
         button.setTextColor(primary ? PAPER : INK);
         button.setTextSize(16);
         button.setGravity(Gravity.CENTER);
-        button.setMinHeight(dp(context, 54));
-        button.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 13));
+        button.setMinHeight(dp(context, primary ? 54 : 48));
+        button.setPadding(dp(context, 12), dp(context, primary ? 10 : 8), dp(context, 12), dp(context, primary ? 13 : 8));
     }
 
     static void roundButton(Button button) {
