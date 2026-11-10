@@ -79,13 +79,17 @@ function stage(apk,manifestPath,metadata,sourceCommit,mode){
   assert.equal(github(['api',`repos/${repository}/commits/${sourceCommit}`,'--jq','.sha']),sourceCommit,'Approved source commit is unavailable');
   assert.equal(github(['api',`repos/${repository}/actions/workflows/${workflow}`,'--jq','.state']),'active','Enable the verification workflow on main first');
   const tag='android-v'+metadata.versionName;
-  const taggedCommit=github(['api',`repos/${repository}/commits/${tag}`,'--jq','.sha'],true);
-  assert(taggedCommit===null||taggedCommit===sourceCommit,'Existing release tag points to a different source commit');
+  const tagRef=github(['api',`repos/${repository}/git/ref/tags/${tag}`,'--jq','.ref'],true);
+  if(tagRef!==null){
+    assert.equal(tagRef,'refs/tags/'+tag,'GitHub returned an unexpected release tag');
+    const taggedCommit=github(['api',`repos/${repository}/commits/${encodeURIComponent(tagRef)}`,'--jq','.sha']);
+    assert.equal(taggedCommit,sourceCommit,'Existing release tag points to a different source commit');
+  }
   execFileSync('gh',['release','create',tag,apk,resolve(manifestPath),'--repo',repository,
     '--draft','--latest=false','--target',sourceCommit,'--title','SharePass Android '+metadata.versionName,
     '--notes',mode==='archive'?'Archived signed APK for SharePass Android.':'Verified direct-download APK for SharePass Android.'],{stdio:'inherit'});
   execFileSync('gh',['workflow','run',workflow,'--repo',repository,'--ref','main','--json'],{
-    input:JSON.stringify({tag,version_code:String(metadata.versionCode),apk_sha256:metadata.sha256,promote_latest:mode==='latest'}),
+    input:JSON.stringify({tag,version_code:String(metadata.versionCode),apk_sha256:metadata.sha256,promote_latest:String(mode==='latest')}),
     stdio:['pipe','inherit','inherit']
   });
   console.log(`Draft ${tag} created and verification requested on main.`);
