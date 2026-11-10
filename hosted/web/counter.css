@@ -57,6 +57,8 @@ input{width:100%;min-width:0;border:1px solid var(--line);border-radius:.5rem;pa
 .qr-scan svg{width:min(100%,20rem,max(10rem,55svh))}
 .draft-card{margin:.75rem 0;padding:.85rem;border:1px solid var(--line);border-radius:.65rem}
 .draft-card label{display:block;margin:.5rem 0}.draft-card select,.draft-card textarea{display:block;width:100%;margin:.5rem 0;padding:.6rem;font:inherit}
+/* Keep optional controls easy to open without replacing their native disclosure marker. */
+#queue-code-options>summary,.draft-card summary{min-height:44px;padding:.65rem 0;line-height:1.5;cursor:pointer}
 .scan-tile{width:100%;margin-top:.5rem}
 .qr-scan{width:28rem;border:1px solid var(--line);border-radius:1rem;text-align:center;background:#16161a}
 .qr-scan::backdrop{background:#000c}
@@ -69,6 +71,8 @@ input{width:100%;min-width:0;border:1px solid var(--line);border-radius:.5rem;pa
 .wizard-nav{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
 .wizard-nav .primary{margin-left:auto;min-width:min(9rem,45%)}
 .wizard-progress{font-size:.85rem;font-weight:650}
+/* Equal-width digits keep changing counts and step positions easier to scan. */
+.step input,.wizard-progress,#queue-counts,#intake-counts,#handover-summary,#balance,#allocation-balance{font-variant-numeric:tabular-nums}
 #recipient-summary{list-style:none;padding:0}
 #recipient-summary li{margin:0 0 .5rem}
 @media(max-width:360px){.shell{width:calc(100% - 1.25rem)}.action{padding:.75rem}.step button{width:44px}}
@@ -188,7 +192,10 @@ button:not(:disabled):active,.menu-link:active,.opening .primary:active{transfor
 #customer-error{color:#8b1938;margin:.4rem 1.1rem .85rem}
 #customer-error:empty{display:none}
 @media(max-width:400px){.contact-grid{grid-template-columns:1fr}.queue-heading{align-items:start}}
-@media(prefers-reduced-motion:reduce){button,.menu-link,.opening .primary{transition:none}}
+@media(prefers-reduced-motion:reduce){
+  button,.menu-link,.opening .primary{transition:none}
+  button:not(:disabled):active,.menu-link:active,.opening .primary:active{transform:none}
+}
 @media print{
   body{background:#fff;color:#000}
   #shell{width:100%;padding:0}

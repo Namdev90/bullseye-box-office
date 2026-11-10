@@ -12,6 +12,8 @@ node --check dist/server/index.js
 node --test tests/*.test.mjs tests/*.test.cjs
 ```
 
+Interrupted collection-code refreshes use the [code-free recovery journal and read-only replay](../docs/refresh-recovery.md).
+
 The public clone builds with a synthetic code catalogue, neutral artwork and a Site configuration that lacks a production project ID. The tests use disposable records. They never use the live register.
 
 ## Private release inputs

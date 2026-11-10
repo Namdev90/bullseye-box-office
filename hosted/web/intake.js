@@ -31,7 +31,7 @@ let lastReceipt,lastCode;
 const alertButton=document.getElementById('receipt-alerts');
 const alertStatus=document.getElementById('receipt-alert-status');
 const alertCacheName='sharepass-receipt-alerts';
-let alertKey,alertScope,alertsEnabled=false;
+let alertKey,alertScope,alertsEnabled=false,alertRevision=0;
 document.getElementById('finish-receipt').onclick=()=>{
   if(booth)try{sessionStorage.removeItem('sharepass-receipt:'+token);}catch{}
 };
@@ -225,31 +225,60 @@ function showReceipt(result){
     prepareReceiptAlerts(requestId).catch(()=>{});
   }
 }
+async function receiptAlertLock(scope,action){
+  if(navigator.locks?.request)return navigator.locks.request('sharepass-receipt:'+scope,()=>action(true));
+  // Without cross-context locking, automatic refresh is read-only.
+  return action(false);
+}
 async function prepareReceiptAlerts(ticket){
+  const revision=++alertRevision;
   const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(ticket));
   const scope=location.origin+'/receipt-alerts/'+Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('')+'/';
-  const cache=await caches.open(alertCacheName);
-  const stored=await (await cache.match(scope))?.json();
-  if(requestId!==ticket)return;
-  alertScope=scope;
-  alertsEnabled=stored?.expiresAt>Date.now();
-  alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
-  alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
-  for(const key of await cache.keys()){
-    const local=await (await cache.match(key))?.json();
-    if(local?.expiresAt<=Date.now()){
-      await (await receiptWorkerAt(key.url))?.unregister();
-      await cache.delete(key);
+  await receiptAlertLock(scope,async locked=>{
+    const cache=await caches.open(alertCacheName);
+    const stored=await (await cache.match(scope))?.json();
+    if(requestId!==ticket||revision!==alertRevision)return;
+    alertScope=scope;
+    const registration=await receiptWorkerAt(scope);
+    // Refresh existing registrations so saved opt-ins receive the compatible worker.
+    if(typeof registration?.update==='function')registration.update().catch(()=>{});
+    const subscription=await registration?.pushManager.getSubscription();
+    if(stored?.path===location.pathname+'#receipt='+ticket&&subscription&&Notification.permission==='granted'){
+      try{
+        const result=await saveReceiptAlerts('status',subscription,ticket);
+        if(requestId!==ticket||revision!==alertRevision)return;
+        const current=await registration.pushManager.getSubscription();
+        if(requestId!==ticket||revision!==alertRevision)return;
+        alertsEnabled=Notification.permission==='granted'&&current?.endpoint===subscription.endpoint&&
+          result.enabled===true&&Number.isFinite(result.expires_at)&&result.expires_at>Date.now();
+        if(locked){
+          if(alertsEnabled)await cache.put(scope,new Response(JSON.stringify({...stored,expiresAt:result.expires_at})));
+          else await cache.delete(scope);
+        }
+      }catch{
+        if(requestId!==ticket||revision!==alertRevision)return;
+        // Offline is not revocation. Keep the proof so a later check can recover,
+        // and retain the Stop control without silently enabling a new subscription.
+        alertsEnabled=true;
+      }
+    }else{
+      alertsEnabled=false;
+      if(stored&&locked)await cache.delete(scope);
     }
-  }
+    if(requestId!==ticket||revision!==alertRevision)return;
+    alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
+    alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
+  });
 }
 async function receiptWorkerAt(scope){
   const registration=await navigator.serviceWorker.getRegistration(scope);
   return registration?.scope===scope?registration:null;
 }
-async function activeReceiptWorker(){
-  const registration=await navigator.serviceWorker.register('/receipt-alert-worker.js',{scope:alertScope});
-  if(registration.active?.state==='activated')return registration;
+async function activeReceiptWorker(scope){
+  const previous=await receiptWorkerAt(scope);
+  const registration=await navigator.serviceWorker.register('/receipt-alert-worker.js',{scope});
+  if(registration.scope!==scope)throw new Error('Receipt worker scope changed.');
+  if(registration.active?.state==='activated')return {registration,created:!previous};
   const installing=registration.installing||registration.waiting||registration.active;
   if(!installing)throw new Error('The receipt alert worker is unavailable.');
   await new Promise((resolve,reject)=>{
@@ -264,47 +293,76 @@ async function activeReceiptWorker(){
     }
     installing.addEventListener('statechange',changed);changed();
   });
-  return registration;
+  return {registration,created:!previous};
 }
-async function saveReceiptAlerts(action,subscription){
+async function saveReceiptAlerts(action,subscription,ticket=requestId){
   const response=await fetch(endpoint+'/alerts',{method:'POST',credentials:'same-origin',cache:'no-store',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({action,ticket:requestId,endpoint:subscription.endpoint})});
+    headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(5000),body:JSON.stringify({action,ticket,endpoint:subscription.endpoint})});
   if(!response.ok)throw new Error('Receipt alerts are unavailable.');
   return response.json();
 }
 alertButton.onclick=async()=>{
   if(alertButton.disabled)return;
+  const ticket=requestId,scope=alertScope,stopping=alertsEnabled;
+  ++alertRevision;
   alertButton.disabled=true;alertStatus.hidden=false;alertStatus.textContent='';
   try{
-    if(!alertsEnabled&&await Notification.requestPermission()!=='granted')throw new Error('Permission was not granted.');
-    const cache=await caches.open(alertCacheName);
-    if(alertsEnabled){
-      const registration=await receiptWorkerAt(alertScope);
-      const subscription=await registration?.pushManager.getSubscription();
-      if(subscription)await Promise.allSettled([saveReceiptAlerts('stop',subscription),subscription.unsubscribe()]);
-      await registration?.unregister();
-      await cache.delete(alertScope);
-      alertsEnabled=false;alertStatus.textContent='Receipt alerts are off.';
-    }else{
-      const registration=await activeReceiptWorker();
-      const existing=await registration.pushManager.getSubscription();
-      const key=Uint8Array.from(atob(alertKey.replace(/-/g,'+').replace(/_/g,'/')),char=>char.charCodeAt(0));
-      const subscription=existing||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-      try{
-        const result=await saveReceiptAlerts('enable',subscription);
-        await cache.put(alertScope,new Response(JSON.stringify({path:location.pathname+'#receipt='+requestId,expiresAt:result.expires_at})));
-      }catch(error){
-        await subscription.unsubscribe().catch(()=>{});
-        await registration.unregister().catch(()=>{});
-        throw error;
+    if(!stopping&&!navigator.locks?.request)throw new Error('Safe background synchronization is unavailable.');
+    if(!stopping&&await Notification.requestPermission()!=='granted')throw new Error('Permission was not granted.');
+    await receiptAlertLock(scope,async()=>{
+      if(requestId!==ticket||alertScope!==scope)return;
+      const cache=await caches.open(alertCacheName);
+      if(stopping){
+        // Delete the local proof first, under the same lock used by push/click.
+        // A failed network stop must not leave a background notification enabled.
+        await cache.delete(scope);
+        const registration=await receiptWorkerAt(scope);
+        const subscription=await registration?.pushManager.getSubscription();
+        if(subscription)await Promise.allSettled([saveReceiptAlerts('stop',subscription,ticket),subscription.unsubscribe()]);
+        await registration?.unregister();
+        if(requestId===ticket&&alertScope===scope){
+          alertsEnabled=false;alertStatus.textContent='Receipt alerts are off.';
+        }
+      }else{
+        const current=()=>requestId===ticket&&alertScope===scope&&Notification.permission==='granted';
+        const worker=await activeReceiptWorker(scope),registration=worker.registration;
+        let subscription,createdSubscription=false,enableSent=false;
+        try{
+          if(!current())throw new Error('Receipt changed.');
+          const existing=await registration.pushManager.getSubscription();
+          if(!current())throw new Error('Receipt changed.');
+          const key=Uint8Array.from(atob(alertKey.replace(/-/g,'+').replace(/_/g,'/')),char=>char.charCodeAt(0));
+          subscription=existing||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+          createdSubscription=!existing;
+          if(!current())throw new Error('Receipt changed.');
+          enableSent=true;
+          const result=await saveReceiptAlerts('enable',subscription,ticket);
+          if(!current())throw new Error('Receipt changed.');
+          const latest=await registration.pushManager.getSubscription();
+          if(!current()||latest?.endpoint!==subscription.endpoint)throw new Error('Receipt subscription changed.');
+          await cache.put(scope,new Response(JSON.stringify({path:location.pathname+'#receipt='+ticket,expiresAt:result.expires_at})));
+        }catch(error){
+          // Never tear down an existing subscription or a replacement made after
+          // this attempt started. Only the captured scope and our own resources
+          // can be cleaned up when receipt navigation interrupts the operation.
+          const latest=await registration.pushManager.getSubscription().catch(()=>null);
+          if(createdSubscription&&latest?.endpoint===subscription?.endpoint){
+            if(enableSent)await saveReceiptAlerts('stop',subscription,ticket).catch(()=>{});
+            await subscription.unsubscribe().catch(()=>{});
+            if(worker.created)await registration.unregister().catch(()=>{});
+          }else if(worker.created&&!subscription&&!latest)await registration.unregister().catch(()=>{});
+          throw error;
+        }
+        if(current()){alertsEnabled=true;alertStatus.textContent='Receipt alerts are on for this browser.';}
       }
-      alertsEnabled=true;alertStatus.textContent='Receipt alerts are on for this browser.';
-      await checkReceipt();
-    }
-  }catch{alertStatus.textContent='Could not change receipt alerts. You can still check your receipt here.';}
+    });
+    if(!stopping&&requestId===ticket&&alertScope===scope)await checkReceipt();
+  }catch{if(requestId===ticket&&alertScope===scope)alertStatus.textContent='Could not change receipt alerts. You can still check your receipt here.';}
   finally{
-    alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
-    alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
+    if(requestId===ticket&&alertScope===scope){
+      alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
+      alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
+    }
     alertButton.disabled=false;
   }
 };

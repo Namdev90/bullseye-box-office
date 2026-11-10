@@ -71,10 +71,11 @@ public final class HostedDeskActivity extends Activity {
     private float deskTouchX, deskTouchY;
     private boolean deskSwipeStarted;
     private final ArrayList<Recipient> recipients = new ArrayList<>();
-    private String sharingCode;
+    private String sharingCode, sharingPacket;
 
     private static final class Recipient {
         String name = "", phone = "";
+        Object quantities; // Absent means a group contact; JSON null remains invalid, not absent.
     }
 
     private interface Work { JSONObject run() throws Exception; }
@@ -1256,7 +1257,8 @@ public final class HostedDeskActivity extends Activity {
             return;
         }
         String code = receipt.optString("collection_code");
-        if (!code.equals(sharingCode)) {
+        String packet = receipt.optJSONObject("deposit").optString("packet_id");
+        if (!code.equals(sharingCode) || !packet.equals(sharingPacket)) {
             recipients.clear();
             JSONArray savedPeople = receipt.optJSONArray("recipients");
             for (int i = 0; savedPeople != null && i < savedPeople.length(); i++) {
@@ -1264,15 +1266,22 @@ public final class HostedDeskActivity extends Activity {
                 if (saved == null) continue;
                 Recipient recipient = new Recipient();
                 recipient.name = saved.optString("name");
+                recipient.quantities = saved.opt("quantities");
                 try {
                     recipient.phone = "+" + WhatsAppDraft.phone(saved.optString("phone"));
                     recipients.add(recipient);
                 } catch (IllegalArgumentException invalid) {
-                    // Earlier receipts may have email-only contacts.
+                    // Keep an explicit plan available for contact repair, never drop it on a later save.
+                    if (recipient.quantities != null) {
+                        recipient.phone = saved.optString("phone");
+                        recipients.add(recipient);
+                    }
+                    // Earlier unallocated receipts may have email-only contacts.
                 }
             }
             if (recipients.isEmpty()) recipients.add(new Recipient());
             sharingCode = code;
+            sharingPacket = packet;
         }
         if (recipients.isEmpty()) recipients.add(new Recipient());
         if (recipients.get(0).phone.isEmpty()) editRecipient(receipt, 0);
@@ -1302,7 +1311,7 @@ public final class HostedDeskActivity extends Activity {
     private void editRecipient(JSONObject receipt, int index) {
         Recipient recipient = recipients.get(index);
         page("WhatsApp recipient", "recipient", () -> {
-            if (!recipient.phone.isEmpty()) sharingPerson(receipt, index);
+            if (!recipient.phone.isEmpty() || recipient.quantities != null) sharingPerson(receipt, index);
             else if (recipients.size() > 1) {
                 recipients.remove(index);
                 sharingPerson(receipt, Math.max(0, index - 1));
@@ -1334,7 +1343,11 @@ public final class HostedDeskActivity extends Activity {
         run(() -> {
             JSONArray people = new JSONArray();
             for (Recipient recipient : recipients) {
-                if (!recipient.phone.isEmpty()) people.put(new JSONObject().put("name", recipient.name).put("phone", recipient.phone));
+                if (!recipient.phone.isEmpty() || recipient.quantities != null) {
+                    JSONObject person = new JSONObject().put("name", recipient.name).put("phone", recipient.phone);
+                    if (recipient.quantities != null) person.put("quantities", recipient.quantities);
+                    people.put(person);
+                }
             }
             client.rememberRecipients(receipt.getString("collection_code"), people);
             return null;
@@ -1342,10 +1355,21 @@ public final class HostedDeskActivity extends Activity {
     }
     private String depositMessage(JSONObject receipt, Recipient recipient) throws Exception {
         JSONObject quantities = receipt.getJSONObject("deposit").getJSONObject("remaining");
-        Map<String,Integer> counts = new LinkedHashMap<>();
-        for (String key : KEYS) counts.put(key, quantities.optInt(key));
+        Map<String,Object> counts = draftCounts(quantities);
+        Map<String,Object> allocation = null;
+        if (recipient.quantities != null) {
+            if (!(recipient.quantities instanceof JSONObject)) throw new IllegalArgumentException("Review the recipient’s planned share");
+            allocation = draftCounts((JSONObject) recipient.quantities);
+        }
         return WhatsAppDraft.message(receipt.getString("collection_code"), "", context.optString("booth_label","Box office"),
-            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"));
+            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation);
+    }
+    private static Map<String,Object> draftCounts(JSONObject quantities) {
+        Map<String,Object> counts = new LinkedHashMap<>();
+        // Keep the original values for strict validation instead of optInt coercion.
+        java.util.Iterator<String> keys = quantities.keys();
+        while (keys.hasNext()) { String key = keys.next(); counts.put(key, quantities.opt(key)); }
+        return counts;
     }
     private void compose(String address, String message) {
         try {

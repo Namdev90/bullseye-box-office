@@ -29,33 +29,54 @@ final class WhatsAppDraft {
             return false;
         }
     }
-    static String message(String code,String event,String booth,String location,Map<String,Integer> counts){
+    static String message(String code,String event,String booth,String location,Map<String,?> counts){
         return message(code,event,booth,location,counts,"");
     }
-    static String message(String code,String event,String booth,String location,Map<String,Integer> counts,String name){
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name){
         return message(code,event,booth,location,counts,name,"");
     }
-    static String message(String code,String event,String booth,String location,Map<String,Integer> counts,String name,String reference){
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference){
+        return message(code,event,booth,location,counts,name,reference,null);
+    }
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation){
+        // Validate pickup/contact details through the same rules for either message kind.
+        validateDetails(code,event,booth,location,name,reference);
+        String quantities=passCounts(counts);
+        if(quantities.isEmpty())throw new IllegalArgumentException("Pass counts required");
+        String planned=allocation==null?"":passCounts(allocation);
+        if(allocation!=null&&planned.isEmpty())throw new IllegalArgumentException("Review the recipient’s planned share");
+        return "Hi"+(name.trim().isEmpty()?"":" "+name.trim())+"! "+
+            (allocation==null?"The receipt lists "+quantities+" passes for our group.":
+                "Your planned share: "+planned+" passes.\nGroup balance on this receipt: "+quantities+" passes.")+
+            " SharePass by Bullseye Entertainment.\n\n"+
+            (event.trim().isEmpty()?"Use code ":"For "+event.trim()+", use code ")+code+
+            (reference.isEmpty()?"":" and pickup reference "+reference)+" to collect from "+booth.trim()+
+            (location.trim().isEmpty()?"":", "+location.trim())+".\n\n"+
+            "Shared group code. Staff must confirm availability; pickups are not tracked per person.";
+    }
+    private static void validateDetails(String code,String event,String booth,String location,String name,String reference){
         if(name==null||name.length()>80||name.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Use a name of up to 80 characters");
         if(!code.matches("[A-Z0-9]{4}"))throw new IllegalArgumentException("Invalid collection code");
         if(!reference.isEmpty()&&!reference.matches("PKT-[A-F0-9]{8}"))throw new IllegalArgumentException("Invalid pickup reference");
         for(String value:new String[]{event,booth,location})
             if(value==null||value.length()>100||value.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Invalid pickup details");
         if(booth.trim().isEmpty())throw new IllegalArgumentException("Enter a pickup counter");
+    }
+    private static String passCounts(Map<String,?> counts){
+        if(counts==null||counts.isEmpty())throw new IllegalArgumentException("Pass counts required");
         StringBuilder quantities=new StringBuilder();
-        for(Map.Entry<String,Integer> entry:counts.entrySet()){
-            if(!entry.getKey().matches("[A-Za-z][A-Za-z0-9 _-]{0,39}")||entry.getValue()<0||entry.getValue()>10000)throw new IllegalArgumentException("Invalid pass quantities");
-            if(entry.getValue()==0)continue;
+        for(Map.Entry<String,?> entry:counts.entrySet()){
+            if(entry.getKey()==null||!entry.getKey().matches("[A-Za-z][A-Za-z0-9 _-]{0,39}")||
+                !(entry.getValue() instanceof Number))throw new IllegalArgumentException("Invalid pass quantities");
+            double value=((Number)entry.getValue()).doubleValue();
+            if(!Double.isFinite(value)||value<0||value>10000||value!=Math.floor(value))throw new IllegalArgumentException("Invalid pass quantities");
+            int count=(int)value;
+            if(count==0)continue;
             if(quantities.length()>0)quantities.append(" + ");
             String label=entry.getKey().equals("normal")?"Normal":entry.getKey().matches("vip|vvip|mip")?entry.getKey().toUpperCase(java.util.Locale.ROOT):entry.getKey();
-            quantities.append(entry.getValue()).append(" ").append(label);
+            quantities.append(count).append(" ").append(label);
         }
-        if(quantities.length()==0)throw new IllegalArgumentException("Pass counts required");
-        return "Hi"+(name.trim().isEmpty()?"":" "+name.trim())+"! I’ve left "+quantities+" passes for our group with SharePass by Bullseye Entertainment.\n\n"+
-            (event.trim().isEmpty()?"Use code ":"For "+event.trim()+", use code ")+code+
-            (reference.isEmpty()?"":" and pickup reference "+reference)+" to collect from "+booth.trim()+
-            (location.trim().isEmpty()?"":", "+location.trim())+".\n\n"+
-            "You can pick up some or all of the passes still available for our group.";
+        return quantities.toString();
     }
     static String url(String recipient, String message) {
         String result = "https://wa.me/" + phone(recipient) + "?text=" + encode(message);
