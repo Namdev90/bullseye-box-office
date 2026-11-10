@@ -31,6 +31,32 @@ test('Android launcher opens a native desk with internet and optional notificati
  assert(desk.includes('"/api/intakes/" + token + "/confirm"'));
  assert(read('android-app/build.gradle.kts').includes('in.sharepass.foundation'));
 });
+test('debug cleartext is limited to exact loopback without subdomains',()=>{
+ // Android domain rules match exactly unless includeSubdomains is true.
+ // Keep false explicit for NetworkSecurityConfig lint, and reject any extra
+ // domain, nested config, trust override or app-wide cleartext exception.
+ const compact=xml=>xml.replace(/>\s+</g,'><').trim();
+ assert.equal(compact(read('android-app/src/debug/res/xml/showcase_network.xml')),
+   '<network-security-config><base-config cleartextTrafficPermitted="false"/>'+
+   '<domain-config cleartextTrafficPermitted="true"><domain includeSubdomains="false">127.0.0.1</domain>'+
+   '</domain-config></network-security-config>');
+ const src=path.join(root,'android-app/src');
+ const files=fs.readdirSync(src,{recursive:true}).map(file=>file.replaceAll(path.sep,'/'));
+ assert.deepEqual(files.filter(file=>file.endsWith('/showcase_network.xml')),['debug/res/xml/showcase_network.xml']);
+ for(const file of files.filter(file=>file.endsWith('/AndroidManifest.xml'))){
+   const manifest=read('android-app/src/'+file);
+   assert(!/android:usesCleartextTraffic="true"/.test(manifest),file);
+   if(file==='debug/AndroidManifest.xml'){
+     assert.equal(compact(manifest),
+       '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'+
+       '<uses-permission android:name="android.permission.INTERNET"/>'+
+       '<application android:networkSecurityConfig="@xml/showcase_network"/></manifest>');
+   }else{
+     assert(!manifest.includes('networkSecurityConfig'),file);
+   }
+ }
+ assert(read('android-app/src/main/AndroidManifest.xml').includes('android:usesCleartextTraffic="false"'));
+});
 test('booth alert can only open staff review and carries no customer details',()=>{
  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
  const client=read('android-app/src/main/java/in/sharepass/foundation/HostedRegisterClient.java');
