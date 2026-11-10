@@ -40,11 +40,11 @@ const pass=label=>{checks++;console.log('PASS',label);};
  assert.equal(store.state(event).deposits[0].depositor_label,'Aria');
  pass('Custody snapshots isolate depositor display metadata from outside changes');
 
- await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'Aria'}),/not found/);
- await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'Kenneth'}),/not found/);
+ await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'Aria'}),/four digits/);
+ await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'Kenneth'}),/four digits/);
  pass('Fictional staff and depositor names cannot authorize pickup');
 
- const verified=await store.request('/api/verify',{event_id:event,collection_code:'K7M4'});
+ const verified=await store.request('/api/verify',{event_id:event,collection_code:'0420'});
  const release=await store.request(`/api/deposits/${fixture.id}/release`,{
   request_id:'release',event_id:event,operator:'Kenneth',claim_token:verified.claim_token,
   version:verified.deposit.version,packet_id:fixture.packet_id,quantities:quantity(2,1,0)
@@ -52,7 +52,7 @@ const pass=label=>{checks++;console.log('PASS',label);};
  assert.deepEqual(release.deposit.remaining,quantity(4,1,1));
  assert.equal(release.deposit.depositor_label,'Aria');
  for(let i=0;i<3;i++) store.state(event);
- await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'K7M4'}),/unconfirmed/);
+ await assert.rejects(store.request('/api/verify',{event_id:event,collection_code:'0420'}),/unconfirmed/);
  assert.equal(store.state(event).deposits[0].pending_collection.id,release.collection.id);
  pass('Reading and reopening the desk preserves Aria metadata and the unconfirmed handover lock');
 

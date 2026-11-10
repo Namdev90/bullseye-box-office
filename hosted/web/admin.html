@@ -76,12 +76,12 @@
         <form id="reissue-form" class="admin-wizard" novalidate>
           <fieldset data-step><legend>Match the physical packet</legend>
             <div class="field"><label for="reissue-booth">Booth</label><select id="reissue-booth" name="booth_id" required></select></div>
-            <label class="field">Expired code <input name="collection_code" maxlength="4" minlength="4" pattern="[A-Za-z0-9]{4}" required autocapitalize="characters"></label>
+            <label class="field">Expired code <input name="collection_code" maxlength="4" minlength="4" pattern="[0-9]{4}" required inputmode="numeric"></label>
             <label class="field">Shelf or slot <input name="location" maxlength="30" required></label>
             <label class="field">Physical packet label <input name="packet_id" placeholder="PKT-1234ABCD" maxlength="12" required autocapitalize="characters"></label>
           </fieldset>
           <fieldset data-step hidden><legend>Review replacement options</legend>
-            <label class="field">New code (optional) <input name="custom_code" maxlength="4" pattern="[A-Za-z0-9]{4}" autocapitalize="characters"></label>
+            <label class="field">New code (optional) <input name="custom_code" maxlength="4" pattern="[0-9]{4}" inputmode="numeric"></label>
             <button class="info-trigger" type="button" aria-label="About the replacement code" data-info="Leave this blank to let SharePass choose an unused code.">i</button>
             <label class="field">New code lifetime in minutes <input type="number" name="valid_minutes" min="5" max="2880" value="1440" required></label>
           </fieldset>
