@@ -25,16 +25,18 @@
     <section id="desk" hidden><div class="desk-heading"><div><p class="eyebrow">SharePass · Box office</p><h1 tabindex="-1">Pass desk</h1></div></div><div class="desk-priority">
       <form id="desk-code-form" class="desk-collect">
         <h2>Collect passes</h2>
-        <label class="field">Collection code <input name="code" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" placeholder="0420"></label>
+        <label class="field">Collection code <input name="code" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" enterkeyhint="search" aria-describedby="desk-code-hint"></label>
+        <p id="desk-code-hint" class="code-hint">Enter the 4 digits on the pickup receipt.</p>
         <button class="primary">Find passes</button>
       </form>
       <section class="desk-deposit">
         <h2>Deposit passes</h2>
         <p>Let the depositor scan and enter their details.</p>
         <div id="desk-deposit-qr" class="intake-qr" hidden></div>
-        <button class="action" id="deposit-action">Open deposit <span aria-hidden="true">↘</span></button>
+        <button class="action" id="deposit-action" type="button">Show deposit QR</button>
       </section>
     </div><div id="recovery" class="stack recovery"></div>
+    <button type="button" id="staff-message-open" hidden>Staff messages</button>
     <div class="queue-panel" id="queue-panel" hidden>
       <div class="queue-heading"><h2>Booth queue</h2>
         <div class="quick-choices"><button id="refresh-queue" class="outline-action" type="button">Refresh / reconnect</button><button id="poster-open" class="outline-action" type="button">Booth poster QR</button></div></div>
@@ -141,7 +143,8 @@
     </section>
     <section id="share" hidden><h1 tabindex="-1">Share code</h1><button id="share-back" type="button">Back to receipt</button><div id="share-content"></div></section>
     <section id="lookup" hidden><h1 tabindex="-1">Collect passes</h1><form id="lookup-form">
-      <label class="field">Collection code <input name="code" maxlength="4" minlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" spellcheck="false"></label>
+      <label class="field">Collection code <input name="code" maxlength="4" minlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" enterkeyhint="search" aria-describedby="lookup-code-hint" spellcheck="false"></label>
+      <p id="lookup-code-hint" class="code-hint">Enter the 4 digits on the pickup receipt.</p>
       <label class="field" id="lookup-reference" hidden>Pickup reference from the collector’s receipt
         <input name="reference" maxlength="12" minlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="PKT-1234ABCD">
       </label>
@@ -166,6 +169,17 @@
     <p class="error" id="error" role="alert"></p>
   </main>
 </div>
+<dialog id="staff-message" class="info-dialog" aria-labelledby="staff-message-heading">
+  <h2 id="staff-message-heading">Message from admin</h2>
+  <p id="staff-message-text"></p>
+  <div class="quick-choices">
+    <button type="button" data-staff-reply="done" class="primary">Done</button>
+    <button type="button" data-staff-reply="working">Working on it</button>
+    <button type="button" data-staff-reply="help">Need help</button>
+    <button type="button" id="staff-message-later">Later</button>
+  </div>
+  <p id="staff-message-status" role="status"></p>
+</dialog>
 <script defer src="/demo-store.js"></script>
 <script defer src="/vendor/sharepass-qr.js"></script>
 <script defer src="/phone.js"></script><script defer src="/steps.js"></script>

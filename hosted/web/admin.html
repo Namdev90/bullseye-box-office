@@ -29,10 +29,23 @@
       <nav class="admin-nav" aria-label="Administration">
         <button type="button" data-panel="booths" aria-pressed="true" aria-controls="booths">Booths</button>
         <button type="button" data-panel="staff" aria-pressed="false" aria-controls="staff">Staff and devices</button>
+        <button type="button" data-panel="staff-messages" aria-pressed="false" aria-controls="staff-messages">Staff messages</button>
         <button type="button" data-panel="reissue" aria-pressed="false" aria-controls="reissue">Replace expired code</button>
         <button type="button" data-panel="code-policy" aria-pressed="false" aria-controls="code-policy">Code catalogue</button>
       </nav>
       <p id="setup-status" role="status"></p>
+      <section class="admin-card" id="staff-messages" aria-labelledby="staff-messages-heading" hidden>
+        <h2 id="staff-messages-heading" tabindex="-1">Staff messages</h2>
+        <p>The first reply from the selected booth closes the message. Unanswered messages expire after 24 hours.</p>
+        <form id="staff-message-form" class="admin-wizard">
+          <label class="field">Booth <select name="booth_id" required></select></label>
+          <label class="field">Message <input name="message" maxlength="300" required></label>
+          <button class="primary" type="submit">Send message</button>
+        </form>
+        <button type="button" id="refresh-staff-messages">Refresh replies</button>
+        <p id="staff-messages-status" role="status"></p>
+        <ul id="staff-messages-list" class="admin-list"></ul>
+      </section>
       <section class="admin-card" id="booths" aria-labelledby="booths-heading">
         <h2 id="booths-heading" tabindex="-1">Booths</h2>
         <ul id="booth-list" class="admin-list"></ul>

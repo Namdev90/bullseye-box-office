@@ -41,6 +41,45 @@ const scope={event_id:'training-event-001',booth_id:'B1'};
 const state='/api/state?event_id=training-event-001';
 const deposit={...scope,request_id:'deposit-0001',location:'A-01',custody_confirmed:true,quantities:{normal:4,vip:2,vvip:0}};
 
+test('admin messages stay booth-scoped and accept only the first selectable reply',async t=>{
+  const f=fixture();
+  t.after(f.close);
+  const endpoint='/api/admin/staff-messages';
+  const reply='/api/staff-messages/reply';
+  const other=(await f.call('/api/admin/setup',{action:'booth',name:'Fixture East',location:'East desk'}))
+    .body.booths.find(booth=>booth.name==='Fixture East');
+  const pair=async(booth_id,name,letter)=>{
+    const invite=await f.call('/api/admin/setup',{action:'invite',booth_id,staff_name:name,device_label:'Fixture '+letter});
+    const token=letter.repeat(43);
+    assert.equal((await f.call('/api/device/connect',{code:invite.body.code,verifier:token},'')).status,200);
+    return {'X-SharePass-Session':token};
+  };
+  const east=await pair(other.id,'East operator','E');
+  const west=await pair('B1','Box office operator','B');
+  const device=(path,body,headers)=>f.call(path,body,'',undefined,headers);
+  const message={id:crypto.randomUUID(),booth_id:other.id,message:'Check the east counter.'};
+  assert.equal((await device(endpoint,message,east)).status,404);
+  assert.equal((await f.call(endpoint,message,'account-one','https://untrusted.example')).status,403);
+  assert.equal((await f.call(endpoint,message)).status,200);
+  assert.equal((await f.call(endpoint,message)).body.messages.length,1);
+  assert.equal((await f.call(endpoint,{...message,message:'Changed content'})).status,409);
+  assert.equal((await device('/api/queue',undefined,east)).body.messages[0].message,message.message);
+  assert.equal((await device('/api/queue',undefined,west)).body.messages,undefined);
+  assert.equal((await device(reply,{id:message.id,reply:'done'},west)).status,404);
+  assert.equal((await device(reply,{id:message.id,reply:'custom'},east)).status,400);
+  assert.equal((await device(reply,{id:message.id,reply:'help'},east)).status,200);
+  assert.equal((await device(reply,{id:message.id,reply:'help'},east)).status,200);
+  assert.equal((await device(reply,{id:message.id,reply:'done'},east)).status,409);
+  assert.equal((await device('/api/queue',undefined,east)).body.messages,undefined);
+  const received=(await f.call(endpoint)).body.messages[0];
+  assert.equal(received.reply,'help');
+  assert.equal(received.replied_by,'East operator');
+  assert.equal((await f.call(endpoint,{...message,id:crypto.randomUUID()})).status,200);
+  f.sqlite.prepare('UPDATE sharepass_staff_prompts SET expires_at=0 WHERE reply IS NULL').run();
+  assert.equal((await device('/api/queue',undefined,east)).body.messages,undefined);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,0);
+});
+
 test('numeric rollout rejects stored legacy letter codes without modifying custody',async t=>{
   const f=fixture();
   t.after(f.close);
@@ -245,7 +284,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'26');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'27');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));

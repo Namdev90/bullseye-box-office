@@ -16,6 +16,8 @@ const openBooth=byId('open-booth-form');
 const openInvite=byId('open-invite-form');
 const refreshDevices=byId('refresh-devices');
 let busy=false, reissueAttempt;
+let messageBooths=new Map(), messageAttempt, sendingMessage=false;
+const messageForm=byId('staff-message-form');
 
 async function request(path,body){
   const response=await fetch(path,{cache:'no-store',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
@@ -38,6 +40,11 @@ function item(title,detail){
 
 function renderSetup(data){
   const boothNames=new Map(data.booths.map(booth=>[booth.id,booth.name]));
+  messageBooths=boothNames;
+  const booth=messageForm.elements.booth_id;
+  const selected=booth.value;
+  booth.replaceChildren(...data.booths.map(item=>new Option(item.name,item.id)));
+  if(boothNames.has(selected))booth.value=selected;
   const staffNames=new Map(data.staff.map(person=>[person.id,person.name]));
   boothList.replaceChildren(...data.booths.map(booth=>item(booth.name,booth.location||'Pickup location not set')));
   deviceList.replaceChildren(...data.devices.map(device=>{
@@ -89,8 +96,43 @@ function panel(id,focus=true){
   }
   if(focus)byId(id+'-heading').focus();
   if(id==='code-policy'&&!catalogue.length)updateCodePolicy();
+  if(id==='staff-messages')loadStaffMessages();
 }
 for(const button of nav)button.onclick=()=>panel(button.dataset.panel);
+
+async function loadStaffMessages(body){
+  const status=byId('staff-messages-status');
+  try{
+    const {messages}=await request('/api/admin/staff-messages',body);
+    const labels={done:'Done',working:'Working on it',help:'Need help'};
+    byId('staff-messages-list').replaceChildren(...messages.map(message=>item(
+      message.message, (messageBooths.get(message.booth_id)||message.booth_id)+' · '+
+      (message.reply?labels[message.reply]+' · '+message.replied_by:message.expires_at<=Date.now()?'Expired':'Waiting for reply'))));
+    status.textContent=body?'Message sent.':messages.length?'':'No staff messages yet.';
+    return true;
+  }catch(error){status.textContent=error.message;return false;}
+}
+byId('refresh-staff-messages').onclick=()=>loadStaffMessages();
+messageForm.onsubmit=async event=>{
+  event.preventDefault();
+  if(sendingMessage)return;
+  const data=Object.fromEntries(new FormData(messageForm));
+  const message=data.message.trim(),booth_id=data.booth_id;
+  if(!message)return;
+  if(messageAttempt?.message!==message||messageAttempt.booth_id!==booth_id){
+    messageAttempt={id:crypto.randomUUID(),message,booth_id};
+  }
+  sendingMessage=true;
+  const button=messageForm.querySelector('button');
+  button.disabled=true;
+  try{
+    if(await loadStaffMessages(messageAttempt)){
+      if(messageForm.elements.message.value.trim()===message)messageForm.elements.message.value='';
+      messageAttempt=undefined;
+    }
+  }
+  finally{sendingMessage=false;button.disabled=false;}
+};
 
 function wizard(form,finish,cancel){
   const steps=[...form.querySelectorAll('[data-step]')];

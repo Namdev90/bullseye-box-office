@@ -64,8 +64,8 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.9.11"
+        versionCode = 22
+        versionName = "0.9.12"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
         manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
     }
@@ -75,7 +75,9 @@ android {
     androidResources.ignoreAssetsPatterns.add("sharepass-handoff.png")
     buildTypes {
         release {
-            isMinifyEnabled = false // Intentionally unsigned. No production key.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             firebaseResources("in.sharepass.foundation", required = true)
         }
         debug { applicationIdSuffix = ".debug" }

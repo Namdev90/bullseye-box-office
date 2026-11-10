@@ -307,7 +307,9 @@ a.whatsapp-action{background:#146c43;color:white;border-color:#105c38;text-align
   min-height:var(--desk-min-height,clamp(18rem,55svh,31rem));
 }
 #shell .desk-collect{max-width:none;background:#fff3de;border:1px solid #b1987d;border-radius:1rem;padding:clamp(.85rem,3vw,1.4rem);align-content:center}
-.desk-collect h2{margin:0}.desk-collect input{max-width:16rem;font-size:1.5rem;letter-spacing:.2em;text-transform:uppercase}
+.desk-collect h2{margin:0}.desk-collect input{max-width:16rem;font-size:1.5rem;letter-spacing:.2em}
+.code-hint{margin:0;color:var(--muted,#5c4d43)}
+#staff-message-text{overflow-wrap:anywhere}
 #queue-recipient-list{padding-left:1.2rem}
 
 .desk-deposit{background:#f8ecd3;border:1px solid #b1987d;border-radius:1rem;padding:clamp(.85rem,3vw,1.4rem);display:grid;align-content:center;gap:.65rem}

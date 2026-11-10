@@ -78,7 +78,7 @@ async function pushRegistration(request,env,staff,register){
   return result.meta.changes===1?json({configured:true,registered:true}):error('This push token belongs to a different setup.',409);
 }
 
-async function deliverBoothPush(env,workspace,booth){
+async function deliverBoothPush(env,workspace,booth,staffMessage){
   const config=await pushConfiguration(env);
   if(!config)return;
   const db=env.DB;
@@ -95,7 +95,7 @@ async function deliverBoothPush(env,workspace,booth){
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(5000),
       headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
       body:JSON.stringify({message:{
-        token,notification:{title:'SharePass',body:'A pass deposit is ready for review.'},
+        token,notification:{title:'SharePass',body:staffMessage?'Open SharePass to review a staff message.':'A pass deposit is ready for review.'},
         data:{type:'sharepass_queue'},
         android:{priority:'HIGH',ttl:'120s',collapse_key:'sharepass_queue',
           notification:{channel_id:'booth_queue',tag:'sharepass_queue',visibility:'PRIVATE'}}
@@ -115,9 +115,9 @@ async function pushFanout(targets,send){
   for(let start=0;start<targets.length;start+=3)await Promise.allSettled(targets.slice(start,start+3).map(send));
 }
 
-async function scheduleBoothPush(env,ctx,workspace,booth){
+async function scheduleBoothPush(env,ctx,workspace,booth,staffMessage=false){
   if(!env.SHAREPASS_FCM_SERVICE_ACCOUNT&&!env.SHAREPASS_WEB_PUSH_PRIVATE_JWK)return;
-  const delivery=Promise.allSettled([deliverBoothPush(env,workspace,booth),deliverWebPush(env,workspace,booth)]);
+  const delivery=Promise.allSettled([deliverBoothPush(env,workspace,booth,staffMessage),deliverWebPush(env,workspace,booth)]);
   if(typeof ctx?.waitUntil==='function')ctx.waitUntil(delivery);
   else await delivery;
 }

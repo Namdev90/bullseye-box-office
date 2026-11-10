@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'26',
+  'X-SharePass-Version':'27',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -254,6 +254,10 @@ export default {async fetch(request,env,ctx){
         if(request.method!=='GET'||!staff.admin||deviceToken)return error('Page not found.',404);
         return await adminReport(env.DB,staff.workspace);
       }
+      if(path==='/api/admin/staff-messages'){
+        if(!staff.admin||deviceToken)return error('Page not found.',404);
+        return await adminStaffPrompts(request,env,ctx,staff);
+      }
       if(path==='/api/admin/code-policy'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);
         return await adminCodePolicy(request,env.DB,staff.workspace,env.SHAREPASS_CODE_THEME||'');
@@ -297,6 +301,7 @@ export default {async fetch(request,env,ctx){
         return json({staff:roster.results});
       }
       if(!staff.name)return error('Register your staff profile first.',403);
+      if(path==='/api/staff-messages/reply'&&request.method==='POST')return await replyToStaffPrompt(request,env.DB,staff);
       if(path==='/api/web-push')return await webPushSubscription(request,env,staff);
       if(path==='/api/booth'&&request.method==='GET')return await boothPoster(env.DB,staff,url.origin);
       if(path==='/api/queue'&&request.method==='GET')return await queueList(env.DB,staff);
