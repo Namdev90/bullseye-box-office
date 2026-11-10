@@ -158,7 +158,7 @@ function clearInvitation(){
 
 function showInvitation(data){
   const url=new URL(data.qr_url,location.origin);
-  if(url.origin!==location.origin||url.pathname!=='/connect'||
+  if(url.origin!==location.origin||!['/app-setup','/connect'].includes(url.pathname)||
     !/^[0-9a-f-]{36}$/i.test(url.searchParams.get('invite')||'')||!/^[0-9]{4}$/.test(data.code)){
     throw new Error('The setup details could not be displayed.');
   }

@@ -14,6 +14,22 @@ The repository contains the legacy prototype at its root, the hosted worker in `
 1. Build and lint using the approved HTTPS Site origin and Android Firebase client configuration from the release workspace. Use `-PsharepassOrigin` and `-PsharepassFirebaseConfig` when building from the public repository.
 2. Align and sign the APK locally with the approved signing identity for its channel. Keep keystores, passwords and server credentials outside the public repository, workflow logs and artifacts.
 3. Verify the package name and version with `aapt dump badging`. Check alignment with `zipalign -c -P 16 4`, verify signatures with `apksigner verify --verbose --print-certs`, and record the APK SHA-256. Compare the signing certificate with the previous build in the same channel to verify upgrade compatibility.
-4. With approval, upload only the verified APK to the existing owner-only SharePass Drive folder. Verify the uploaded file name, size and permissions before sharing its download link with the owner.
+4. For an approved public GitHub release, prepare the exact APK and signed update manifest locally. The following command prompts for the keystore and key passwords in the local terminal. Use a folder outside the source checkout for the two public artifacts.
 
-The private review channel uses the existing development signing identity. A Google Play rollout requires a separate approved signing and upload plan. A Play app signed with a different identity cannot replace the installed review APK in place. [Android app signing](https://developer.android.com/studio/publish/app-signing)
+   ```text
+   node android/tools/sharepass-release.mjs prepare <signed-apk> <version> <version-code> <approved-apk-sha256> <local-keystore> <key-alias> <output-folder>
+   ```
+
+   Use the same command with `inspect` and omit the keystore, alias, and output folder to verify an APK before signing metadata. Use `verify` with the signed manifest path as the last argument to check both files without the private key.
+
+5. With the release approved and GitHub CLI authenticated, run the stage command. It re-verifies both files, uploads only the APK and manifest to a draft named `android-vX.Y.Z`, and starts verification on main. The tag can be created when the verified draft is published.
+
+   ```text
+   node android/tools/sharepass-release.mjs stage <prepared-apk> <version> <version-code> <approved-apk-sha256> <signed-manifest> <approved-source-commit> <archive|latest>
+   ```
+
+   Use `latest` for the first update-enabled APK, 0.9.8 with version code 18, and later Android updates. Use `archive` for historical APKs. Keep source-only releases out of GitHub's latest slot too. Android uses the signed manifest asset on GitHub's latest release.
+
+6. The **Publish verified SharePass Android APK** workflow checks GitHub's recorded asset digests and the downloaded bytes, the APK identity and signer, and the signature over the update manifest. It publishes the verified draft if all checks pass. Wait for verification before staging another version. If dispatch needs to be retried, run the workflow from main with the approved tag, version code, APK hash and latest setting. Keep the keystore, signing passwords, production exports and runtime credentials outside GitHub.
+
+The direct-download channel uses the existing development signing identity. A Google Play rollout requires a separate approved signing and upload plan. A Play app signed with a different identity cannot replace the installed direct-download APK in place. [Android app signing](https://developer.android.com/studio/publish/app-signing)

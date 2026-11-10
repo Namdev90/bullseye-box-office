@@ -1,6 +1,6 @@
 {
   "name": "sharepass-android",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "private": true,
   "scripts": {
     "check": "node --check web/app.js && node --check web/demo-store.js && node --check web/desk-enhancements.js && node --check web/app-shell.js",

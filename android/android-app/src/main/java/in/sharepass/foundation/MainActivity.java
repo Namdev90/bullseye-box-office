@@ -36,23 +36,14 @@ public final class MainActivity extends Activity {
     private boolean connectedShowcase;
     private WebView web;
     private DeskWindow viewport;
+    private AppUpdates updates;
     private final BackRequestGate backGate = new BackRequestGate();
     private AlertDialog exitDialog;
 
     @Override public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
         if (openQueueFromPush(getIntent())) return;
-        Uri incoming = getIntent().getData();
-        if (incoming != null && "sharepass".equals(incoming.getScheme())) {
-            String invite = HostedRegisterClient.setupInvite(incoming.toString());
-            if (!invite.isEmpty()) {
-                startActivity(new android.content.Intent(this, HostedDeskActivity.class)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    .putExtra("setupInvite", invite));
-                finish();
-                return;
-            }
-        }
+        if (openSetup(getIntent())) return;
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 && getIntent().getBooleanExtra("nativeDesk", false)) {
             startActivity(new android.content.Intent(this, NativeDeskActivity.class));
@@ -136,7 +127,19 @@ public final class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        openQueueFromPush(intent);
+        if (!openQueueFromPush(intent)) openSetup(intent);
+    }
+
+    private boolean openSetup(Intent intent) {
+        Uri incoming = intent.getData();
+        if (incoming == null || ("https".equals(incoming.getScheme()) && !"/app-setup".equals(incoming.getEncodedPath()))) return false;
+        String invite = HostedRegisterClient.setupInvite(incoming.toString());
+        if (invite.isEmpty()) return false;
+        startActivity(new Intent(this, HostedDeskActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra("setupInvite", invite));
+        finish();
+        return true;
     }
 
     private boolean openQueueFromPush(Intent intent) {
@@ -164,7 +167,7 @@ public final class MainActivity extends Activity {
         ImageView artwork = new ImageView(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), viewport.paneHeight(),
-                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 200));
+                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 240));
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
             }
         };
@@ -198,6 +201,14 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-1, -2);
         action.topMargin = DeskSurface.dp(this, 8);
         pass.addView(open, action);
+        updates = new AppUpdates(this, () -> true);
+        if (updates.isEnabled()) {
+            Button updatesButton = new Button(this);
+            updatesButton.setText("App updates");
+            DeskSurface.button(updatesButton, false);
+            updatesButton.setOnClickListener(view -> updates.options());
+            pass.addView(updatesButton, new LinearLayout.LayoutParams(-1, -2));
+        }
         LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2);
         passLayout.topMargin = DeskSurface.dp(this, 12);
         stage.addView(pass, passLayout);
@@ -268,8 +279,24 @@ public final class MainActivity extends Activity {
     // API 33+ uses the registered OnBackInvokedCallback above; this override is only the legacy path.
     @android.annotation.SuppressLint("GestureBackNavigation")
     @Override public void onBackPressed() { handleBack(); }
-    @Override protected void onPause() { if (web != null) web.onPause(); super.onPause(); }
-    @Override protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
+    @Override protected void onPause() {
+        if (updates != null) updates.stop();
+        if (web != null) web.onPause();
+        super.onPause();
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        if (updates != null) updates.start();
+        if (web != null) web.onResume();
+    }
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        if (updates != null) updates.focusChanged(focused);
+    }
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent event) {
+        if (updates != null && event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) updates.cancelDownload();
+        return super.dispatchTouchEvent(event);
+    }
     @Override protected void onDestroy() { if (exitDialog != null) exitDialog.dismiss(); backGate.release(); if (web != null) { web.destroy(); web = null; } super.onDestroy(); }
     private void showUnavailable() {
         TextView notice = new TextView(this); notice.setTextColor(Color.WHITE); notice.setBackgroundColor(Color.rgb(37,37,32));

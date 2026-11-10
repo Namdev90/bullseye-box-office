@@ -6,10 +6,8 @@ plugins { id("com.android.application") }
 
 val sharepassOrigin = providers.gradleProperty("sharepassOrigin").orElse("https://sharepass.example.test").get()
 val parsedOrigin = URI(sharepassOrigin)
-require(sharepassOrigin.matches(Regex("https://[a-zA-Z0-9.-]+(?::[0-9]{1,5})?"))
-        && parsedOrigin.host != null && (parsedOrigin.port == -1 || parsedOrigin.port in 1..65535)) {
-    "sharepassOrigin must be an HTTPS origin without a path, query or credentials."
-}
+require(parsedOrigin.scheme == "https" && parsedOrigin.host?.matches(Regex("[a-z0-9]+(?:[.-][a-z0-9]+)*")) == true
+    && sharepassOrigin == "https://${parsedOrigin.host}") { "sharepassOrigin must be an HTTPS origin." }
 
 val firebaseConfig = providers.gradleProperty("sharepassFirebaseConfig").orNull?.let { file ->
     val config = rootProject.file(file)
@@ -52,13 +50,15 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 17
-        versionName = "0.9.7"
+        versionCode = 18
+        versionName = "0.9.8"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
+        manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures.resValues = firebaseConfig != null
     buildFeatures.buildConfig = true
+    androidResources.ignoreAssetsPatterns.add("sharepass-handoff.png")
     buildTypes {
         release {
             isMinifyEnabled = false // Intentionally unsigned. No production key.

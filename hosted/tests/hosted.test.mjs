@@ -206,7 +206,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'21');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'22');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -964,5 +964,44 @@ test('staff request identifiers cannot forge a guest receipt',async()=>{
     const receipt=await f.call(path+'?ticket='+ticket,undefined,'');
     assert.equal(receipt.status,200);
     assert.deepEqual(receipt.body,{status:'submitted',queue_ref:ticket.slice(-6).toUpperCase()});
+  }finally{f.close();}
+});
+
+test('staff desk has an install manifest and a scoped Android setup link with web fallback',async()=>{
+  const origin='https://test.example';
+  const fetchPage=path=>worker.fetch(new Request(origin+path,{headers:{'oai-authenticated-user-id':'account-one'}}),{});
+  const staff=await fetchPage('/staff');
+  assert.equal(staff.status,200);
+  assert.match(await staff.text(),/<link rel="manifest" href="\/staff.webmanifest">/);
+  const metadata=await fetchPage('/staff.webmanifest');
+  assert.equal(metadata.status,200);
+  assert.match(metadata.headers.get('Content-Type'),/^application\/manifest\+json/);
+  const manifest=await metadata.json();
+  assert.equal(manifest.start_url,'/staff');
+  assert.equal(manifest.display,'standalone');
+  for(const size of [192,512]){
+    const icon=manifest.icons.find(item=>item.sizes===size+'x'+size);
+    assert(icon);
+    const bytes=Buffer.from(await (await fetchPage(icon.src)).arrayBuffer());
+    assert.equal(bytes.readUInt32BE(16),size);
+    assert.equal(bytes.readUInt32BE(20),size);
+  }
+  const links=await worker.fetch(new Request(origin+'/.well-known/assetlinks.json'),{});
+  assert.equal(links.status,200);
+  assert.match(links.headers.get('Content-Type'),/^application\/json/);
+  const [link]=await links.json();
+  assert.deepEqual(link.relation,['delegate_permission/common.handle_all_urls']);
+  assert.equal(link.target.package_name,'in.sharepass.foundation');
+  assert.equal(link.target.sha256_cert_fingerprints[0].replaceAll(':','').toLowerCase(),
+    '0a8b400966fd754c6db2b33b94f78c9898803aff37718fa34c34aef77b642c12');
+  const fallback=await fetchPage('/app-setup?invite=7b5fde7e-1a21-4e59-a568-1e3760963d3d');
+  const old=await fetchPage('/connect');
+  assert.equal(fallback.status,200);
+  assert.equal(await fallback.text(),await old.text());
+  const f=fixture();
+  try{
+    const response=await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'Test desk',device_label:'Test browser'});
+    assert.equal(response.status,200);
+    assert.equal(new URL(response.body.qr_url).pathname,'/app-setup');
   }finally{f.close();}
 });
