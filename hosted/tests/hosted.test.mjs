@@ -245,7 +245,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'24');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'26');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -843,8 +843,10 @@ test('a recycled code requires the new receipt and never redirects an old messag
     assert.equal((await create('reuse-pending','reuse-pending')).status,409);
     assert.equal((await finish(last.body.collection,'last-handover')).status,200);
     env.SHAREPASS_ALLOW_CODE_REUSE='0';
+    assert.equal((await f.call('/api/context')).body.pickup_code_reuse_enabled,false);
     assert.equal((await create('reuse-disabled','reuse-disabled')).status,409);
     delete env.SHAREPASS_ALLOW_CODE_REUSE;
+    assert.equal((await f.call('/api/context')).body.pickup_code_reuse_enabled,true);
     const attempts=await Promise.all([create('reuse-candidate-A','reuse-candidate-A'),create('reuse-candidate-B','reuse-candidate-B')]);
     assert.deepEqual(attempts.map(r=>r.status).sort(),[200,409]);
     const current=attempts.find(r=>r.status===200).body.deposit;
