@@ -266,3 +266,13 @@ test('read-only replay never notifies, renews, or resurrects guest receipt alert
     }
   }finally{globalThis.fetch=originalFetch;f.close();}
 });
+
+test('numeric refresh rejects letters locally without creating a mutation journal',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),p=await page(f);
+    await start(p,{...data,collection_code:'K7M4'});await p.submit();
+    assert.equal(p.storage.size,0);
+    assert.equal(p.calls.filter(c=>c.path===refreshPath).length,0);
+    assert.equal(p.node('error').textContent,'Enter the original four-digit collection code.');
+  }finally{f.close();}
+});

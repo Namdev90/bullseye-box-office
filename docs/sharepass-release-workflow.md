@@ -9,6 +9,8 @@ The repository contains the legacy prototype at its root, the hosted worker in `
 3. With approval, back up the live register and verify the restore before promoting the exact reviewed Site build. Verify live access and the new version after publishing.
 4. Keep the Sites deployment credential, owner password secret, Firebase sender credential and VAPID private key in their respective private stores. The public Site template and CI build use test configuration.
 
+Before deploying the four-digit pickup policy, complete or reconcile any outstanding pickups with letter codes using the current desk. Roll out the compatible web and Android desks together. Reused codes require the current pickup reference and become available only after a fully confirmed handover. Set `SHAREPASS_ALLOW_CODE_REUSE=0` during a staged rollout if staff need more time to switch clients.
+
 ## Android APK
 
 1. Build and lint using the approved HTTPS Site origin and Android Firebase client configuration from the release workspace. Use `-PsharepassOrigin` and `-PsharepassFirebaseConfig` when building from the public repository.

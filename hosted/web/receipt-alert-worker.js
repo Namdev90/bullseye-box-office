@@ -26,7 +26,9 @@ async function withLiveReceipt(action){
       result=await response.json();
     }catch{return;} // Offline is not revocation; preserve proof for a later retry.
     if(result.enabled!==true||!Number.isFinite(result.expires_at)||result.expires_at<=Date.now()){
-      await cache.delete(scope);return;
+      // Preserve the code-free cleanup index. A later page visit can safely
+      // remove this registration after rechecking inactive server consent.
+      return;
     }
     // Recheck local permission/subscription after the network round trip.
     const current=await self.registration.pushManager.getSubscription();

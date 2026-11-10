@@ -9,7 +9,7 @@ class DemoStore {
     this.booths=[{id:'B1',label:'Booth 1'},{id:'B2',label:'Booth 2'}];
     this.codes=new Map(); this.claims=new Map(); this.requests=new Map(); this.failures=[];
     this.events=[{id:'training-event-001',name:eventName},...(singleEvent?[]:[{id:'training-event-002',name:'Oktoberfest 2027 — Concept Demo · isolation fixture'}])];
-    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Kenneth',depositor_label:'Aria',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'K7M4','PKT-DEMO-001');
+    if(seed) this.create({request_id:'sample',event_id:this.events[0].id,operator:'Kenneth',depositor_label:'Aria',location:'A-01',quantities:{normal:6,vip:2,vvip:1},custody_confirmed:true},'0420','PKT-DEMO-001');
   }
   clone(value){return JSON.parse(JSON.stringify(value));}
   error(message,status=400,notExecuted=true){const e=new Error(message);e.status=status;e.notExecuted=notExecuted;throw e;}
@@ -89,18 +89,22 @@ class DemoStore {
     return sample[0]%limit;
   }
   code(){
-    const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return Array.from({length:4},()=>alphabet[this.randomBelow(alphabet.length)]).join('');
+    return String(this.randomBelow(10000)).padStart(4,'0');
   }
   availableCode(event,exclude=''){
     const available=code=>code!==exclude&&!this.codes.has(event+':'+code);
-    const candidates=this.preferredCodes?.filter(([code])=>available(code));
+    const candidates=this.preferredCodes?.filter(([code])=>/^[0-9]{4}$/.test(code)&&available(code));
     if(candidates?.length){
       let pick=this.randomBelow(candidates.reduce((sum,[,weight])=>sum+weight,0));
       for(const [code,weight] of candidates)if((pick-=weight)<0)return code;
     }
     for(let attempt=0;attempt<128;attempt++){
       const code=this.code();
+      if(available(code))return code;
+    }
+    const start=this.randomBelow(10000);
+    for(let index=0;index<10000;index++){
+      const code=String((start+index)%10000).padStart(4,'0');
       if(available(code))return code;
     }
     this.error('Could not allocate a collection code. Try again.',409);
@@ -117,9 +121,9 @@ class DemoStore {
     if(b.update_contact)d.update_contact=this.clone(b.update_contact);
     if(b.valid_minutes!==undefined)d.code_expires_at=this.now()+b.valid_minutes*60000;
     const custom=b.custom_code;
-    if(custom&&!/^[A-Z0-9]{4}$/.test(custom))this.error('Enter four letters or digits.');
+    if(custom&&!/^[0-9]{4}$/.test(custom))this.error('Enter four digits.');
     if(custom&&this.codes.has(b.event_id+':'+custom))this.error('That code is already used. Choose another.',409);
-    const code=custom||(b.suggested_code&&!this.codes.has(b.event_id+':'+b.suggested_code)?b.suggested_code:null)||(fixedCode&&!this.codes.has(b.event_id+':'+this.normalize(fixedCode))?fixedCode:this.availableCode(b.event_id));
+    const code=custom||(b.suggested_code&&/^[0-9]{4}$/.test(b.suggested_code)&&!this.codes.has(b.event_id+':'+b.suggested_code)?b.suggested_code:null)||(fixedCode&&!this.codes.has(b.event_id+':'+this.normalize(fixedCode))?fixedCode:this.availableCode(b.event_id));
     this.deposits.push(d);this.codes.set(b.event_id+':'+this.normalize(code),d.id);
     this.record('CODE_GENERATED',d,operator,{quantities:{...b.quantities},location,booth_id});
     this.intent('DEPOSIT_CREATED',d,d.id,notification_channels,evidence);
@@ -128,7 +132,8 @@ class DemoStore {
   verify(b){
     this.purgeEvidence();this.event(b.event_id);this.failures=this.failures.filter(t=>t>this.now()-60000);
     if(this.failures.length>=5)this.error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
-    const code=this.normalize(b.collection_code);
+    const code=typeof b.collection_code==='string'?b.collection_code.trim():'';
+    if(!/^[0-9]{4}$/.test(code))this.error('Enter four digits.');
     const id=this.codes.get(b.event_id+':'+code);const d=this.deposits.find(d=>d.id===id);
     if(!d){this.failures.push(this.now());this.error('Collection code not found in this event.',404);}
     if(d.active_collection_code&&d.active_collection_code!==code||d.code_expires_at<=this.now())this.error('This code expired. Ask the booth supervisor to reconcile the packet.',409);
@@ -199,6 +204,7 @@ class DemoStore {
     if(!Object.values(d.remaining).some(Boolean)||this.collections.some(c=>c.deposit_id===id&&c.status==='RELEASE_RECORDED')){
       this.error('Check the physical balance and finish any pending handover first.',409);
     }
+    if(b.custom_code&&!/^[0-9]{4}$/.test(b.custom_code))this.error('Enter four digits.');
     const code=b.custom_code||this.availableCode(b.event_id,b.collection_code);
     if(b.custom_code&&this.codes.has(b.event_id+':'+code))this.error('That code is already used. Choose another.',409);
     this.codes.set(b.event_id+':'+code,id);

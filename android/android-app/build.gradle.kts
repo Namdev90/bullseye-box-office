@@ -1,8 +1,22 @@
 import groovy.json.JsonSlurper
 import com.android.build.api.dsl.ApplicationBuildType
 import java.net.URI
+import javax.inject.Inject
 
 plugins { id("com.android.application") }
+
+abstract class PrepareNativeAssets @Inject constructor(private val files: FileSystemOperations) : DefaultTask() {
+    @get:InputDirectory abstract val web: DirectoryProperty
+    @get:OutputDirectory abstract val output: DirectoryProperty
+
+    @TaskAction fun prepare() {
+        files.sync {
+            from(web)
+            include("assets/sharepass-approved-logo.jpg", "vendor/sharepass-qr.js", "vendor/QR-LICENSE.txt", "vendor/QR-SOURCES.md")
+            into(output)
+        }
+    }
+}
 
 val sharepassOrigin = providers.gradleProperty("sharepassOrigin").orElse("https://sharepass.example.test").get()
 val parsedOrigin = URI(sharepassOrigin)
@@ -50,8 +64,8 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 18
-        versionName = "0.9.8"
+        versionCode = 20
+        versionName = "0.9.10"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
         manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
     }
@@ -66,12 +80,19 @@ android {
         }
         debug { applicationIdSuffix = ".debug" }
     }
-    sourceSets.getByName("main").assets.srcDir(rootProject.file("web"))
+    sourceSets.getByName("debug").assets.srcDir(rootProject.file("web"))
     sourceSets.getByName("debug").java.srcDir("src/polling/java")
     sourceSets.getByName("release").java.srcDir(if (firebaseConfig == null) "src/polling/java" else "src/fcm/java")
     if (firebaseConfig != null) {
         sourceSets.getByName("release").manifest.srcFile("src/fcm/AndroidManifest.xml")
     }
+}
+
+val prepareNativeAssets = tasks.register<PrepareNativeAssets>("prepareNativeAssets") {
+    web.set(rootProject.layout.projectDirectory.dir("web"))
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(prepareNativeAssets, PrepareNativeAssets::output)
 }
 
 dependencies {

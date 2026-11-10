@@ -51,7 +51,7 @@ async function ledgerCode(db,owner,theme,exclude='',preferred='',allowReuse=fals
     ledgerCodePolicy={...policy,weights,total:weights.reduce((sum,[,weight])=>sum+weight,0),eligible:new Set(weights.map(([code])=>code))};
   }
   const {weights,total,eligible}=ledgerCodePolicy;
-  const allowed=code=>!CODE_CATALOGUE.has(code)||eligible.has(code);
+  const allowed=code=>/^[0-9]{4}$/.test(code)&&(!CODE_CATALOGUE.has(code)||eligible.has(code));
   const candidates=new Set(preferred&&allowed(preferred)?[preferred]:[]);
   for(let i=0;i<20&&total;i++){
     let pick=model.randomBelow(total);
@@ -62,10 +62,15 @@ async function ledgerCode(db,owner,theme,exclude='',preferred='',allowReuse=fals
     if(allowed(code))candidates.add(code);
   }
   candidates.delete(exclude);
-  return (await ledgerStatement(db,"SELECT value AS code FROM json_each(?) j WHERE NOT EXISTS("+
+  const firstAvailable=async codes=>(await ledgerStatement(db,"SELECT value AS code FROM json_each(?) j WHERE NOT EXISTS("+
     'SELECT 1 FROM sharepass_ledger_codes held WHERE owner=? AND event=? AND code=j.value'+
     (allowReuse?' AND NOT '+reusableCode('held'):'')+') ORDER BY j.key LIMIT 1',
-    ledgerJson([...candidates]),owner,EVENT).first())?.code;
+    ledgerJson(codes),owner,EVENT).first())?.code;
+  const sampled=await firstAvailable([...candidates]);
+  if(sampled)return sampled;
+  const start=model.randomBelow(10000);
+  return firstAvailable(Array.from({length:10000},(_,index)=>String((start+index)%10000).padStart(4,'0'))
+    .filter(code=>code!==exclude&&allowed(code)));
 }
 
 async function ledgerDepositByCode(db,owner,code){
@@ -152,6 +157,9 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
         if(claim)model.claims.set(body.claim_token,JSON.parse(claim.payload));
       }
       if(isCreate||isReissue){
+        if([body.custom_code,body.suggested_code].some(code=>code!==undefined&&!/^[0-9]{4}$/.test(code))){
+          return error('Enter four digits.',400);
+        }
         if(body.custom_code){
           const reserved=await read('SELECT deposit_id FROM sharepass_ledger_codes held WHERE owner=? AND event=? AND code=?'+
             (allowReuse?' AND NOT '+reusableCode('held'):''),EVENT,body.custom_code);

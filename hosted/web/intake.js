@@ -32,6 +32,7 @@ const alertButton=document.getElementById('receipt-alerts');
 const alertStatus=document.getElementById('receipt-alert-status');
 const alertCacheName='sharepass-receipt-alerts';
 let alertKey,alertScope,alertsEnabled=false,alertRevision=0;
+let receiptCleanupCursor;
 document.getElementById('finish-receipt').onclick=()=>{
   if(booth)try{sessionStorage.removeItem('sharepass-receipt:'+token);}catch{}
 };
@@ -225,6 +226,80 @@ function showReceipt(result){
     prepareReceiptAlerts(requestId).catch(()=>{});
   }
 }
+// Best-effort maintenance is independent of the visible receipt. Never wait for
+// a busy receipt lock, infer revocation from local expiry, or mutate server consent.
+async function cleanupReceiptAlerts(){
+  if(!navigator.locks?.request||!navigator.serviceWorker||!('caches' in window))return;
+  const cache=await caches.open(alertCacheName),keys=(await cache.keys())
+    .filter(key=>key.url.startsWith(location.origin)&&/^\/receipt-alerts\/[a-f0-9]{64}\/$/.test(key.url.slice(location.origin.length)))
+    .sort((a,b)=>a.url<b.url?-1:a.url>b.url?1:0);
+  // Persist only the last scope, never a ticket, contact, code or push endpoint.
+  // Advance even past busy/live/invalid records so subsequent visits make progress.
+  let cursor=receiptCleanupCursor;
+  try{cursor=localStorage.getItem('sharepass-alert-cleanup-cursor')||cursor;}catch{}
+  const next=keys.findIndex(key=>key.url>cursor),start=next<0?0:next;
+  for(let i=0;i<Math.min(keys.length,16);i++){
+    const scope=keys[(start+i)%keys.length].url;
+    receiptCleanupCursor=scope;
+    try{localStorage.setItem('sharepass-alert-cleanup-cursor',scope);}catch{}
+    if(scope===alertScope)continue;
+    try{
+      await navigator.locks.request('sharepass-receipt:'+scope,{ifAvailable:true},async lock=>{
+        if(!lock||scope===alertScope)return;
+        let proof=await (await cache.match(scope))?.text();
+        if(!proof)return;
+        const stored=JSON.parse(proof),match=typeof stored.path==='string'&&
+          /^\/booth\/([a-f0-9-]{36})#receipt=([a-f0-9-]{36})$/.exec(stored.path);
+        if(!match||match[2]===requestId)return;
+        const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(match[2]));
+        const expected=location.origin+'/receipt-alerts/'+Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('')+'/';
+        if(scope!==expected)return;
+        const registration=await receiptWorkerAt(scope);
+        const pending=stored.cleanupPending===true&&Number.isFinite(stored.expiresAt)&&
+          Object.keys(stored).sort().join(',')==='cleanupPending,expiresAt,path';
+        // Locks serialize our tabs and worker. Preserve replaced proof/resources
+        // even if an earlier inactive response or teardown marker is still valid.
+        const unchanged=async()=>{
+          if(scope===alertScope||match[2]===requestId)return false;
+          if(await receiptWorkerAt(scope)!==registration)return false;
+          return await (await cache.match(scope))?.text()===proof;
+        };
+        const subscription=await registration?.pushManager.getSubscription();
+        if(!subscription&&!pending)return;
+        if(subscription){
+          const response=await fetch('/api/public/booth/'+match[1]+'/alerts',{
+            method:'POST',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000),
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({action:'status',ticket:match[2],endpoint:subscription.endpoint})
+          });
+          if(!response.ok)return;
+          const result=await response.json();
+          if(!await unchanged())return;
+          const current=await registration.pushManager.getSubscription();
+          if(current?.endpoint!==subscription.endpoint||!await unchanged())return;
+          if(result?.enabled===true&&Number.isFinite(result.expires_at)&&result.expires_at>Date.now()){
+            if(pending)await cache.put(scope,new Response(JSON.stringify({path:stored.path,expiresAt:result.expires_at})));
+            return;
+          }
+          if(result?.enabled!==false||!Number.isFinite(stored.expiresAt))return;
+          // Journal before unsubscribe: a crash or failed unregister must leave a
+          // durable, endpoint-free way to finish this already-authorized cleanup.
+          const marker=JSON.stringify({path:stored.path,expiresAt:stored.expiresAt,cleanupPending:true});
+          await cache.put(scope,new Response(marker));
+          proof=marker;
+          if(!await unchanged()||(await registration.pushManager.getSubscription())?.endpoint!==subscription.endpoint)return;
+          if(!await subscription.unsubscribe())return;
+        }
+        // Without a subscription, only our valid durable marker permits retry.
+        // This also completes a crash after unregister but before cache deletion.
+        if(!await unchanged()||await registration?.pushManager.getSubscription())return;
+        if(registration&&!await registration.unregister())return;
+        if(scope!==alertScope&&match[2]!==requestId&&!await receiptWorkerAt(scope)&&
+          await (await cache.match(scope))?.text()===proof)await cache.delete(scope);
+      });
+    }catch{} // Offline, malformed records, unsupported locks: leave proof alone.
+  }
+}
 async function receiptAlertLock(scope,action){
   if(navigator.locks?.request)return navigator.locks.request('sharepass-receipt:'+scope,()=>action(true));
   // Without cross-context locking, automatic refresh is read-only.
@@ -252,8 +327,9 @@ async function prepareReceiptAlerts(ticket){
         alertsEnabled=Notification.permission==='granted'&&current?.endpoint===subscription.endpoint&&
           result.enabled===true&&Number.isFinite(result.expires_at)&&result.expires_at>Date.now();
         if(locked){
-          if(alertsEnabled)await cache.put(scope,new Response(JSON.stringify({...stored,expiresAt:result.expires_at})));
-          else await cache.delete(scope);
+          if(alertsEnabled)await cache.put(scope,new Response(JSON.stringify({path:stored.path,expiresAt:result.expires_at})));
+          // Keep inactive proof indexed until bounded maintenance can safely
+          // unsubscribe and unregister it. A stale expiry alone is not revocation.
         }
       }catch{
         if(requestId!==ticket||revision!==alertRevision)return;
@@ -263,7 +339,7 @@ async function prepareReceiptAlerts(ticket){
       }
     }else{
       alertsEnabled=false;
-      if(stored&&locked)await cache.delete(scope);
+      // Missing permission/subscription is uncertain. Preserve the cleanup index.
     }
     if(requestId!==ticket||revision!==alertRevision)return;
     alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
@@ -422,4 +498,8 @@ form.onsubmit=async event=>{
     form.hidden=false;
     statusLine.textContent='Add your details and pass counts. Then show staff your passes.';
   }catch(error){statusLine.textContent='This form couldn’t be opened.';errorLine.textContent=error.message;}
+  finally{
+    // Start only after the current ticket is known. Never await maintenance.
+    setTimeout(()=>{cleanupReceiptAlerts().catch(()=>{});},0);
+  }
 })();

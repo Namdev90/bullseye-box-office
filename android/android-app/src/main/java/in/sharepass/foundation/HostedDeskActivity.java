@@ -328,7 +328,7 @@ public final class HostedDeskActivity extends Activity {
             case "Booth queue", "Check customer name" -> "Match the waiting person's name and queue reference before checking their passes.";
             case "Check pass counts", "Check available passes" -> "Compare the counts for each type with the passes in front of you.";
             case "Shelf or slot", "Find the packet" -> "Use the physical shelf or slot label so staff can find the right packet.";
-            case "Custom code (optional)" -> "Use four letters or numbers. Leave it blank to let SharePass choose an unused code.";
+            case "Custom code (optional)" -> "Use four digits. Leave it blank to let SharePass choose an available code.";
             case "Code lifetime (optional)" -> "Choose between 5 minutes and 2 days. Leave it blank for the register's default.";
             case "Confirm receipt" -> "Confirm after the customer's physical passes are in your hands.";
             case "Collect passes" -> "Enter the four characters the collector shares. Looking up the code does not release passes.";
@@ -855,11 +855,11 @@ public final class HostedDeskActivity extends Activity {
                 return client.stockChange(path, body);
             }, this::stockResult), true);
         });
-        wizard.text("Custom code (optional)", draft.code, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS,
-            4, "Four letters or numbers", (value, validate) -> {
-                draft.code = value.toUpperCase(Locale.ROOT);
-                return validate && !draft.code.isEmpty() && !draft.code.matches("[A-Z0-9]{4}")
-                    ? "Enter four letters or numbers" : null;
+        wizard.text("Custom code (optional)", draft.code, InputType.TYPE_CLASS_NUMBER,
+            4, "Four digits", (value, validate) -> {
+                draft.code = value;
+                return validate && !draft.code.isEmpty() && !draft.code.matches("[0-9]{4}")
+                    ? "Enter four digits" : null;
             }, Collections.singletonMap("Use automatic code", ""));
         Map<String, String> expiryChoices = new LinkedHashMap<>();
         expiryChoices.put("1 hour", "60");
@@ -1027,24 +1027,24 @@ public final class HostedDeskActivity extends Activity {
         }, result -> receipt(client.receipt()));
     }
     private void collectionEntry(String initial) {
-        EditText input = field("Collection code", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 4);
+        EditText input = field("Collection code", InputType.TYPE_CLASS_NUMBER, 4);
         input.setText(initial);
-        input.setHint("AB12");
+        input.setHint("0420");
         input.setTextSize(26);
         input.setShowSoftInputOnFocus(false);
         deskInput = input;
         Runnable find = () -> {
-            String code = input.getText().toString().trim().toUpperCase(Locale.ROOT);
-            if (!code.matches("[A-Z0-9]{4}")) { input.setError("Enter the four-character code"); return; }
+            String code = input.getText().toString().trim();
+            if (!code.matches("[0-9]{4}")) { input.setError("Enter four digits"); return; }
             deskCode = code;
             verifyPickup(code, "");
         };
         button("Find passes", find, true);
-        autoAdvance(input, value -> value.matches("[A-Za-z0-9]{4}"), find);
+        autoAdvance(input, value -> value.matches("[0-9]{4}"), find);
         LinearLayout keypad = new LinearLayout(this);
         keypad.setOrientation(LinearLayout.VERTICAL);
         content.addView(keypad);
-        drawKeypad(keypad, input, false);
+        drawKeypad(keypad, input);
     }
     private void verifyPickup(String code, String reference) {
         run(() -> {
@@ -1074,10 +1074,9 @@ public final class HostedDeskActivity extends Activity {
         };
         button("Find passes", check, true);
     }
-    private void drawKeypad(LinearLayout keypad, EditText input, boolean letters) {
-        keypad.removeAllViews();
-        String keys = letters ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "1234567890";
-        int preferredColumns = letters ? 5 : 3;
+    private void drawKeypad(LinearLayout keypad, EditText input) {
+        String keys = "1234567890";
+        int preferredColumns = 3;
         GridLayout keysGrid = new GridLayout(this);
         keysGrid.setColumnCount(preferredColumns);
         keypad.addView(keysGrid, new LinearLayout.LayoutParams(-1, -2));
@@ -1099,8 +1098,7 @@ public final class HostedDeskActivity extends Activity {
         }
         LinearLayout controls = new LinearLayout(this);
         keypad.addView(controls);
-        addKey(controls,letters?"123":"ABC",letters?"Show numbers":"Show letters",() -> drawKeypad(keypad,input,!letters));
-        addKey(controls,"⌫","Delete last character",() -> {
+        addKey(controls,"⌫","Delete last digit",() -> {
             input.requestFocus();
             if (input.length()>0) input.getText().delete(input.length()-1,input.length());
         });

@@ -81,7 +81,7 @@ test('closed-tab push and notification click revalidate stale cache and store no
 test('expired, stopped or replaced server consent never gets renewed or notified',async t=>{
   for(const reason of ['expired','stopped','replaced'])await t.test(reason,async()=>{
     const f=await browser();f.status={enabled:false};await f.event('push');await f.event('notificationclick');
-    assert.equal(f.notices.length,0);assert.equal(f.opened.length,0);assert.equal(f.record,null);
+    assert.equal(f.notices.length,0);assert.equal(f.opened.length,0);assert(f.record,'Inactive proof stays indexed for safe browser cleanup');
     await f.page.prepare();assert.equal(f.page.enabled(),false);
     assert.equal(f.writes.length,0);
   });
@@ -108,7 +108,7 @@ test('permission revoked or browser subscription missing prevents background act
   for(const mode of ['denied','missing'])await t.test(mode,async()=>{
     const f=await browser();if(mode==='denied')f.permission.permission='denied';else f.subscription=null;
     await f.event('push');await f.event('notificationclick');await f.page.prepare();
-    assert.equal(f.calls.length,0);assert.equal(f.notices.length,0);assert.equal(f.opened.length,0);assert.equal(f.record,null);
+    assert.equal(f.calls.length,0);assert.equal(f.notices.length,0);assert.equal(f.opened.length,0);assert(f.record,'Inactive proof stays indexed for safe browser cleanup');
   });
 });
 
@@ -215,4 +215,13 @@ test('enable captures scope and cleans up only owned resources after receipt nav
     await t.test('existing '+stage,()=>interruptedEnable({stage,existing:true}));
   }
   await t.test('replacement during enable response',()=>interruptedEnable({stage:'response',replacement:true}));
+});
+
+test('normal page and worker live renewal replace teardown marker with exact clean proof',async t=>{
+  for(const mode of ['page','worker'])await t.test(mode,async()=>{
+    const f=await browser();f.record={...f.record,cleanupPending:true};
+    if(mode==='page')await f.page.prepare();else await f.event('push');
+    assert.deepEqual(Object.keys(f.record).sort(),['expiresAt','path']);
+    assert.equal(f.record.expiresAt,f.now+48*hour);
+  });
 });

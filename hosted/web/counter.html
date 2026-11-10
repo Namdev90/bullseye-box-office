@@ -25,7 +25,7 @@
     <section id="desk" hidden><div class="desk-heading"><div><p class="eyebrow">SharePass · Box office</p><h1 tabindex="-1">Pass desk</h1></div></div><div class="desk-priority">
       <form id="desk-code-form" class="desk-collect">
         <h2>Collect passes</h2>
-        <label class="field">Collection code <input name="code" maxlength="4" pattern="[A-Za-z0-9]{4}" required autocomplete="off" autocapitalize="characters" placeholder="AB12"></label>
+        <label class="field">Collection code <input name="code" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" placeholder="0420"></label>
         <button class="primary">Find passes</button>
       </form>
       <section class="desk-deposit">
@@ -64,7 +64,7 @@
           <div class="receipt queue-receipt"><h2 id="queue-name"></h2><strong id="queue-counts"></strong><p id="queue-contact" hidden></p></div>
           <section id="queue-recipient-details" class="receipt" hidden aria-labelledby="queue-recipient-summary"><h3 id="queue-recipient-summary">Collectors</h3><ul id="queue-recipient-list"></ul></section>
           <details id="queue-code-options"><summary>Code and expiry options</summary>
-            <label class="field">Custom code (optional) <input name="custom_code" placeholder="e.g. FUNN" pattern="[A-Za-z0-9]{4}" title="Four letters or digits" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false"></label>
+            <label class="field">Custom code (optional) <input name="custom_code" placeholder="e.g. 1337" pattern="[0-9]{4}" title="Four digits" maxlength="4" inputmode="numeric" autocomplete="off" spellcheck="false"></label>
             <button type="button" id="use-auto-code">Use automatic code</button><button type="button" id="suggest-code">Refresh code suggestion</button>
             <div class="quick-choices" aria-label="Common expiry choices">
               <button type="button" data-expiry="60">1 hour</button><button type="button" data-expiry="1440">1 day</button><button type="button" data-expiry="2880">2 days</button>
@@ -134,14 +134,14 @@
         <p>Match the physical packet. The old code will stop working. Share the replacement with the collectors.</p>
         <label class="field">Physical packet label <input name="packet" required maxlength="12" autocomplete="off" autocapitalize="characters"></label>
         <label class="field" id="refresh-original-code" hidden>Original collection code before the interrupted refresh
-          <input name="code" maxlength="4" pattern="[A-Za-z0-9]{4}" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <input name="code" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" autocomplete="off" spellcheck="false">
         </label>
         <button class="primary">Confirm refresh</button><button id="cancel-refresh" type="button">Back to receipt</button>
       </form>
     </section>
     <section id="share" hidden><h1 tabindex="-1">Share code</h1><button id="share-back" type="button">Back to receipt</button><div id="share-content"></div></section>
     <section id="lookup" hidden><h1 tabindex="-1">Collect passes</h1><form id="lookup-form">
-      <label class="field">Collection code <input name="code" maxlength="4" minlength="4" required autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+      <label class="field">Collection code <input name="code" maxlength="4" minlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" spellcheck="false"></label>
       <label class="field" id="lookup-reference" hidden>Pickup reference from the collector’s receipt
         <input name="reference" maxlength="12" minlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="PKT-1234ABCD">
       </label>
