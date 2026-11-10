@@ -63,6 +63,30 @@ test('Firebase is opt-in, authenticated, permission-aware, and opens only the qu
  const host=read('android-app/src/main/java/in/sharepass/foundation/MainActivity.java');
  assert(host.includes('startActivity(QueueNotifications.openQueue(this))'));
 });
+test('shared AndroidX APIs are compile dependencies even when Firebase is absent',()=>{
+ const gradle=read('android-app/build.gradle.kts');
+ const dependencies=gradle.slice(gradle.indexOf('\ndependencies {'));
+ // Only declarations directly inside dependencies are unconditional. A Core
+ // declaration inside the Firebase branch must not satisfy this regression.
+ let depth=0;
+ const unconditional=[];
+ for(const line of dependencies.split('\n')){
+   if(depth===1)unconditional.push(line.trim());
+   depth+=(line.match(/\{/g)||[]).length-(line.match(/\}/g)||[]).length;
+ }
+ assert(unconditional.includes('implementation("androidx.core:core:1.8.0")'));
+ assert(unconditional.includes('implementation("androidx.window:window-java:1.5.1")'));
+ assert(!unconditional.some(line=>/^(?:implementation|api|add)\(/.test(line)&&line.includes('com.google.firebase')));
+ assert(dependencies.includes('if (firebaseConfig != null) {\n        add("releaseImplementation", platform("com.google.firebase:firebase-bom:35.1.0"))\n        add("releaseImplementation", "com.google.firebase:firebase-messaging")'));
+ for(const [file,api] of [['DeskWindow','util.Consumer'],['AppUpdates','content.FileProvider'],['UpdateFileProvider','content.FileProvider']]){
+   assert(read(`android-app/src/main/java/in/sharepass/foundation/${file}.java`).includes(`import androidx.core.${api};`));
+ }
+ // These real Android compile/lint gates complement this source contract. They
+ // must remain independent, with a clean to avoid Firebase build leftovers.
+ const ci=read('../.github/workflows/sharepass-ci.yml');
+ assert(ci.includes('"-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease'));
+ assert(ci.includes('bash ./gradlew --no-daemon :android-app:clean :android-app:assembleRelease :android-app:lintRelease :android-app:mergeDebugAssets :android-app:compileDebugJavaWithJavac :android-app:lintDebug'));
+});
 test('native polling has a separate executor and brief actions do not show loading text',()=>{
  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
  const run=desk.slice(desk.indexOf('private void run(Work'),desk.indexOf('private void login'));

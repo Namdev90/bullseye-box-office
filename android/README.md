@@ -39,6 +39,14 @@ asset directory is verified, without packaging a debug APK or creating signing
 material. Inventory-verifier tests use synthetic ZIPs, not real APKs. On-device
 layout, gesture, keyboard, accessibility and installer checks remain separate.
 
+Shared native code imports `Consumer` and `FileProvider`, so AndroidX Core is an
+unconditional `implementation` dependency, independent of Firebase. The pinned
+`core:1.8.0` matches the existing runtime requirement in the official
+[window-java 1.5.1 Gradle metadata](https://dl.google.com/dl/android/maven2/androidx/window/window-java/1.5.1/window-java-1.5.1.module).
+Window's runtime-only dependency does not put Core on the app's compile
+classpath. Firebase remains opt-in and release-only; keep both clean CI build
+configurations when changing dependencies.
+
 Published Android versions and tags identify fixed APK bytes. Source integration
 does not replace or republish those APKs. Any changed signed release needs a new
 version/tag and a versionCode higher than every published build through the
