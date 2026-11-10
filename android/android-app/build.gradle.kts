@@ -96,6 +96,9 @@ androidComponents.onVariants(androidComponents.selector().withBuildType("release
 }
 
 dependencies {
+    // Shared Consumer/FileProvider imports must compile without optional Firebase.
+    // Match window-java 1.5.1's existing Core runtime dependency.
+    implementation("androidx.core:core:1.8.0")
     implementation("androidx.window:window-java:1.5.1")
     if (firebaseConfig != null) {
         add("releaseImplementation", platform("com.google.firebase:firebase-bom:35.1.0"))

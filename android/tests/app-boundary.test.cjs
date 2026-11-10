@@ -31,6 +31,32 @@ test('Android launcher opens a native desk with internet and optional notificati
  assert(desk.includes('"/api/intakes/" + token + "/confirm"'));
  assert(read('android-app/build.gradle.kts').includes('in.sharepass.foundation'));
 });
+test('debug cleartext is limited to exact loopback without subdomains',()=>{
+ // Android domain rules match exactly unless includeSubdomains is true.
+ // Keep false explicit for NetworkSecurityConfig lint, and reject any extra
+ // domain, nested config, trust override or app-wide cleartext exception.
+ const compact=xml=>xml.replace(/>\s+</g,'><').trim();
+ assert.equal(compact(read('android-app/src/debug/res/xml/showcase_network.xml')),
+   '<network-security-config><base-config cleartextTrafficPermitted="false"/>'+
+   '<domain-config cleartextTrafficPermitted="true"><domain includeSubdomains="false">127.0.0.1</domain>'+
+   '</domain-config></network-security-config>');
+ const src=path.join(root,'android-app/src');
+ const files=fs.readdirSync(src,{recursive:true}).map(file=>file.replaceAll(path.sep,'/'));
+ assert.deepEqual(files.filter(file=>file.endsWith('/showcase_network.xml')),['debug/res/xml/showcase_network.xml']);
+ for(const file of files.filter(file=>file.endsWith('/AndroidManifest.xml'))){
+   const manifest=read('android-app/src/'+file);
+   assert(!/android:usesCleartextTraffic="true"/.test(manifest),file);
+   if(file==='debug/AndroidManifest.xml'){
+     assert.equal(compact(manifest),
+       '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'+
+       '<uses-permission android:name="android.permission.INTERNET"/>'+
+       '<application android:networkSecurityConfig="@xml/showcase_network"/></manifest>');
+   }else{
+     assert(!manifest.includes('networkSecurityConfig'),file);
+   }
+ }
+ assert(read('android-app/src/main/AndroidManifest.xml').includes('android:usesCleartextTraffic="false"'));
+});
 test('booth alert can only open staff review and carries no customer details',()=>{
  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
  const client=read('android-app/src/main/java/in/sharepass/foundation/HostedRegisterClient.java');
@@ -62,6 +88,30 @@ test('Firebase is opt-in, authenticated, permission-aware, and opens only the qu
  assert(!receiver.includes('getNotification()'));
  const host=read('android-app/src/main/java/in/sharepass/foundation/MainActivity.java');
  assert(host.includes('startActivity(QueueNotifications.openQueue(this))'));
+});
+test('shared AndroidX APIs are compile dependencies even when Firebase is absent',()=>{
+ const gradle=read('android-app/build.gradle.kts');
+ const dependencies=gradle.slice(gradle.indexOf('\ndependencies {'));
+ // Only declarations directly inside dependencies are unconditional. A Core
+ // declaration inside the Firebase branch must not satisfy this regression.
+ let depth=0;
+ const unconditional=[];
+ for(const line of dependencies.split('\n')){
+   if(depth===1)unconditional.push(line.trim());
+   depth+=(line.match(/\{/g)||[]).length-(line.match(/\}/g)||[]).length;
+ }
+ assert(unconditional.includes('implementation("androidx.core:core:1.8.0")'));
+ assert(unconditional.includes('implementation("androidx.window:window-java:1.5.1")'));
+ assert(!unconditional.some(line=>/^(?:implementation|api|add)\(/.test(line)&&line.includes('com.google.firebase')));
+ assert(dependencies.includes('if (firebaseConfig != null) {\n        add("releaseImplementation", platform("com.google.firebase:firebase-bom:35.1.0"))\n        add("releaseImplementation", "com.google.firebase:firebase-messaging")'));
+ for(const [file,api] of [['DeskWindow','util.Consumer'],['AppUpdates','content.FileProvider'],['UpdateFileProvider','content.FileProvider']]){
+   assert(read(`android-app/src/main/java/in/sharepass/foundation/${file}.java`).includes(`import androidx.core.${api};`));
+ }
+ // These real Android compile/lint gates complement this source contract. They
+ // must remain independent, with a clean to avoid Firebase build leftovers.
+ const ci=read('../.github/workflows/sharepass-ci.yml');
+ assert(ci.includes('"-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease'));
+ assert(ci.includes('bash ./gradlew --no-daemon :android-app:clean :android-app:assembleRelease :android-app:lintRelease :android-app:mergeDebugAssets :android-app:compileDebugJavaWithJavac :android-app:lintDebug'));
 });
 test('native polling has a separate executor and brief actions do not show loading text',()=>{
  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');

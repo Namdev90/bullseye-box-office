@@ -1,0 +1,139 @@
+package in.sharepass.foundation;
+
+import java.util.HashMap;
+import java.util.List;
+
+/** Exact inset/hit-test methods with small synthetic Android value objects.
+ * DeskGeometry itself is compiled from production. No rendering is simulated.
+ */
+public final class DeskWindowInsetsTest {
+    static final class Build { static final class VERSION { static int SDK_INT = 37; } }
+    record Point(int x, int y) {}
+    record Insets(int left, int top, int right, int bottom) {
+        static final Insets NONE = new Insets(0, 0, 0, 0);
+        Insets max(Insets other) {
+            return new Insets(Math.max(left, other.left), Math.max(top, other.top),
+                Math.max(right, other.right), Math.max(bottom, other.bottom));
+        }
+    }
+    record DisplayCutout(Insets safe, Insets waterfall) {
+        int getSafeInsetLeft() { return safe.left; }
+        int getSafeInsetTop() { return safe.top; }
+        int getSafeInsetRight() { return safe.right; }
+        int getSafeInsetBottom() { return safe.bottom; }
+        Insets getWaterfallInsets() { return waterfall; }
+    }
+    record RoundedCorner(Point center) {
+        static final int POSITION_TOP_LEFT = 0, POSITION_TOP_RIGHT = 1,
+            POSITION_BOTTOM_LEFT = 2, POSITION_BOTTOM_RIGHT = 3;
+        Point getCenter() { return center; }
+    }
+    static final class WindowInsets {
+        static final class Type {
+            static int systemBars() { return 1; }
+            static int displayCutout() { return 2; }
+            static int ime() { return 4; }
+            static int systemGestures() { return 8; }
+        }
+        Insets system = new Insets(0, 24, 0, 24), ime = Insets.NONE;
+        Insets gestures = new Insets(24, 0, 24, 32);
+        DisplayCutout cutout;
+        final HashMap<Integer, RoundedCorner> corners = new HashMap<>();
+        int requestedTypes;
+        int getSystemWindowInsetLeft() { return system.left; }
+        int getSystemWindowInsetTop() { return system.top; }
+        int getSystemWindowInsetRight() { return system.right; }
+        int getSystemWindowInsetBottom() { return system.bottom; }
+        DisplayCutout getDisplayCutout() { return cutout; }
+        RoundedCorner getRoundedCorner(int position) { return corners.get(position); }
+        Insets getInsets(int types) {
+            requestedTypes |= types;
+            Insets result = Insets.NONE;
+            if ((types & Type.systemBars()) != 0) result = result.max(system);
+            if ((types & Type.displayCutout()) != 0 && cutout != null) result = result.max(cutout.safe);
+            if ((types & Type.ime()) != 0) result = result.max(ime);
+            if ((types & Type.systemGestures()) != 0) result = result.max(gestures);
+            return result;
+        }
+    }
+
+    WindowInsets windowInsets = new WindowInsets();
+    final int[] location = {0, 0};
+    int width = 360, height = 800, pl, pt, pr, pb;
+    int getPaddingLeft() { return pl; }
+    int getPaddingTop() { return pt; }
+    int getPaddingRight() { return pr; }
+    int getPaddingBottom() { return pb; }
+    int getWidth() { return width; }
+    int getHeight() { return height; }
+
+    /* PRODUCTION_METHODS */
+
+    void apply(List<DeskGeometry.Fold> folds, int maxWidth) {
+        var pane = DeskGeometry.viewport(width, height, insets(height), folds, maxWidth);
+        pl = pane.left(); pt = pane.top(); pr = width - pane.right(); pb = height - pane.bottom();
+    }
+    void apply() { apply(List.of(), Integer.MAX_VALUE); }
+    static void eq(Object actual, Object expected, String description) {
+        if (!actual.equals(expected)) throw new AssertionError(description + ": " + actual + " != " + expected);
+    }
+    static DeskGeometry.Area area(int left, int top, int right, int bottom) {
+        return new DeskGeometry.Area(left, top, right, bottom);
+    }
+
+    public static void main(String[] args) {
+        var p = new DeskWindowInsetsTest();
+        eq(p.insets(800), area(0, 24, 0, 24), "gesture edges must not shrink the visual pane");
+        eq(p.windowInsets.requestedTypes, 7, "visual insets include bars, cutout and IME, not gestures");
+        p.apply();
+        eq(p.contains(5, 40), false, "reject left gesture edge");
+        eq(p.contains(24, 40), true, "include left hit boundary");
+        eq(p.contains(336, 40), false, "exclude right hit boundary");
+        eq(p.contains(335, 40), true, "include last right point");
+        eq(p.contains(100, 23), false, "exclude status bar");
+        eq(p.contains(100, 24), true, "include top boundary");
+        eq(p.contains(100, 775), true, "bottom uses visual padding, not lateral gesture margins");
+        eq(p.contains(100, 776), false, "exclude bottom boundary");
+
+        p.windowInsets.cutout = new DisplayCutout(new Insets(40, 32, 0, 0), new Insets(3, 0, 4, 28));
+        eq(p.insets(800), area(40, 32, 4, 28), "cutout and waterfall remain protected");
+        p.apply(); eq(p.contains(39, 40), false, "cutout outranks gesture edge");
+        eq(p.contains(40, 40), true, "cutout hit boundary");
+
+        p = new DeskWindowInsetsTest(); p.windowInsets.system = new Insets(0, 24, 48, 0);
+        p.windowInsets.ime = new Insets(0, 0, 0, 300);
+        eq(p.insets(800), area(0, 24, 48, 300), "side navigation and IME remain visual insets");
+        p.apply(); eq(p.contains(312, 40), false, "side navigation excluded");
+        eq(p.contains(100, 500), false, "keyboard excluded");
+        p.windowInsets.ime = Insets.NONE; p.apply();
+        eq(p.contains(100, 500), true, "keyboard dismissal restores usable area");
+
+        p = new DeskWindowInsetsTest(); p.location[1] = 10;
+        p.windowInsets.corners.put(0, new RoundedCorner(new Point(30, 42)));
+        p.windowInsets.corners.put(3, new RoundedCorner(new Point(330, 780)));
+        eq(p.insets(800), area(0, 32, 0, 30), "rounded corners use window-relative location");
+
+        p = new DeskWindowInsetsTest(); p.width = 1200;
+        p.windowInsets.system = new Insets(64, 24, 0, 24);
+        var fold = new DeskGeometry.Fold(area(590, 0, 630, 800), true);
+        p.apply(List.of(fold), 680);
+        eq(p.contains(629, 100), false, "fold pane left bound outranks gestures");
+        eq(p.contains(630, 100), true, "selected fold pane is usable");
+        p = new DeskWindowInsetsTest(); p.apply(List.of(), 200); p.location[0] = 10;
+        eq(p.contains(89, 100), false, "centered pane includes window offset");
+        eq(p.contains(90, 100), true, "centered pane hit boundary");
+
+        for (int sdk : new int[]{24, 28, 29, 30, 31, 37}) {
+            Build.VERSION.SDK_INT = sdk; p = new DeskWindowInsetsTest();
+            p.windowInsets.cutout = new DisplayCutout(new Insets(0, 40, 0, 0), new Insets(8, 0, 8, 0));
+            eq(p.insets(800), area(sdk >= 30 ? 8 : 0, sdk >= 28 ? 40 : 24, sdk >= 30 ? 8 : 0, 24), "API-gated safe insets " + sdk);
+            p.apply(); eq(p.contains(10, 50), sdk < 30, "gesture hit margins only use supported APIs " + sdk);
+        }
+        p.windowInsets = null; eq(p.insets(800), area(0, 0, 0, 0), "no insets before first callback");
+        p.apply(); eq(p.contains(0, 0), true, "null insets do not reject the whole pane");
+        eq(DeskGeometry.openingArtHeight(320, 480, 96, 210), 270, "compact portrait leaves room for controls");
+        eq(DeskGeometry.openingArtHeight(320, 720, 96, 210), 320, "tall portrait caps art at width");
+        eq(DeskGeometry.openingArtHeight(640, 270, 96, 210), 96, "landscape keeps art minimum while controls can scroll");
+        System.out.println("PASS exact-source visual-inset/gesture-hit fixtures (not Android rendering acceptance)");
+    }
+}

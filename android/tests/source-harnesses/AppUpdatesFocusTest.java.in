@@ -1,0 +1,162 @@
+package in.sharepass.foundation;
+
+import java.io.File;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
+
+/** Exact production methods with deterministic, non-Android dependencies.
+ * No network, APK, installer, preferences, Activity or Looper is exercised.
+ * Keep doubles small and make queue order explicit in each scenario.
+ */
+public final class AppUpdatesFocusTest {
+    static final class Activity {
+        boolean focus, finishing, destroyed;
+        boolean hasWindowFocus() { return focus; }
+        boolean isFinishing() { return finishing; }
+        boolean isDestroyed() { return destroyed; }
+    }
+    static final class Prompt {
+        boolean showing = true;
+        boolean isShowing() { return showing; }
+        void dismiss() { showing = false; }
+    }
+    static final class Queue {
+        final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
+        void execute(Runnable task) { tasks.add(task); }
+        void post(Runnable task) { tasks.add(task); }
+        void removeCallbacks(Runnable task) { tasks.removeIf(value -> value == task); }
+        void one() { tasks.remove().run(); }
+        void drain() { while (!tasks.isEmpty()) one(); }
+    }
+    static final class UpdatePolicy { record Release(int code) {} }
+
+    final Activity activity = new Activity();
+    final Queue WORK = new Queue(), handler = new Queue();
+    boolean enabled = true, foreground = true, idleValue = true, permission = true;
+    boolean journalSafe = true, valid = true, verificationThrows;
+    int installed = 18, opened, ticks;
+    final Runnable nextCheck = () -> ticks++;
+    final BooleanSupplier idle = () -> idleValue;
+    AtomicBoolean checkingTransfer, downloading;
+    Prompt prompt;
+    Runnable installWhenFocused, onOpen = () -> {};
+    final List<String> messages = new ArrayList<>();
+
+    boolean safeJournal() { return journalSafe; }
+    int installedVersion() { return installed; }
+    boolean verifiesApk(File file, UpdatePolicy.Release release) {
+        if (verificationThrows) throw new IllegalStateException("synthetic verification failure");
+        return valid;
+    }
+    boolean canInstall() { return permission; }
+    void openInstaller(File file) { opened++; onOpen.run(); }
+    void message(String text) { messages.add(text); }
+
+    /* PRODUCTION_METHODS */
+
+    void begin() {
+        prompt = new Prompt();
+        install(new UpdatePolicy.Release(19), new File("not-read-synthetic.apk"));
+        require(WORK.tasks.size() == 1, "verification must be queued exactly once");
+        prompt.dismiss();
+        prompt = null;
+    }
+    void verified() { WORK.one(); handler.one(); }
+    void regain() { activity.focus = true; focusChanged(true); }
+    static void require(boolean value, String description) {
+        if (!value) throw new AssertionError(description);
+    }
+    static void noInstall(AppUpdatesFocusTest p, String description) {
+        p.regain(); p.handler.drain();
+        require(p.opened == 0 && p.installWhenFocused == null, description);
+    }
+
+    public static void main(String[] args) {
+        var p = new AppUpdatesFocusTest();
+        p.begin(); p.verified();
+        require(p.opened == 0 && p.installWhenFocused != null, "verification must wait for restored focus");
+        p.focusChanged(false);
+        require(p.installWhenFocused != null, "focus loss must not dispatch pending work");
+        p.regain(); p.regain(); p.handler.drain();
+        require(p.opened == 1 && p.ticks == 1, "focus installs once and coalesces checks");
+
+        p = new AppUpdatesFocusTest(); p.begin(); p.regain(); p.WORK.one(); p.handler.drain();
+        require(p.opened == 1 && p.installWhenFocused == null, "focus before verification also installs once");
+        p.regain(); require(p.opened == 1, "later focus cannot replay a finished install");
+
+        p = new AppUpdatesFocusTest(); p.begin(); p.verified();
+        final var reentrant = p;
+        p.onOpen = () -> {
+            require(reentrant.installWhenFocused == null, "deferred work is cleared before external dispatch");
+            reentrant.focusChanged(true);
+        };
+        p.regain(); require(p.opened == 1, "clear deferred work before invoking installer");
+
+        // Cancellation/pause at every asynchronous boundary, including work
+        // completed on the worker but not yet delivered by the UI handler.
+        for (int boundary = 0; boundary < 3; boundary++) {
+            for (boolean pause : new boolean[]{false, true}) {
+                p = new AppUpdatesFocusTest(); p.begin();
+                if (boundary >= 1) p.WORK.one();
+                if (boundary >= 2) p.handler.one();
+                if (pause) p.stop(); else p.cancelDownload();
+                if (boundary == 0) p.WORK.one();
+                p.handler.drain();
+                if (pause) p.start();
+                noInstall(p, "cancelled/paused work cannot revive at boundary " + boundary);
+            }
+        }
+        p = new AppUpdatesFocusTest(); p.checkingTransfer = new AtomicBoolean(); p.downloading = new AtomicBoolean();
+        p.cancelDownload();
+        require(p.checkingTransfer.get() && p.downloading.get(), "cancel both outstanding transfer tokens");
+
+        for (int change = 0; change < 6; change++) {
+            p = new AppUpdatesFocusTest(); p.begin(); p.verified();
+            switch (change) {
+                case 0 -> p.idleValue = false;
+                case 1 -> p.activity.finishing = true;
+                case 2 -> p.activity.destroyed = true;
+                case 3 -> p.enabled = false;
+                case 4 -> p.permission = false;
+                case 5 -> { p.foreground = false; p.focusChanged(true); p.stop(); }
+            }
+            noInstall(p, "recheck readiness/permission at focus: " + change);
+            if (change == 4) require(p.messages.size() == 1, "permission loss gives feedback");
+            p.idleValue = true; p.permission = true; p.regain();
+            require(p.opened == 0, "discarded deferred work cannot revive after readiness returns");
+        }
+        for (int invalid = 0; invalid < 5; invalid++) {
+            p = new AppUpdatesFocusTest();
+            switch (invalid) {
+                case 0 -> p.valid = false;
+                case 1 -> p.journalSafe = false;
+                case 2 -> p.verificationThrows = true;
+                case 3 -> p.installed = 19;
+                case 4 -> p.installed = 20;
+            }
+            p.begin(); p.verified(); noInstall(p, "reject invalid verification: " + invalid);
+            require(p.messages.size() == 1, "verification failure gives feedback");
+        }
+        for (int guard = 0; guard < 5; guard++) {
+            p = new AppUpdatesFocusTest(); p.activity.focus = true;
+            switch (guard) {
+                case 0 -> p.idleValue = false;
+                case 1 -> p.permission = false;
+                case 2 -> p.downloading = new AtomicBoolean();
+                case 3 -> p.foreground = false;
+                case 4 -> p.activity.destroyed = true;
+            }
+            p.install(new UpdatePolicy.Release(19), new File("not-read-synthetic.apk"));
+            require(p.WORK.tasks.isEmpty(), "do not acquire install work when guarded: " + guard);
+        }
+        p = new AppUpdatesFocusTest(); p.start(); p.start();
+        require(p.handler.tasks.size() == 1, "repeated start coalesces the next check");
+        p.prompt = new Prompt(); p.stop();
+        require(!p.foreground && p.handler.tasks.isEmpty() && !p.prompt.showing, "pause dismisses dialog and stops checks");
+        p.focusChanged(true); require(p.handler.tasks.isEmpty(), "background focus does not schedule checks");
+        System.out.println("PASS exact-source update focus/order/cancellation/readiness fixtures (not Android acceptance)");
+    }
+}

@@ -73,6 +73,7 @@ jobs:
           npm run check
           node --check tools/sharepass-release.mjs
           npm test
+          python3 -m unittest discover -s tests -p 'test_apk_assets.py'
       - name: Verify pinned Android SDK packages
         run: |
           sdk_root="${ANDROID_HOME:?Android SDK unavailable on the runner}"
@@ -90,16 +91,30 @@ jobs:
           {"project_info":{"project_number":"000000000000","project_id":"sharepass-ci-fixture"},"client":[{"client_info":{"mobilesdk_app_id":"1:000000000000:android:0000000000000000","android_client_info":{"package_name":"in.sharepass.foundation"}},"api_key":[{"current_key":"synthetic-ci-value"}]}]}
           EOF
           bash ./gradlew --no-daemon "-PsharepassFirebaseConfig=$fixture" :android-app:assembleRelease :android-app:lintRelease
+          python3 tools/verify-apk-assets.py release android-app/build/outputs/apk/release/android-app-release-unsigned.apk
       - name: Run native policy, pairing, recovery, geometry and update tests
         run: |
           test_classes="$RUNNER_TEMP/sharepass-native-tests"
+          fixture_sources="$RUNNER_TEMP/sharepass-source-harnesses"
           classes='android-app/build/intermediates/javac/release/compileReleaseJavaWithJavac/classes'
           sdk_jar="$ANDROID_HOME/platforms/android-37.0/android.jar"
           mkdir -p "$test_classes"
           test -f tests/java/in/sharepass/foundation/DeskGeometryTest.java
           test -f tests/java/in/sharepass/foundation/UpdatePolicyTest.java
-          test_sources=(tests/java/WhatsAppDraftTest.java tests/java/in/sharepass/foundation/*Test.java)
+          node tools/prepare-source-harnesses.mjs "$fixture_sources"
+          test_sources=(tests/java/WhatsAppDraftTest.java tests/java/in/sharepass/foundation/*Test.java "$fixture_sources"/*Test.java)
           javac -cp "$classes:$sdk_jar" -d "$test_classes" "${test_sources[@]}"
           for test_file in "${test_sources[@]}"; do
             java -cp "$test_classes:$classes:$sdk_jar" "in.sharepass.foundation.$(basename "$test_file" .java)"
           done
+      - name: Verify polling release and debug practice assets without debug signing
+        run: |
+          # Clean between Firebase and polling configurations to reject stale
+          # generated resources/assets. Debug is compiled/linted, not packaged.
+          bash ./gradlew --no-daemon :android-app:clean :android-app:assembleRelease :android-app:lintRelease :android-app:mergeDebugAssets :android-app:compileDebugJavaWithJavac :android-app:lintDebug
+          python3 tools/verify-apk-assets.py release android-app/build/outputs/apk/release/android-app-release-unsigned.apk
+          mapfile -t debug_indexes < <(find android-app/build/intermediates -type f -path '*/debug/mergeDebugAssets/*' -name index.html)
+          test "${#debug_indexes[@]}" -eq 1
+          debug_assets=$(dirname "${debug_indexes[0]}")
+          echo "Checking merged debug assets: $debug_assets"
+          python3 tools/verify-apk-assets.py debug-merged "$debug_assets"

@@ -244,3 +244,31 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
   }
   return error('The register changed. Recover the same action before trying another handover.',409,false);
 }
+
+// Read/replay only: request identifiers cannot start a refresh without its code.
+// Scope every lookup to the current workspace, booth and original operator.
+async function recoverCodeRefresh(db,staff,requestId,packet){
+  const previous=await ledgerStatement(db,`SELECT r.payload AS request,d.payload AS deposit,
+    (SELECT c.payload FROM sharepass_ledger_collections c WHERE c.owner=r.owner AND c.deposit_id=r.deposit_id AND c.pending=1) AS pending
+    FROM sharepass_ledger_requests r JOIN sharepass_ledger_deposits d ON d.owner=r.owner AND d.id=r.deposit_id
+    WHERE r.owner=? AND r.id=?`,staff.workspace,requestId).first();
+  // Absence is not proof of failure: the original request may still be in flight.
+  if(!previous)return json({refresh_pending:true});
+  const stored=JSON.parse(previous.request),deposit=JSON.parse(previous.deposit);
+  const [path,body]=JSON.parse(stored.fingerprint);
+  if(path!=='/api/codes/refresh'||body.request_id!==requestId||body.packet_id!==packet||
+    body.event_id!==EVENT||body.booth_id!==(staff.booth_id||'B1')||body.operator!==staff.operator||
+    deposit.id!==stored.result.deposit.id||deposit.packet_id!==packet||deposit.event_id!==body.event_id||deposit.booth_id!==body.booth_id){
+    return error('Recover the saved refresh from its original staff session and booth.',404,false);
+  }
+  const model=ledgerModel();
+  model.deposits=[deposit];
+  model.collections=previous.pending?[JSON.parse(previous.pending)]:[];
+  model.requests=new Map([[requestId,stored]]);
+  try{return json(await model.request(path,body,staff.admin));}
+  catch(exception){
+    if(!exception.status)throw exception;
+    return json({error:exception.message,notExecuted:exception.notExecuted!==false,
+      refreshResolved:exception.notExecuted!==false},exception.status);
+  }
+}

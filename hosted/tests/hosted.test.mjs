@@ -41,6 +41,25 @@ const scope={event_id:'training-event-001',booth_id:'B1'};
 const state='/api/state?event_id=training-event-001';
 const deposit={...scope,request_id:'deposit-0001',location:'A-01',custody_confirmed:true,quantities:{normal:4,vip:2,vvip:0}};
 
+test('numeric rollout rejects stored legacy letter codes without modifying custody',async t=>{
+  const f=fixture();
+  t.after(f.close);
+  const created=await f.call('/api/deposits',{...deposit,custom_code:'4242'});
+  assert.equal(created.status,200);
+  const id=created.body.deposit.id;
+  // Synthetic pre-rollout record only. This does not inspect a private catalogue or live records.
+  f.sqlite.prepare('UPDATE sharepass_ledger_codes SET code=? WHERE deposit_id=?').run('K7M4',id);
+  f.sqlite.prepare("UPDATE sharepass_ledger_deposits SET payload=json_set(payload,'$.active_collection_code',?,'$.code_expires_at',0) WHERE id=?").run('K7M4',id);
+  const before=f.sqlite.prepare('SELECT payload,revision FROM sharepass_ledger_deposits WHERE id=?').get(id);
+  const input={collection_code:'K7M4',packet_id:created.body.deposit.packet_id,location:deposit.location,
+    request_id:crypto.randomUUID(),valid_minutes:1440};
+  for(const path of ['/api/verify','/api/codes/refresh','/api/admin/reissue']){
+    assert.equal((await f.call(path,input)).status,400,path);
+  }
+  assert.deepEqual(f.sqlite.prepare('SELECT payload,revision FROM sharepass_ledger_deposits WHERE id=?').get(id),before);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections WHERE deposit_id=?').get(id).n,0);
+});
+
 test('the allocator finds the last available four-digit code and reports exhaustion',async t=>{
   const f=fixture();
   t.after(f.close);
@@ -139,11 +158,15 @@ test('receipt notification stays generic and opens only its locally saved receip
   let saved={path:validPath,expiresAt:Date.now()+60000},closed=0;
   runInNewContext(readFileSync('web/receipt-alert-worker.js','utf8'),{
     self:{
-      registration:{scope,showNotification:async(...notice)=>notices.push(notice)},
+      registration:{scope,showNotification:async(...notice)=>notices.push(notice),
+        pushManager:{getSubscription:async()=>({endpoint:'https://fcm.googleapis.com/fcm/send/synthetic-worker'})}},
+      navigator:{locks:{request:async(key,fn)=>fn()}},Notification:{permission:'granted'},
       addEventListener:(type,action)=>{handlers[type]=action;},
       clients:{matchAll:async()=>[{postMessage:message=>messages.push(message)}],openWindow:async path=>opened.push(path)}
     },
-    caches:{open:async()=>({match:async key=>{assert.equal(key,scope);return {json:async()=>saved};}})}
+    caches:{open:async()=>({match:async key=>{assert.equal(key,scope);return saved?{json:async()=>saved}:null;},
+      put:async(key,response)=>{saved=await response.json();},delete:async()=>{saved=null;}})},
+    Response,AbortSignal,fetch:async()=>Response.json({enabled:saved?.expiresAt>Date.now(),expires_at:saved?.expiresAt})
   });
   async function run(type,event={}){
     let done;
@@ -913,7 +936,7 @@ test('aged booth receipts retain live or pending custody and expire unused or fi
   }finally{f.close();}
 });
 
-test('a retained active receipt can renew opt-in after its draft alert expires',async t=>{
+test('explicit receipt opt-in follows the current confirmed code lifetime',async t=>{
   const hour=60*60*1000,started=Date.now();
   let now=started;
   t.mock.method(Date,'now',()=>now);
@@ -931,8 +954,8 @@ test('a retained active receipt can renew opt-in after its draft alert expires',
     assert.equal((await enable()).body.expires_at,started+26*hour);
     assert.equal((await f.call('/api/queue/'+ticket+'/confirm',{location:'Receipt-alert',valid_minutes:2880,custody_confirmed:true})).status,200);
     now=started+hour;
-    assert.equal((await enable()).body.expires_at,started+27*hour);
-    assert.equal(f.sqlite.prepare('SELECT expires_at FROM sharepass_receipt_push WHERE ticket=?').get(ticket).expires_at,started+27*hour);
+    assert.equal((await enable()).body.expires_at,started+48*hour);
+    assert.equal(f.sqlite.prepare('SELECT expires_at FROM sharepass_receipt_push WHERE ticket=?').get(ticket).expires_at,started+48*hour);
     now=started+28*hour;
     assert.equal((await f.call(path,{...draft,request_id:crypto.randomUUID()},'')).status,200);
     assert.equal((await enable()).body.expires_at,started+48*hour);

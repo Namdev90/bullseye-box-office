@@ -133,6 +133,9 @@
       <form id="refresh-code-form">
         <p>Match the physical packet. The old code will stop working. Share the replacement with the collectors.</p>
         <label class="field">Physical packet label <input name="packet" required maxlength="12" autocomplete="off" autocapitalize="characters"></label>
+        <label class="field" id="refresh-original-code" hidden>Original collection code before the interrupted refresh
+          <input name="code" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" autocomplete="off" spellcheck="false">
+        </label>
         <button class="primary">Confirm refresh</button><button id="cancel-refresh" type="button">Back to receipt</button>
       </form>
     </section>
