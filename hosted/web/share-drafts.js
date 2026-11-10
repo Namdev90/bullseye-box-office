@@ -16,24 +16,41 @@
   link.target='_blank';link.rel='noopener noreferrer';
   return link;
  }
- function depositDraft({phone,name='',code,reference,eventName,booth,location,quantities,expiresAt}){
+ function passCounts(quantities){
+  if(!quantities||typeof quantities!=='object'||Array.isArray(quantities)||!Object.keys(quantities).length)throw new Error('Pass counts are required.');
+  return Object.entries(quantities).map(([kind,count])=>{
+   if(!/^[A-Za-z][A-Za-z0-9 _-]{0,39}$/.test(kind)||!Number.isInteger(count)||count<0||count>10000)throw new Error('Invalid pass counts.');
+   const label=kind==='normal'?'Normal':kind==='vip'?'VIP':kind==='vvip'?'VVIP':kind==='mip'?'MIP':kind;
+   return count?count+' '+label:'';
+  }).filter(Boolean).join(' + ');
+ }
+ function copyQuantities(value){
+  return value&&typeof value==='object'?(Array.isArray(value)?[...value]:{...value}):value;
+ }
+ function depositDraft(options){
+  const {phone,name='',code,reference,eventName,booth,location,quantities,expiresAt}=options;
   const recipient=normalizePhone(phone);
   if(typeof name!=='string'||name.length>80||/[\u0000-\u001f\u007f]/.test(name))throw new Error('Use a name of up to 80 characters.');
   if(typeof code!=='string'||!/^[A-Z0-9]{4}$/.test(code))throw new Error('Verify a current collection code.');
   if(reference!=null&&(typeof reference!=='string'||!/^PKT-[A-F0-9]{8}$/.test(reference)))throw new Error('Verify a current pickup reference.');
   for(const value of [eventName,booth,location])if(value!=null&&(typeof value!=='string'||value.length>100||/[\u0000-\u001f\u007f]/.test(value)))throw new Error('Use valid event and pickup details.');
   if(!booth?.trim())throw new Error('Enter a pickup counter.');
-  if(!quantities||typeof quantities!=='object'||Array.isArray(quantities)||!Object.keys(quantities).length)throw new Error('Pass counts are required.');
-  const counts=Object.entries(quantities).map(([kind,count])=>{
-   if(!/^[A-Za-z][A-Za-z0-9 _-]{0,39}$/.test(kind)||!Number.isInteger(count)||count<0||count>10000)throw new Error('Invalid pass counts.');
-   const label=kind==='normal'?'Normal':kind==='vip'?'VIP':kind==='vvip'?'VVIP':kind==='mip'?'MIP':kind;
-   return count?count+' '+label:'';
-  }).filter(Boolean).join(' + ');
-  if(!counts)throw new Error('There are no remaining passes to share.');
+  // The public intake supplies only a person's original plan, not group stock.
+  const scope=Object.hasOwn(options,'scope')?options.scope:'planned';
+  if(scope!=='planned'&&scope!=='group')throw new Error('Use a valid pass-count scope.');
+  const allocated=Object.hasOwn(options,'allocation');
+  if(allocated&&scope!=='group')throw new Error('Recipient allocation requires group counts.');
+  const counts=passCounts(quantities);
+  if(!counts)throw new Error(scope==='group'?'There are no remaining passes to share.':'Review the recipient’s planned share.');
+  const planned=allocated?passCounts(options.allocation):'';
+  if(allocated&&!planned)throw new Error('Review the recipient’s planned share.');
   const expires=Number.isFinite(expiresAt)?' Code expires '+new Date(expiresAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})+'.':'';
-  const message='Hi'+(name.trim()?' '+name.trim():'')+'! I’ve left '+counts+' passes for our group with SharePass by Bullseye Entertainment.\n\n'+
+  const message='Hi'+(name.trim()?' '+name.trim():'')+'! '+(scope==='planned'?
+   'Your planned share: '+counts+' passes.':allocated?
+   'Your planned share: '+planned+' passes.\nGroup balance on this receipt: '+counts+' passes.':
+   'The receipt lists '+counts+' passes for our group.')+' SharePass by Bullseye Entertainment.\n\n'+
    (eventName?.trim()?'For '+eventName.trim()+', use code ':'Use code ')+code+(reference?' and pickup reference '+reference:'')+' to collect from '+booth.trim()+(location?.trim()?', '+location.trim():'')+'.'+expires+'\n\n'+
-   'You can pick up some or all of the passes still available for our group.';
+   'Shared group code. Staff must confirm availability; pickups are not tracked per person.';
   const url=composeUrl(recipient,message);
   if(url.length>1200)throw new Error('Shorten the pickup details for this QR.');
   return Object.freeze({message,url,recipient,name:name.trim()});
@@ -117,7 +134,12 @@
    const name=input('Recipient name (optional)','text',initial.name,80);
    const phone=input('Recipient WhatsApp number','tel',initial.phone,40);
    phone.placeholder='10-digit mobile or international + code';
-   const entry={card,draft:null,label:'Recipient '+number};
+   // An allocation is the original plan, not a personal remaining balance.
+   const allocation=Object.hasOwn(initial,'quantities')?{allocation:copyQuantities(initial.quantities)}:{};
+   const savedPerson=(name,phone)=>({name,phone,...(Object.hasOwn(allocation,'allocation')?{quantities:copyQuantities(allocation.allocation)}:{})});
+   const entry={card,draft:null,label:'Recipient '+number,
+    saved:sharePassPhone(initial.phone)||Object.hasOwn(initial,'quantities')?
+     savedPerson(initial.name||'',sharePassPhone(initial.phone)?'+'+sharePassPhone(initial.phone):initial.phone||''):undefined};
    entries.push(entry);cards.append(card);
    const remember=()=>details.saveRecipients?.(entries.map(item=>item.saved).filter(Boolean));
    const remove=button('Remove recipient',()=>{
@@ -127,9 +149,9 @@
    const edit=button('Edit recipient',()=>{entry.draft=null;output.hidden=true;form.hidden=false;phone.focus();});
    function generate(focusResult){
     try{
-     entry.draft=depositDraft({...details,name:name.value,phone:phone.value});
+     entry.draft=depositDraft({...details,...allocation,scope:'group',name:name.value,phone:phone.value});
      entry.label=entry.draft.name||'Recipient '+number;
-     entry.saved={name:entry.draft.name,phone:'+'+entry.draft.recipient};
+     entry.saved=savedPerson(entry.draft.name,'+'+entry.draft.recipient);
      const tile=button('Show WhatsApp QR',()=>{
       selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();scan.showModal();
      },'scan-tile');
@@ -157,7 +179,7 @@
   }
   container.append(node('h3','Share by WhatsApp'),cards,entryNav,add);
   const saved=details.recipients?.length?details.recipients:[{phone:details.phone,name:details.name}];
-  const ready=saved.filter(person=>sharePassPhone(person.phone));
+  const ready=saved.filter(person=>sharePassPhone(person.phone)||Object.hasOwn(person,'quantities'));
   if(ready.length)ready.forEach(person=>addRecipient(person));
   else addRecipient({name:saved[0]?.name});
   showEntry(0);
