@@ -1,3 +1,5 @@
+> **Shared local integration:** Desktop and Android emulator use one synthetic SQLite desk. See [START_HERE.md](START_HERE.md) and [cloud reconciliation](docs/CLOUD_RECONCILIATION.md). This is not a signed phone release or live service.
+
 # SharePass — brought to you by Bullseye Entertainment
 
 ## Current hosted and Android source

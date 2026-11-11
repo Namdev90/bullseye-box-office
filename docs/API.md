@@ -1,5 +1,7 @@
 # Local API reference
 
+> **Current integration branch:** The handbook below records the reviewed main snapshot. See [cloud reconciliation](CLOUD_RECONCILIATION.md) and [START_HERE](../START_HERE.md) for the newly combined emulator feature, fixes, verification and outstanding laptop comparison.
+
 [Documentation index](README.md) · [Architecture](ARCHITECTURE.md)
 
 This describes [`app.py`](../app.py) at `4561791` for local development and synthetic tests. It is an internal training API, not a public integration or production authentication contract. The static browser demo simulates similar routes without a backend.

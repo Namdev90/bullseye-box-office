@@ -1,3 +1,7 @@
+# Local integration addendum — 8 November 2026
+
+The latest user-specified SharePass lockup (ticket dots matched; Bullseye Entertainment **brings you** SharePass) has now been integrated in the **new local desktop UI** as transparent web artwork and a ticket-derived emblem. The newer Android 0.2.0 mock and public hosted Site are **not silently overwritten**. A separate Android *emulator* project loads the existing real Python local web UI and shares SQLite state. See `START_HERE.md`. All older remarks about the November 5 release below remain historical, not current integration status.
+
 # SharePass — current release, 5 November 2026
 
 Product name: **SharePass**. Endorsement: **brought to you by Bullseye Entertainment**. The existing Bullseye logo remains the genuine GEVA-hosted asset used with the user's permission. A new logo is still under review; no new logo, trademark clearance or real event announcement is claimed.

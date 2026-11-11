@@ -16,3 +16,9 @@ screenshots/
 *.key
 *.pem
 *.log
+
+# Local Android verification output
+android-shared-preview/.gradle/
+android-shared-preview/build/
+android-shared-preview/app/build/
+android-shared-preview/local.properties
