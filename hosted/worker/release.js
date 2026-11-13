@@ -35,8 +35,8 @@ async function publishedAndroidRelease(manifest){
     headers:{Accept:'application/vnd.github+json','User-Agent':'SharePass-release-notifier','X-GitHub-Api-Version':'2022-11-28'}});
   if(!response.ok){
     console.error('SharePass GitHub release verification HTTP '+response.status+
-      ' (remaining '+response.headers.get('X-RateLimit-Remaining')+')');
-    return false;
+      ' (remaining '+response.headers.get('X-RateLimit-Remaining')+', reset '+response.headers.get('X-RateLimit-Reset')+')');
+    return response.status===401||response.status===403||response.status===429||response.status>=500?null:false;
   }
   const reader=response.body?.getReader();
   if(!reader)return false;
@@ -140,7 +140,12 @@ async function androidReleaseWebhook(request,env){
       return error('This version was already announced with different release metadata.',409);
     }
   }else{
-    if(!await publishedAndroidRelease(manifest))return error('The signed release is not the current published GitHub update.',409);
+    const published=await publishedAndroidRelease(manifest);
+    if(published===null){
+      const response=error('GitHub release verification is temporarily unavailable. Retry the same signed release.',503);
+      response.headers.set('Retry-After','60');return response;
+    }
+    if(!published)return error('The signed release is not the current published GitHub update.',409);
     await db.prepare(`UPDATE sharepass_android_release_state SET version_code=?,version_name=?,manifest=?,accepted_at=?
       WHERE id=1 AND version_code<?`).bind(manifest.versionCode,manifest.versionName,encoded,Date.now(),manifest.versionCode).run();
     current=await db.prepare('SELECT version_code,manifest FROM sharepass_android_release_state WHERE id=1').bind().first();
