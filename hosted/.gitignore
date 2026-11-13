@@ -1,5 +1,6 @@
 dist/
 *.sqlite*
 .sites-runtime/
+.wrangler/
 private/
 .dev.vars*

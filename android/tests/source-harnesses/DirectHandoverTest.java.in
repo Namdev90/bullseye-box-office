@@ -1,0 +1,70 @@
+package in.sharepass.foundation;
+import java.util.*;
+import java.util.concurrent.Callable;
+import java.io.IOException;
+
+public class DirectHandoverTest {
+    static class JSONObject {
+        final Map<String,Object> values=new LinkedHashMap<>();
+        JSONObject put(String key,Object value){values.put(key,value);return this;}
+        Object remove(String key){return values.remove(key);}
+        boolean has(String key){return values.containsKey(key);}
+        Object get(String key){if(!has(key))throw new IllegalStateException(key);return values.get(key);}
+        JSONObject getJSONObject(String key){return (JSONObject)get(key);}
+        JSONObject optJSONObject(String key){return values.get(key) instanceof JSONObject j?j:null;}
+        String getString(String key){return (String)get(key);}
+        int getInt(String key){return ((Number)get(key)).intValue();}
+        boolean optBoolean(String key){return Boolean.TRUE.equals(values.get(key));}
+        JSONObject cloneValue(){JSONObject copy=new JSONObject();values.forEach((key,value)->copy.put(key,value instanceof JSONObject j?j.cloneValue():value));return copy;}
+    }
+    static class Rejected extends Exception {boolean notExecuted;int status;}
+    static class Client {
+        JSONObject saved=new JSONObject();
+        Map<String,JSONObject> committed=new HashMap<>();
+        int released,handedOver;
+        boolean loseRelease,loseHandover,crashAfterRelease,failFirstJournal;
+        boolean hasPending(){return saved.has("pending");}
+        JSONObject copy(){return saved.cloneValue();}
+        void write(JSONObject updated)throws Exception{
+            if(failFirstJournal){failFirstJournal=false;throw new IOException("Journal unavailable");}
+            saved=updated.cloneValue();
+            if(crashAfterRelease&&saved.has("handover")&&!saved.has("pending")){crashAfterRelease=false;throw new IOException("Process stopped after journal commit");}
+        }
+        static <T>T retryPickup(String path,Callable<T> action)throws Exception{return action.call();}
+        JSONObject request(String path,JSONObject body)throws Exception{
+            String id=body.getString("request_id");
+            if(committed.containsKey(id))return committed.get(id).cloneValue();
+            JSONObject response=new JSONObject().put("deposit",new JSONObject().put("id","deposit"))
+                .put("collection",new JSONObject().put("id","collection").put("version",path.endsWith("/release")?1:2));
+            if(path.endsWith("/release"))released++;else handedOver++;
+            committed.put(id,response.cloneValue());
+            if(path.endsWith("/release")&&loseRelease){loseRelease=false;throw new IOException("Release reply lost");}
+            if(path.endsWith("/handover")&&loseHandover){loseHandover=false;throw new IOException("Handover reply lost");}
+            return response;
+        }
+        /* PRODUCTION_METHODS */
+    }
+    static JSONObject amounts(){return new JSONObject().put("packet_id","PKT-1234ABCD").put("quantities",new JSONObject().put("normal",1));}
+    static void require(boolean value){if(!value)throw new AssertionError();}
+    static void interrupted(Callable<?> action)throws Exception{try{action.call();throw new AssertionError("Expected interruption");}catch(IOException expected){}}
+    public static void main(String[] args)throws Exception{
+        Client normal=new Client();normal.stockChange("/api/deposits/deposit/release",amounts(),true);
+        require(normal.released==1&&normal.handedOver==1&&!normal.hasPending()&&!normal.saved.has("handover"));
+        for(boolean release:new boolean[]{true,false}){
+            Client lost=new Client();lost.loseRelease=release;lost.loseHandover=!release;
+            interrupted(()->lost.stockChange("/api/deposits/deposit/release",amounts(),true));
+            String request=lost.saved.getJSONObject("pending").getJSONObject("body").getString("request_id");
+            lost.recover();require(lost.committed.containsKey(request)&&lost.released==1&&lost.handedOver==1&&!lost.hasPending());
+        }
+        Client crash=new Client();crash.crashAfterRelease=true;
+        interrupted(()->crash.stockChange("/api/deposits/deposit/release",amounts(),true));
+        require(!crash.hasPending()&&crash.saved.getJSONObject("handover").optBoolean("finalize_confirmed"));
+        crash.completeConfirmedHandover();require(crash.released==1&&crash.handedOver==1);
+        Client old=new Client();old.stockChange("/api/deposits/deposit/release",amounts());
+        require(old.released==1&&old.handedOver==0);
+        interrupted(old::completeConfirmedHandover);require(old.handedOver==0);
+        Client disk=new Client();disk.failFirstJournal=true;
+        interrupted(()->disk.stockChange("/api/deposits/deposit/release",amounts(),true));require(disk.released==0&&disk.handedOver==0);
+        System.out.println("PASS exact client methods preserve direct handover intent and original request IDs through lost replies and process interruption");
+    }
+}

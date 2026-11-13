@@ -12,9 +12,9 @@
 <script defer src="/brand.js"></script>
 </head>
 <body><div class="shell" id="shell">
-  <header>
+  <header><button id="desk-refresh" type="button" aria-label="Refresh SharePass" title="Refresh">↻</button>
     <button class="home" id="home">← Desk</button>
-    <details id="menu"><summary>Account</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo">Run demo</button><button id="install-staff-desk" hidden>Install staff desk</button><button id="settings-open">Settings</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a></div></details>
+    <details id="menu"><summary aria-label="Account and logout">◉</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo" hidden>Run demo</button><button id="install-staff-desk" hidden>Install staff desk</button><button id="settings-open" hidden>Settings</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top" aria-label="Log out">↪</a></div></details>
   </header>
   <div class="demo-bar" id="demo-bar" hidden>
     <span>Demo register</span><button id="pause">Pause</button><button id="replay">Replay</button><button id="leave">Exit demo</button>
@@ -51,9 +51,9 @@
     </div></section>
     <section id="history" hidden><h1 tabindex="-1">History</h1>
       <p>Deposits and handovers at this booth.</p>
-      <div class="history-filters"><button id="history-all" type="button" aria-pressed="true">All deposits</button><button id="history-pending" type="button" aria-pressed="false">Pending handovers</button></div>
+      <div class="history-filters"><button id="history-all" type="button" aria-pressed="true">All deposits</button><button id="history-pending" type="button" aria-pressed="false">Pending handovers</button><button id="history-refresh" type="button">Refresh history</button></div>
       <p id="history-status" class="quiet-status" role="status"></p><ul id="history-list" class="history-list"></ul>
-      <button id="history-more" type="button" hidden>Load more deposits</button><button id="history-refresh" type="button">Refresh history</button>
+      <button id="history-more" type="button" hidden>Load more deposits</button>
     </section>
     <section id="settings" hidden><h1 tabindex="-1">Settings</h1>
       <div class="stack settings-group"><h2>Connection and alerts</h2><button id="queue-alerts" type="button">Enable booth notifications</button><p id="queue-alert-status" class="quiet-status" role="status"></p><button id="refresh-queue" type="button">Refresh connection</button></div>
@@ -133,12 +133,13 @@
       <div class="wizard-nav"><button class="primary" data-wizard-next>Save deposit</button></div>
     </form></section>
     <section id="saved" hidden><h1 tabindex="-1">Passes deposited</h1><div class="stack">
-      <div class="receipt"><p>Collection code</p><div class="code-with-action"><div class="code" id="saved-code" aria-live="polite"></div><button id="refresh-saved-code" type="button" aria-label="Refresh collection code; old code will stop working" title="Refresh code">↻</button></div><p id="saved-expiry" hidden></p><p id="saved-packet"></p></div>
+      <div class="receipt"><p>Collection code</p><div class="code-with-action"><div class="code" id="saved-code" aria-live="polite" tabindex="0" role="button" title="Read collection code aloud"></div><button id="refresh-saved-code" type="button" aria-label="Refresh collection code; old code will stop working" title="Refresh code">↻</button></div><p id="saved-expiry" hidden></p><p id="saved-packet"></p></div>
       <div id="depositor-receipt"></div><button id="share-action" class="primary">Share code</button>
-      <button id="pickup-updates-open" type="button">Pickup updates</button><button id="saved-done">Done</button>
+      <button id="pickup-updates-open" type="button">Depositor updates</button><button id="saved-done">Done</button>
     </div></section>
-    <section id="pickup-updates" hidden><h1 tabindex="-1">Pickup updates</h1>
-      <form id="pickup-updates-form">
+    <section id="pickup-updates" hidden><h1 tabindex="-1">Depositor updates</h1>
+      <div id="prepared-depositor-update"></div><button id="back-from-update" type="button">Back to receipt</button>
+      <form id="pickup-updates-form" hidden>
         <label class="field">Depositor WhatsApp number <input name="phone" type="tel" inputmode="tel" autocomplete="off" maxlength="40" required placeholder="10-digit mobile or international + code"></label>
         <button class="primary">Save WhatsApp updates</button>
         <button id="pickup-updates-off" type="button">Turn off updates</button>
@@ -158,27 +159,29 @@
     <section id="lookup" hidden><h1 tabindex="-1">Collect passes</h1><form id="lookup-form">
       <label class="field">Collection code <input name="code" maxlength="4" minlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" enterkeyhint="search" aria-describedby="lookup-code-hint" spellcheck="false"></label>
       <p id="lookup-code-hint" class="code-hint">Enter the 4 digits on the pickup receipt.</p>
-      <label class="field" id="lookup-reference" hidden>Pickup reference from the collector’s receipt
-        <input name="reference" maxlength="12" minlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="PKT-1234ABCD">
+      <label class="field" id="lookup-reference" hidden>Current receipt link
+        <input name="reference" maxlength="600" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Paste the current receipt link">
       </label>
       <button class="primary">Find passes</button>
     </form></section>
-    <section id="collect" hidden><h1 tabindex="-1">Prepare pickup</h1><form id="collect-form">
+    <section id="collect" hidden><h1 tabindex="-1">Hand over passes</h1><form id="collect-form">
       <fieldset data-wizard-page><legend>Review this pickup</legend>
         <div class="location" id="pickup-location"><p>Pickup details</p><strong id="slot"></strong><p id="pickup-customer"></p></div>
         <input name="packet" type="hidden">
         <p>Choose the passes you are handing over now.</p><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button>
+        <label class="confirmation"><input type="checkbox" name="name_confirmed" required> I confirmed the depositor’s name and handed over these passes.</label>
       </fieldset>
-      <div class="wizard-nav"><button class="primary" data-wizard-next>Prepare handover</button></div>
+      <div class="wizard-nav"><button class="primary" data-wizard-next>Confirm handover</button></div>
     </form></section>
     <section id="handover" hidden><h1 tabindex="-1">Hand over passes</h1><div class="stack">
       <div class="receipt"><p id="handover-summary"></p></div>
+      <p>Confirm after the collector has these passes. If they already received them, confirm without handing them over again.</p>
       <button id="confirm" class="primary">Confirm handover</button>
     </div></section>
     <section id="done" hidden><h1 tabindex="-1">Passes handed over</h1><div class="stack">
       <div class="receipt"><h2>Remaining</h2><p id="balance"></p></div><div id="pickup-update-draft"></div><button id="done-action" class="primary">Done</button>
     </div></section>
-    <section id="guide" hidden><h1 tabindex="-1">Help</h1><p>Deposit passes after counting them and putting the packet on the shelf. When someone gives you a code, review the matching deposit and choose the passes for this pickup. Confirm only after handing over the selected passes.</p><p>Run demo opens a separate practice register.</p></section>
+    <section id="guide" hidden><h1 tabindex="-1">Help</h1><p>Deposit passes after counting them and putting the packet on the shelf. When someone gives you a code, review the matching deposit and choose the passes for this pickup. Confirm only after handing over the selected passes.</p><p></p></section>
     <p class="error" id="error" role="alert"></p>
   </main>
 </div>

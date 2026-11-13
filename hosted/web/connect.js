@@ -48,3 +48,4 @@ form.onsubmit=async event=>{
 };
 
 sharePassAutoAdvance(code,value=>!hasInvite&&/^[0-9]{4}$/.test(value),()=>form.requestSubmit());
+if(hasInvite&&(!/Android/i.test(navigator.userAgent)||location.pathname==='/connect'))queueMicrotask(()=>form.requestSubmit());

@@ -47,14 +47,14 @@ async function boothPoster(db,staff,origin){
 
 async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   const db=env.DB;
-  const poster=await db.prepare('SELECT workspace,id AS booth_id,name FROM sharepass_configured_booths WHERE poster_token=?').bind(token).first()
-    ||await db.prepare("SELECT workspace,'B1' AS booth_id,'Box office' AS name FROM sharepass_booth_posters WHERE token=?").bind(token).first();
+  const poster=await db.prepare('SELECT workspace,id AS booth_id,name,archived FROM sharepass_configured_booths WHERE poster_token=?').bind(token).first()
+    ||await db.prepare("SELECT p.workspace,'B1' AS booth_id,'Box office' AS name,coalesce(b.archived,0) AS archived FROM sharepass_booth_posters p LEFT JOIN sharepass_configured_booths b ON b.workspace=p.workspace AND b.id='B1' WHERE p.token=?").bind(token).first();
   if(!poster)return boothMissing();
   if(alerts)return guestReceiptSubscription(request,env,poster,origin);
   if(request.method==='GET'){
     if(ticket===null){
       const publicKey=webPushSettings(env)?.publicKey;
-      return json({booth:poster.name,...(publicKey?{alerts_key:publicKey}:{})});
+      return json({booth:poster.name,archived:!!poster.archived,...(publicKey?{alerts_key:publicKey}:{})});
     }
     if(!intakeTokenPattern.test(ticket))return boothMissing();
     return boothReceipt(db,poster,ticket);
@@ -81,6 +81,13 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   const update=updatePreference(input.update_channel,contact);
   if(update===false)return error('Enter a valid address for your chosen pickup update channel.',400);
   const payload=JSON.stringify({...contact,quantities,recipients,...(update?{update}:{}),...(current?{intake_version:2}:{})});
+  const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=? AND booth_id=?')
+    .bind(input.request_id,poster.workspace,poster.booth_id).first();
+  if(prior){
+    if(prior.payload!==payload)return error('These details have already been sent. Tell staff if anything changed.',409);
+    return current?boothReceipt(db,poster,input.request_id):json({status:'submitted',queue_ref:input.request_id.slice(-6).toUpperCase()});
+  }
+  if(poster.archived)return error('This booth is archived and is not accepting new deposits.',409);
   const now=Date.now(),expires=now+QUEUE_LIFETIME_MS;
   // Confirmed receipts can outlive their intake. Wait for legacy import before pruning them.
   await db.prepare(`DELETE FROM sharepass_booth_queue AS q WHERE q.expires_at<=? AND (q.confirmed=0 OR (
@@ -101,7 +108,7 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
     if(!prior)return error('The booth queue is full. Let the booth staff know.',429);
     if(prior.payload!==payload)return error('These details have already been sent. Tell staff if anything changed.',409);
   }else await scheduleBoothPush(env,ctx,poster.workspace,poster.booth_id);
-  return json({status:'submitted',queue_ref:input.request_id.slice(-6).toUpperCase()});
+  return json({status:'submitted',...(current?{name:contact.name}:{}),queue_ref:input.request_id.slice(-6).toUpperCase()});
 }
 
 async function boothReceipt(db,poster,ticket){
@@ -111,7 +118,7 @@ async function boothReceipt(db,poster,ticket){
   const fields=JSON.parse(row.payload);
   if(fields.intake_version!==2)return boothMissing();
   const queue_ref=ticket.slice(-6).toUpperCase();
-  if(!row.confirmed)return json({status:row.expires_at>Date.now()?'submitted':'closed',queue_ref});
+  if(!row.confirmed)return json({status:row.expires_at>Date.now()?'submitted':'closed',queue_ref,name:fields.name});
   const committed=await ledgerReceipt(db,poster.workspace,'booth-'+ticket);
   if(!committed)return json({status:row.expires_at>Date.now()?'submitted':'closed',queue_ref});
   const deposit=committed.deposit.booth_id===poster.booth_id?committed.deposit:null;
@@ -120,7 +127,7 @@ async function boothReceipt(db,poster,ticket){
     return json({status:'closed',queue_ref});
   }
   return json({status:'confirmed',queue_ref,booth:poster.name,collection_code:deposit.active_collection_code||committed.receipt.collection_code,
-    collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,
+    name:fields.name,collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,
     recipients:fields.recipients.map(({name,phone,quantities})=>({name,phone,quantities}))});
 }
 
@@ -159,6 +166,7 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
   body.depositor_label=fields.name;
   const preference=JSON.parse(row.payload).update;
   if(preference)body.update_contact=preference;
+  else if(fields.intake_version===2&&sharePassPhone(fields.phone))body.update_contact={channel:'whatsapp',address:sharePassPhone(fields.phone),name:fields.name};
   const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{booth:true,token},allowCodeReuse);
   if(!result.ok)return result;
   if((await result.clone().json()).replayed)await db.prepare('UPDATE sharepass_booth_queue SET confirmed=1 WHERE workspace=? AND token=?').bind(staff.workspace,token).run();
@@ -166,8 +174,9 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
     [{name:fields.name,phone:fields.phone,email:fields.email}].filter(item=>item.phone||item.email);
   const depositorPhone=sharePassPhone(fields.phone);
   const counts=Object.entries(fields.quantities).filter(([,count])=>count).map(([key,count])=>count+' '+key.toUpperCase()).join(' + ');
-  const proof=depositorPhone?{address:depositorPhone,message:'Hi '+fields.name+'! SharePass staff received '+counts+
-    ' passes at your booth. Receipt reference '+fields.queue_ref+'. Keep this confirmation as proof of deposit.'}:null;
+  const received=await result.clone().json();
+  const proof=depositorPhone?{address:depositorPhone,message:'Hi '+fields.name+'! SharePass staff '+staff.name+' received '+counts+
+    ' passes at your booth. Collection code '+received.collection_code+'. Keep this confirmation as proof of deposit.'}:null;
   return json({...await result.json(),recipients,update_channel:preference?.channel||'',
     depositor_phone:depositorPhone||'',depositor_name:fields.name,depositor_receipt:proof});
 }

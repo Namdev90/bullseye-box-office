@@ -57,7 +57,7 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
       const normal=()=>f.send(path,body,options);
       return intercept?intercept(path,body,normal):normal();
     }};
-  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
+  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,reserve,preparePickup:value=>{match=value;},state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
   const api=sandbox.testCounter;
   async function settle(){for(let i=0;i<100;i++){await Promise.resolve();if(!api.state().busy&&api.state().view!=='loading'){await Promise.resolve();return;}}throw Error('Counter did not settle');}
   await settle();
@@ -66,6 +66,45 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
   return {api,node,calls,storage,stored,click,submit,settle};
 }
 const journal=p=>JSON.parse([...p.storage.values()][0]||'null');
+
+test('one-button handover recovers either lost reply without another release or handover',async()=>{
+  for(const cut of ['/release','/handover']){
+    const f=fixture();try{
+      const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;
+      let lost=true;
+      const p=await page(f,{intercept:async(path,body,normal)=>{
+        const response=await normal();
+        if(lost&&path.endsWith(cut)){lost=false;throw new TypeError('Synthetic lost reply');}
+        return response;
+      }});
+      p.api.preparePickup(claim);
+      const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+      form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+      await assert.rejects(p.api.reserve());assert(journal(p));
+      await p.api.recover();assert.equal(p.api.state().view,'done');assert.equal(journal(p),null);
+      assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+      assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").get().n,1);
+      for(const suffix of ['/release','/handover']){
+        const ids=p.calls.filter(call=>call.path.endsWith(suffix)).map(call=>call.body.request_id);
+        assert.equal(new Set(ids).size,1,'Recovery must retain the original request ID');
+      }
+    }finally{f.close();}
+  }
+});
+
+test('handover waits for name confirmation and preserves intent if the second journal write fails',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body,p=await page(f);
+    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=false;
+    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    await assert.rejects(p.api.reserve(),/depositor/);assert.equal(journal(p),null);
+    form.elements.name_confirmed.checked=true;
+    p.api.setStorage({...p.stored,setItem(key,value){if(JSON.parse(value).path.endsWith('/handover'))throw new Error('Synthetic journal failure');return p.stored.setItem(key,value);}});
+    await assert.rejects(p.api.reserve(),/Recover/);assert.equal(journal(p).finalize,true);
+    p.api.setStorage(p.stored);await p.api.recover();assert.equal(journal(p),null);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+  }finally{f.close();}
+});
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 async function receipt(f,options){const made=await f.call('/api/deposits',initial,options);assert.equal(made.status,200);return made.body;}
 // Recovery tests deliberately enter the retained interrupted-request form. The
@@ -226,7 +265,7 @@ test('recovery endpoint is exact-operation and staff/booth/workspace scoped, rea
     f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run(booth.id,staffId);
     assert.equal((await f.call(recoverPath,saved,original.options)).status,404);
     f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run('B1',staffId);
-    f.sqlite.prepare('INSERT INTO sharepass_configured_booths VALUES(?,?,?,?,?)').run('other-workspace','B1','Other workspace','Elsewhere',crypto.randomUUID());
+    f.sqlite.prepare('INSERT INTO sharepass_configured_booths(workspace,id,name,location,poster_token) VALUES(?,?,?,?,?)').run('other-workspace','B1','Other workspace','Elsewhere',crypto.randomUUID());
     f.sqlite.prepare('UPDATE sharepass_configured_devices SET workspace=? WHERE id=?').run('other-workspace',original.id);
     const otherWorkspace=await f.call(recoverPath,saved,original.options);
     assert.deepEqual(otherWorkspace.body,{refresh_pending:true});

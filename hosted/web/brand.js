@@ -55,3 +55,13 @@ window.sharePassCopyText=async(text,status)=>{
     return false;
   }
 };
+
+document.addEventListener('click',event=>{
+  const code=event.target.closest('#saved-code,#pickup-code');
+  if(!code||!/^\d{4}$/.test(code.textContent.trim())||!('speechSynthesis' in window))return;
+  speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(code.textContent.trim().split('').join(' ')));
+});
+document.addEventListener('keydown',event=>{
+  if(!['Enter',' '].includes(event.key)||!event.target.matches('#saved-code,#pickup-code'))return;
+  event.preventDefault();event.target.click();
+});

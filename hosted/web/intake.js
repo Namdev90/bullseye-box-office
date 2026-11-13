@@ -216,8 +216,8 @@ function showReceipt(result){
   form.hidden=false;
   form.reset();recipientList.replaceChildren();form.hidden=true;
   receipt.hidden=false;
-  reference.hidden=!result.queue_ref;
-  reference.textContent=result.queue_ref?'Queue reference '+result.queue_ref:'';
+  reference.hidden=!result.collection_code&&!result.name;
+  reference.textContent=result.collection_code?(result.name?result.name+' · ':'')+'Code '+result.collection_code:result.name||'';
   receiptShare.replaceChildren();
   if(result.status==='confirmed'&&result.collection_code){
     statusLine.textContent='✓ Passes received';
@@ -229,18 +229,18 @@ function showReceipt(result){
       link.classList.add('whatsapp-action');receiptShare.append(link);
     }
   }else if(result.status==='submitted'){
-    statusLine.textContent='✓ Sent to staff';
-    receiptState.textContent='Show this screen at the counter. Keep it open while staff count and receive your passes.';
+    statusLine.textContent='✓ Sent to booth';
+    receiptState.textContent='Waiting for booth confirmation. Your pickup code and WhatsApp buttons will appear here automatically after staff receive and approve your passes.';
 
   }else if(result.status==='checking'){
     statusLine.textContent='Pickup in progress';
     receiptState.textContent='The counter is confirming a handover.';
   }else{
     statusLine.textContent=result.status==='closed'?'This deposit is closed.':'Passes received';
-    receiptState.textContent='Show the queue reference to staff if you need help.';
+    receiptState.textContent='Ask the booth team if you need help.';
   }
   lastReceipt=result.status;lastCode=result.collection_code;
-  document.getElementById('check-receipt').hidden=!booth||result.status==='closed';
+  document.getElementById('check-receipt').hidden=true;
   document.getElementById('receipt-sync-status').textContent=result.status==='submitted'?'Waiting for staff confirmation. This page updates automatically.':result.status==='closed'?'Deposit closed.':'Receipt updated automatically.';
   scheduleReceiptPoll();
   if(alertKey&&requestId&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&'caches' in window){
@@ -364,7 +364,7 @@ async function prepareReceiptAlerts(ticket){
     }
     if(requestId!==ticket||revision!==alertRevision)return;
     alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
-    alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
+    alertButton.hidden=true;
   });
 }
 async function receiptWorkerAt(scope){
@@ -458,7 +458,7 @@ alertButton.onclick=async()=>{
   finally{
     if(requestId===ticket&&alertScope===scope){
       alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
-      alertButton.hidden=lastReceipt==='closed'&&!alertsEnabled;
+      alertButton.hidden=true;
     }
     alertButton.disabled=false;
   }
@@ -470,7 +470,7 @@ let receiptCheck=0;
 function scheduleReceiptPoll(){
   clearTimeout(receiptPollTimer);
   if(!booth||!requestId||receipt.hidden||lastReceipt==='closed'||document.hidden)return;
-  const delay=receiptFailures?Math.min(30000,5000*receiptFailures):lastReceipt==='submitted'?4000:12000;
+  const delay=receiptFailures?Math.min(60000,15000*receiptFailures):15000;
   receiptPollTimer=setTimeout(checkReceipt,delay);
 }
 async function checkReceipt(){
@@ -540,6 +540,7 @@ form.onsubmit=async event=>{
       }catch{requestId=undefined;}
     }
     if(result.status&&result.status!=='waiting')return showReceipt(result);
+    if(result.archived)throw new Error('This booth is archived and is not accepting new deposits.');
     form.hidden=false;
     statusLine.textContent='Add your details and pass counts. Then show staff your passes.';
   }catch(error){statusLine.textContent='This form couldn’t be opened.';errorLine.textContent=error.message;}

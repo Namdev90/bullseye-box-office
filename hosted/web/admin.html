@@ -33,13 +33,13 @@
         <button type="button" data-panel="booths" aria-pressed="true" aria-controls="booths">Booths</button>
         <button type="button" data-panel="staff" aria-pressed="false" aria-controls="staff">Staff and devices</button>
         <button type="button" data-panel="staff-messages" aria-pressed="false" aria-controls="staff-messages">Staff messages</button>
-        <button type="button" data-panel="reissue" aria-pressed="false" aria-controls="reissue">Replace expired code</button>
-        <button type="button" data-panel="code-policy" aria-pressed="false" aria-controls="code-policy">Code catalogue</button>
+        <button hidden type="button" data-panel="reissue" aria-pressed="false" aria-controls="reissue">Replace expired code</button>
+        <button hidden type="button" data-panel="code-policy" aria-pressed="false" aria-controls="code-policy">Code catalogue</button>
       </nav>
       <p id="setup-status" role="status"></p>
       <section class="admin-card" id="staff-messages" aria-labelledby="staff-messages-heading" hidden>
         <h2 id="staff-messages-heading" tabindex="-1">Staff messages</h2>
-        <p>The first reply from the selected booth closes the message. Unanswered messages expire after 24 hours.</p>
+        <p>Each person replies once; replies synchronize across their devices. Unanswered messages expire after 24 hours.</p>
         <form id="staff-message-form" class="admin-wizard">
           <label class="field">Booth <select name="booth_id" required></select></label>
           <label class="field">Message <input name="message" maxlength="300" required></label>
@@ -47,7 +47,7 @@
         </form>
         <button type="button" id="refresh-staff-messages">Refresh replies</button>
         <p id="staff-messages-status" role="status"></p>
-        <ul id="staff-messages-list" class="admin-list"></ul>
+        <ul id="personal-message-inbox" class="admin-list"></ul><ul id="staff-messages-list" class="admin-list"></ul>
       </section>
       <section class="admin-card" id="booths" aria-labelledby="booths-heading">
         <h2 id="booths-heading" tabindex="-1">Booths</h2>
@@ -63,16 +63,13 @@
       </section>
       <section class="admin-card" id="staff" aria-labelledby="staff-heading" hidden>
         <h2 id="staff-heading" tabindex="-1">Staff and devices</h2>
-        <ul id="device-list" class="admin-list"></ul>
+
         <button type="button" id="open-invite-form" class="primary" disabled>Set up a staff device</button>
-        <button type="button" id="refresh-devices">Refresh devices</button>
+        <button type="button" id="refresh-devices">Refresh devices</button><ul id="device-list" class="admin-list"></ul>
         <form id="invite-form" class="admin-wizard" hidden novalidate>
           <fieldset data-step><legend>Staff device details</legend>
             <div class="field"><label for="invite-booth">Booth</label><select id="invite-booth" name="booth_id" required></select></div>
             <label class="field">Staff name <input name="staff_name" maxlength="80" autocomplete="off" required></label>
-            <label class="field">Designation
-              <select name="designation" aria-describedby="designation-help"><option>Counter staff</option><option>Deposit desk</option><option>Collection desk</option></select>
-            </label>
             <small id="designation-help">The device is named automatically using the staff name. Access is assigned by booth.</small>
           </fieldset>
           <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create setup QR</button></div>
@@ -142,7 +139,7 @@
         <div class="report-table" tabindex="0" role="region" aria-label="Booth totals, scroll horizontally if needed"><table><caption>Pass totals by booth</caption><thead><tr>
           <th scope="col">Booth</th><th scope="col">Deposits</th><th scope="col">Received</th><th scope="col">Available</th><th scope="col">Pending</th><th scope="col">Handed over</th>
         </tr></thead><tbody id="report-rows"></tbody></table></div>
-        <button type="button" id="refresh-report">Refresh report</button>
+        <button type="button" id="refresh-report">Refresh report</button><button type="button" id="download-report" disabled>Download report CSV</button>
       </section>
       </div>
     </main>

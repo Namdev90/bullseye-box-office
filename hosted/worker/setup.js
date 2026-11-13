@@ -20,13 +20,13 @@ function staffCookieHeader(value,maxAge){
 async function boothConfiguration(db,workspace,id='B1'){
   if(id==='B1')await db.prepare('INSERT OR IGNORE INTO sharepass_configured_booths(workspace,id,name,location,poster_token) VALUES(?,?,?,?,?)')
     .bind(workspace,id,BOOTH_LABEL,'',crypto.randomUUID()).run();
-  return db.prepare('SELECT id,name,location,poster_token FROM sharepass_configured_booths WHERE workspace=? AND id=?').bind(workspace,id).first();
+  return db.prepare('SELECT id,name,location,poster_token,archived FROM sharepass_configured_booths WHERE workspace=? AND id=?').bind(workspace,id).first();
 }
 
 async function setupState(db,workspace){
   await boothConfiguration(db,workspace);
   const [booths,staff,devices,release]=await Promise.all([
-    db.prepare('SELECT id,name,location FROM sharepass_configured_booths WHERE workspace=? ORDER BY name').bind(workspace).all(),
+    db.prepare('SELECT id,name,location,archived FROM sharepass_configured_booths WHERE workspace=? ORDER BY name').bind(workspace).all(),
     db.prepare('SELECT id,name,booth_id FROM sharepass_configured_staff WHERE workspace=? ORDER BY name').bind(workspace).all(),
     db.prepare(`SELECT d.id,d.label,d.staff_id,s.name AS staff_name,s.booth_id,d.designation,d.active,
       (d.digest IS NOT NULL AND d.session_expires>?) AS paired,
@@ -112,6 +112,12 @@ async function adminSetup(request,db,workspace,origin){
   if(request.method==='GET')return json(await setupState(db,workspace));
   if(request.method!=='POST')return error('Page not found.',404);
   const body=await bodyJson(request);
+  if(body?.action==='archive-booth'){
+    if(body.confirmed!==true||!boothIdPattern.test(body.booth_id||''))return error('Confirm the booth to archive.',400);
+    const changed=await db.prepare('UPDATE sharepass_configured_booths SET archived=1 WHERE workspace=? AND id=?').bind(workspace,body.booth_id).run();
+    if(changed.meta.changes!==1)return error('Booth not found.',404);
+    return json(await setupState(db,workspace));
+  }
   if(body?.action==='booth'){
     const name=setupText(body.name,80),location=setupText(body.location,100);
     if(!name||!location)return error('Enter the booth name and pickup location.',400);
@@ -131,7 +137,8 @@ async function adminSetup(request,db,workspace,origin){
   if(body?.action!=='invite'||!name||!label||
      (body.device_label!==undefined&&body.device_label!==''&&!setupText(body.device_label,80))||
      !['Counter staff','Deposit desk','Collection desk'].includes(designation)||
-     !boothIdPattern.test(booth||'')||!(await boothConfiguration(db,workspace,booth))){
+     !boothIdPattern.test(booth||'')||!(await boothConfiguration(db,workspace,booth))||
+     (await boothConfiguration(db,workspace,booth)).archived){
     return error('Choose a booth and designation and enter the staff name.',400);
   }
   const now=Date.now(),expires_at=now+SETUP_LIFETIME_MS;
@@ -159,7 +166,7 @@ async function setupAttempt(db,scope,minute,limit){
 async function configuredAccess(db,verifier){
   const digest=await verifierDigest(verifier);
   if(!digest)return null;
-  const row=await db.prepare(`SELECT d.id AS device_id,d.workspace,d.session_expires,s.id AS operator,s.name,s.booth_id,d.designation,b.name AS booth_label,b.location AS pickup_location
+  const row=await db.prepare(`SELECT d.id AS device_id,d.workspace,d.session_expires,s.id AS operator,s.name,s.booth_id,d.designation,b.name AS booth_label,b.location AS pickup_location,b.archived
     FROM sharepass_configured_devices d JOIN sharepass_configured_staff s ON d.staff_id=s.id
     JOIN sharepass_configured_booths b ON b.workspace=d.workspace AND b.id=s.booth_id
     WHERE d.digest=? AND d.active=1 AND d.session_expires>?`).bind(digest,Date.now()).first();
@@ -168,7 +175,7 @@ async function configuredAccess(db,verifier){
 
 function staffContext(staff,env){
   return {ticket_receipts:true,push_first:true,staff_label:staff.name,admin:staff.admin,session_key:staff.operator,booth_id:staff.booth_id||'B1',
-    booth_label:staff.booth_label||BOOTH_LABEL,designation:staff.designation||null,pickup_location:staff.pickup_location||env.SHAREPASS_PICKUP_LOCATION||''};
+    booth_label:staff.booth_label||BOOTH_LABEL,booth_archived:!!staff.archived,designation:staff.designation||null,pickup_location:staff.pickup_location||env.SHAREPASS_PICKUP_LOCATION||''};
 }
 
 async function connectDevice(request,env){
@@ -191,7 +198,9 @@ async function connectDevice(request,env){
     }
     const column=code?'setup_code':'invite';
     await db.prepare(`UPDATE sharepass_configured_devices SET digest=?,session_expires=?
-      WHERE ${column}=? AND active=1 AND digest IS NULL AND invite_expires>?`).bind(digest,expires,code||invite,now).run();
+      WHERE ${column}=? AND active=1 AND digest IS NULL AND invite_expires>?
+        AND EXISTS(SELECT 1 FROM sharepass_configured_staff s JOIN sharepass_configured_booths b ON b.workspace=sharepass_configured_devices.workspace AND b.id=s.booth_id
+          WHERE s.id=sharepass_configured_devices.staff_id AND b.archived=0)`).bind(digest,expires,code||invite,now).run();
     staff=await configuredAccess(db,verifier);
   }
   if(!staff)return error('This setup has expired or was already used. Ask the desktop administrator for a new code.',403);

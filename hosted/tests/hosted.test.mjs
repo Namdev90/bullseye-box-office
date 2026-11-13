@@ -284,7 +284,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'30');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'34');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -292,7 +292,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js"'));
+  assert((await signed.text()).includes('src="/counter.js?v=34-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });
@@ -854,7 +854,9 @@ test('a recycled code requires the new receipt and never redirects an old messag
     const ticket=crypto.randomUUID(),code='1337',quantities={normal:2,vip:0,vvip:0};
     const guest={request_id:ticket,intake_version:2,name:'Fixture guest',phone:'+12025550120',quantities,
       recipients:[{name:'Fixture collector',phone:'+12025550121',quantities}]};
-    assert.equal((await f.call(publicPath,guest,'')).status,200);
+    const submitted=await f.call(publicPath,guest,'');
+    assert.equal(submitted.status,200);
+    assert.equal(submitted.body.collection_code,undefined);
     const original=await f.call('/api/queue/'+ticket+'/confirm',{custody_confirmed:true,custom_code:code});
     assert.equal(original.status,200);
     const old=original.body.deposit;
@@ -1044,7 +1046,9 @@ test('staff request identifiers cannot forge a guest receipt',async()=>{
     assert.equal(legacy.changes,1);
     const receipt=await f.call(path+'?ticket='+ticket,undefined,'');
     assert.equal(receipt.status,200);
-    assert.deepEqual(receipt.body,{status:'submitted',queue_ref:ticket.slice(-6).toUpperCase()});
+    assert.equal(receipt.body.status,'submitted');
+    assert.equal(receipt.body.collection_code,undefined);
+    assert.equal(receipt.body.collection_reference,undefined);
   }finally{f.close();}
 });
 

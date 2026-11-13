@@ -35,7 +35,7 @@ class BrandArtwork extends View {
     void animateOpening() {
         if (header || Build.VERSION.SDK_INT < 26 || !ValueAnimator.areAnimatorsEnabled()) return;
         animation = ValueAnimator.ofFloat(0f, 1f);
-        animation.setDuration(760);
+        animation.setDuration(1200);
         animation.setInterpolator(new DecelerateInterpolator());
         animation.addUpdateListener(value -> { progress = (float) value.getAnimatedValue(); invalidate(); });
         animation.start();
@@ -46,10 +46,12 @@ class BrandArtwork extends View {
         if (artwork == null) return;
         if (header) {
             int bottom = Math.round(artwork.getHeight() * .195f);
-            float width = Math.min(getWidth(), getHeight() * artwork.getWidth() / (float) bottom);
-            float left = (getWidth() - width) / 2f;
+            float width = Math.min(getWidth() * .60f, getHeight() * artwork.getWidth() / (float) bottom);
+            float left = 0;
             canvas.drawBitmap(artwork, new Rect(0, 0, artwork.getWidth(), bottom),
                 new RectF(left, 0, left + width, getHeight()), paint);
+            canvas.drawBitmap(artwork,new Rect(0,Math.round(artwork.getHeight()*.73f),artwork.getWidth(),Math.round(artwork.getHeight()*.96f)),
+                new RectF(getWidth()*.64f,getHeight()*.18f,getWidth(),getHeight()*.82f),paint);
             return;
         }
         float side = Math.min(getWidth(), getHeight());
