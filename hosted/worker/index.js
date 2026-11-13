@@ -259,7 +259,8 @@ export default {async fetch(request,env,ctx){
       if(request.method==='GET'&&path==='/api/context'){
         if(configured)await recordDeviceSeen(env.DB,configured);
         const poster=await boothPosterDetails(env.DB,staff,url.origin);
-        const enriched={...context,...(poster?{booth_url:poster.url}:{})};
+        const booth=await boothConfiguration(env.DB,staff.workspace,staff.booth_id||'B1');
+        const enriched={...context,booth_archived:!!booth?.archived,...(poster?{booth_url:poster.url}:{})};
         return json(staff.admin?{...enriched,pickup_code_reuse_enabled:allowCodeReuse}:enriched);
       }
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);

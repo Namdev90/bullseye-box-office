@@ -101,11 +101,15 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
             SELECT 1 FROM json_each(d.payload,'$.remaining') amount WHERE amount.type='integer' AND amount.value>0)))
     )))`).bind(now-QUEUE_RECOVERY_MS,now).run();
   const inserted=await db.prepare(`INSERT OR IGNORE INTO sharepass_booth_queue(token,workspace,booth_id,submitted_at,expires_at,payload)
-    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>?)<120`)
-    .bind(input.request_id,poster.workspace,poster.booth_id,now,expires,payload,poster.workspace,poster.booth_id,now).run();
+    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>?)<120
+      AND NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1)`)
+    .bind(input.request_id,poster.workspace,poster.booth_id,now,expires,payload,poster.workspace,poster.booth_id,now,poster.workspace,poster.booth_id).run();
   if(inserted.meta.changes===0){
     const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=? AND booth_id=?').bind(input.request_id,poster.workspace,poster.booth_id).first();
-    if(!prior)return error('The booth queue is full. Let the booth staff know.',429);
+    if(!prior){
+      if((await boothConfiguration(db,poster.workspace,poster.booth_id))?.archived)return error('This booth is archived and is not accepting new deposits.',409);
+      return error('The booth queue is full. Let the booth staff know.',429);
+    }
     if(prior.payload!==payload)return error('These details have already been sent. Tell staff if anything changed.',409);
   }else await scheduleBoothPush(env,ctx,poster.workspace,poster.booth_id);
   return json({status:'submitted',...(current?{name:contact.name}:{}),queue_ref:input.request_id.slice(-6).toUpperCase()});
@@ -164,8 +168,13 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
   const body=validate({...input,location,valid_minutes:input?.valid_minutes??(fields.intake_version===2?1440:undefined),request_id:'booth-'+token,quantities:fields.quantities},'/api/deposits',staff.operator,booth);
   if(!body)return error('Check the shelf, code, expiry, and physical receipt.',400);
   body.depositor_label=fields.name;
+  await ensureLedger(db,staff.workspace);
   const preference=JSON.parse(row.payload).update;
-  if(preference)body.update_contact=preference;
+  const previous=await db.prepare('SELECT payload FROM sharepass_ledger_requests WHERE owner=? AND id=?').bind(staff.workspace,'booth-'+token).first();
+  if(previous){
+    const recorded=JSON.parse(JSON.parse(previous.payload).fingerprint)[1];
+    if(Object.hasOwn(recorded,'update_contact'))body.update_contact=recorded.update_contact;
+  }else if(preference)body.update_contact=preference;
   else if(fields.intake_version===2&&sharePassPhone(fields.phone))body.update_contact={channel:'whatsapp',address:sharePassPhone(fields.phone),name:fields.name};
   const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{booth:true,token},allowCodeReuse);
   if(!result.ok)return result;

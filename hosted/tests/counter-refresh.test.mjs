@@ -105,6 +105,37 @@ test('handover waits for name confirmation and preserves intent if the second jo
     assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
   }finally{f.close();}
 });
+
+test('a definitively unexecuted expired-claim recovery releases its journal without changing stock',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true;
+    const p=await page(f,{intercept:async(path,body,normal)=>{if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Request never reached server');}return normal();}});
+    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    await assert.rejects(p.api.reserve());assert(journal(p));
+    const row=f.sqlite.prepare('SELECT payload FROM sharepass_ledger_claims WHERE token=?').get(claim.claim_token);
+    f.sqlite.prepare('UPDATE sharepass_ledger_claims SET expires=0,payload=? WHERE token=?').run(JSON.stringify({...JSON.parse(row.payload),expires:0}),claim.claim_token);
+    await assert.rejects(p.api.recover());assert.equal(journal(p),null);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,0);
+    assert.equal(p.api.state().recovery,null);
+  }finally{f.close();}
+});
+
+test('expired authentication cannot discard a committed pickup while its response is being recovered',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true,unauthorized=false;
+    const p=await page(f,{intercept:async(path,body,normal)=>{
+      if(unauthorized&&path.endsWith('/release'))return Response.json({error:'Reconnect the original staff account.',notExecuted:true},{status:401});
+      const response=await normal();if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Committed reply lost');}return response;
+    }});
+    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    await assert.rejects(p.api.reserve());const original=journal(p);unauthorized=true;
+    await assert.rejects(p.api.recover(),/Reconnect/);assert.deepEqual(journal(p),original);
+    unauthorized=false;await p.api.recover();assert.equal(journal(p),null);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+  }finally{f.close();}
+});
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 async function receipt(f,options){const made=await f.call('/api/deposits',initial,options);assert.equal(made.status,200);return made.body;}
 // Recovery tests deliberately enter the retained interrupted-request form. The

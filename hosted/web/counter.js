@@ -260,11 +260,13 @@ async function submit(action){
     setRecovery(null);
     return result;
   }catch(error){
-    if(error.notExecuted) setRecovery(null);
+    if(knownFailure(error)) setRecovery(null);
     else throw new Error('The result is uncertain. Return to the desk and recover the last action before handling more passes.');
     throw error;
   }
 }
+
+function knownFailure(error){return error.notExecuted&&error.status!==401&&error.status!==403;}
 
 function request(path,body){
   if(register)return register.request(path,{...scope,...body,request_id:crypto.randomUUID()});
@@ -292,8 +294,8 @@ async function recover(){
   }
   if(action.path==='/api/codes/refresh')return recoverRefresh(action);
   if(action.finalize){
-    const result=await fetchJson(action.path,action.body);
-    return finishDirectHandover(result);
+    try{return await finishDirectHandover(await fetchJson(action.path,action.body));}
+    catch(error){if(knownFailure(error)&&recovery===action)setRecovery(null);throw error;}
   }
   const result=await submit(action);
   if(action.path==='/api/deposits'||action.path.endsWith('/confirm'))showReceipt(result,action.path.startsWith('/api/intakes/'));
@@ -800,7 +802,8 @@ async function reserve(){
   // Keep physical-handover intent until the confirmation request is journaled.
   try{await finishDirectHandover(await fetchJson(action.path,action.body));}
   catch(error){
-    if(error.notExecuted&&recovery===action){setRecovery(null);throw error;}
+    if(knownFailure(error)&&recovery===action)setRecovery(null);
+    if(error.notExecuted)throw error;
     throw new Error('Recover the saved handover from the desk before handing over any more passes.');
   }
   finally{controls.forEach(control=>control.disabled=false);}
@@ -931,6 +934,11 @@ byId('leave').onclick = leaveDemo;
 
 byId('home').onclick = byId('saved-done').onclick = byId('done-action').onclick = demoAction(()=>show('desk'));
 byId('help').onclick = demoAction(()=>show('guide'));
+byId('help-alerts').onclick=async()=>{
+  const button=byId('help-alerts');button.disabled=true;
+  try{await byId('queue-alerts').onclick();byId('help-alert-status').textContent=byId('queue-alert-status').textContent;}
+  finally{button.disabled=false;}
+};
 byId('deposit-action').onclick = demoAction(()=>{
   if(register)return openDeposit();
   if(recovery)return perform(recover);

@@ -14,6 +14,8 @@ Static assets use an application version and content fingerprint. Authenticated 
 
 The update retains approved artwork and the existing Android signing identity. Android uses its native UI, QR scanner, platform speech and existing signed updater. The opening animation is about 1.2 seconds, with reduced-motion support. No new application dependency, signing key or AI service is required.
 
+Routine receipt alert toggles are removed at the owner's request. Receipt alerts remain permission-controlled and bounded; customers can revoke SharePass notifications through their browser settings. The existing scoped Stop API and safe subscription cleanup remain available to older clients. Staff notification and sound recovery is available contextually through Help, without restoring the standalone settings screen.
+
 ## Validation boundaries
 
 Run the hosted and Android suites and the exact-source JVM fixtures before publication. Set `SHAREPASS_MINIFLARE_MODULE` to an existing Miniflare installation to execute the real Workerd release regression. It uses deterministic outbound responses and disables automatic network-metadata fetching.

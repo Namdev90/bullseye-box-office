@@ -318,13 +318,15 @@ public final class HostedDeskActivity extends Activity {
             Button refresh=new Button(this);refresh.setText("↻");refresh.setContentDescription("Refresh SharePass");DeskSurface.roundButton(refresh);
             refresh.setOnClickListener(view -> refreshQueueNow());toolbar.addView(refresh,new LinearLayout.LayoutParams(dp(48),dp(48)));
             toolbar.addView(account, new LinearLayout.LayoutParams(-2, -2));
-        } else if (!"opening".equals(name)) {
+        }
+        if (!"opening".equals(name)) {
             Button help = new Button(this);
             help.setText("?");
             help.setContentDescription("Help for " + title);
             DeskSurface.roundButton(help);
             help.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(title)
-                .setMessage(helpText(title, name)).setPositiveButton("Got it", null).show());
+                .setMessage(helpText(title, name)).setPositiveButton("Got it", null)
+                .setNeutralButton("Notifications",(dialog,which)->openAlertSettings()).show());
             toolbar.addView(help, new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
         header.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
@@ -983,12 +985,16 @@ public final class HostedDeskActivity extends Activity {
     private void openAlertSettings() {
         QueueNotifications.ensureChannel(this);
         Intent settings;
-        if (Build.VERSION.SDK_INT >= 26) {
+        if(Build.VERSION.SDK_INT>=26&&!notificationsAllowed()){
+            settings=new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName());
+        } else if (Build.VERSION.SDK_INT >= 26) {
             settings = new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                 .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName())
                 .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, QueueNotifications.CHANNEL);
         } else settings = new Intent(android.provider.Settings.ACTION_SOUND_SETTINGS);
-        startActivity(settings);
+        try{startActivity(settings);}
+        catch(android.content.ActivityNotFoundException unavailable){note("Open SharePass notifications in Android settings.");}
     }
     private void askNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

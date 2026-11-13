@@ -364,7 +364,7 @@ async function prepareReceiptAlerts(ticket){
     }
     if(requestId!==ticket||revision!==alertRevision)return;
     alertButton.textContent=alertsEnabled?'Stop receipt alerts':'Enable receipt alerts';
-    alertButton.hidden=true;
+    alertButton.hidden=true; // Current receipts use browser permission controls; legacy clients retain scoped Stop support.
   });
 }
 async function receiptWorkerAt(scope){
