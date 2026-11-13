@@ -40,7 +40,7 @@ async function publishedAndroidRelease(manifest){
       ' (remaining '+response.headers.get('X-RateLimit-Remaining')+', reset '+response.headers.get('X-RateLimit-Reset')+')');
     if(response.status===401||response.status===403||response.status===429||response.status>=500){
       const now=Date.now();
-      androidReleaseCheckAfter=Math.max(...[now+60000,Number(response.headers.get('X-RateLimit-Reset'))*1000,
+      androidReleaseCheckAfter=Math.max(...[now+60000,response.headers.get('X-RateLimit-Remaining')==='0'?Number(response.headers.get('X-RateLimit-Reset'))*1000:0,
         now+Number(response.headers.get('Retry-After'))*1000].filter(Number.isSafeInteger));
       return null;
     }
