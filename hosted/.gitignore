@@ -1,3 +1,5 @@
 dist/
 *.sqlite*
 .sites-runtime/
+private/
+.dev.vars*

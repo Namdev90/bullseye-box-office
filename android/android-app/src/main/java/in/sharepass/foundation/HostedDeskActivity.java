@@ -716,6 +716,12 @@ public final class HostedDeskActivity extends Activity {
             + "\nRemaining · " + balance(deposit.optJSONObject("remaining")));
         card.addView(detail);
         JSONObject pending = deposit.optJSONObject("pending_collection");
+        if (pending == null && deposit.optBoolean("handover_pending")) {
+            TextView state = new TextView(this);
+            state.setText("Handover awaiting confirmation by another staff member");
+            state.setTextColor(DeskSurface.MUTED);
+            card.addView(state);
+        }
         if (pending != null) {
             Button resume = new Button(this); resume.setText("Resume handover"); DeskSurface.button(resume, true); card.addView(resume);
             resume.setOnClickListener(view -> run(() -> { client.resumeHandover(deposit, pending); return client.handover(); }, this::handover));
@@ -1349,7 +1355,7 @@ public final class HostedDeskActivity extends Activity {
         drawKeypad(input);
         button("Scan pickup QR", () -> scanQr(false), false);
         retryLookup = button("Retry lookup", find, false);
-        retryLookup.setVisibility(View.GONE);
+        retryLookup.setVisibility(initial.matches("[0-9]{4}") ? View.VISIBLE : View.GONE);
     }
     private void verifyPickup(String code, String reference) {
         run(() -> {
@@ -1440,6 +1446,8 @@ public final class HostedDeskActivity extends Activity {
         wizard.steps.add((previous, next) -> {
             page("Prepare pickup", "prepare", previous);
             try {
+                line("Packet · " + packetId, 21, true);
+                line("Depositor · " + deposit.optString("depositor_label", "Not provided"), 17, false);
                 JSONObject amounts = readQuantities(selected);
                 line(balance(amounts), 21, true);
                 line("Check these passes in your hands, then prepare the handover.", 16, false);

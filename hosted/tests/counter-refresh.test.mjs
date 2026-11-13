@@ -89,6 +89,22 @@ test('receipt refresh icon rotates once without asking for a packet label',async
   }finally{f.close();}
 });
 
+for(const contacts of [[],[{name:'Corrected collector',phone:'+12025550199'}]])test('code rotation preserves locally edited recipients '+contacts.length,async()=>{
+  const f=fixture();
+  try{
+    const data=await receipt(f),p=await page(f,{intercept:async(path,body,normal)=>{
+      const response=await normal();
+      if(path!==refreshPath||!response.ok)return response;
+      return Response.json({...await response.json(),recipients:[{name:'Original collector',phone:'+12025550102'}]});
+    }});
+    data.recipients=contacts;
+    p.api.showReceipt(data);
+    await p.click('refresh-saved-code');
+    assert.deepEqual(p.api.state().receipt.recipients,contacts);
+    assert.notEqual(p.api.state().receipt.collection_code,data.collection_code);
+  }finally{f.close();}
+});
+
 for(const reopen of [false,true])test('lost committed refresh recovers identically '+(reopen?'after Cancel/reopen':'on immediate retry'),async()=>{
   const f=fixture();let lose=true,committed;
   try{

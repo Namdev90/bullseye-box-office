@@ -100,7 +100,8 @@ async function ledgerHistory(db,staff,params){
   const booth=staff.booth_id||'B1';
   const after=cursor?" AND ((d.payload->>'created_at')<? OR ((d.payload->>'created_at')=? AND d.id<?))":'';
   const [records,pending]=await db.batch([
-    ledgerStatement(db,`SELECT d.id,d.payload FROM sharepass_ledger_deposits d
+    ledgerStatement(db,`SELECT d.id,d.payload,EXISTS(SELECT 1 FROM sharepass_ledger_collections c
+      WHERE c.owner=d.owner AND c.deposit_id=d.id AND c.pending=1) AS handover_pending FROM sharepass_ledger_deposits d
       WHERE d.owner=? AND d.event=? AND d.booth=?${after}
       ORDER BY (d.payload->>'created_at') DESC,d.id DESC LIMIT ?`,
       staff.workspace,EVENT,booth,...(cursor?[cursor[0],cursor[0],cursor[1]]:[]),limit+1),
@@ -112,7 +113,8 @@ async function ledgerHistory(db,staff,params){
   ]);
   const model=ledgerModel();
   model.collections=pending.results.map(row=>JSON.parse(row.collection));
-  const deposits=records.results.slice(0,limit).map(row=>model.publicDeposit(JSON.parse(row.payload)));
+  const deposits=records.results.slice(0,limit).map(row=>({...model.publicDeposit(JSON.parse(row.payload)),
+    handover_pending:!!row.handover_pending}));
   const last=deposits.at(-1);
   return json({deposits,pending_handovers:pending.results.map(row=>model.publicDeposit(JSON.parse(row.deposit))),
     next_cursor:records.results.length>limit?btoa(ledgerJson([last.created_at,last.id])):null});

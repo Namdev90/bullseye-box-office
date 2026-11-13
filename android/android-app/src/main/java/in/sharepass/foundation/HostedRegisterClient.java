@@ -218,7 +218,7 @@ final class HostedRegisterClient {
             if (previous != null && previous.getJSONObject("deposit").getString("id")
                     .equals(response.getJSONObject("deposit").getString("id"))) {
                 for (String key : new String[]{"recipients", "depositor_phone", "depositor_name", "update_channel", "update_address"}) {
-                    if (!response.has(key) && previous.has(key)) response.put(key, previous.get(key));
+                    if (previous.has(key) && (key.equals("recipients") || !response.has(key))) response.put(key, previous.get(key));
                 }
             }
             updated.put("receipt", response);

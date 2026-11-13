@@ -284,7 +284,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'29');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'30');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -1167,6 +1167,14 @@ test('History paginates booth records without private codes or contacts and keep
     quantities:{normal:1,vip:0,vvip:0}});
   assert.equal(reserved.status,200);
   await f.call('/api/deposits',{...deposit,request_id:'history-second',location:'H-02'});
+  const sameBooth=await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'Second desk'});
+  const sameToken='J'.repeat(43);
+  await f.call('/api/device/connect',{code:sameBooth.body.code,verifier:sameToken},'');
+  const secondHistory=(await f.call('/api/history',undefined,'',undefined,{'X-SharePass-Session':sameToken})).body;
+  const awaiting=secondHistory.deposits.find(item=>item.id===first.deposit.id);
+  assert.equal(awaiting.handover_pending,true);
+  assert.equal(awaiting.pending_collection,null);
+  assert.equal(secondHistory.pending_handovers.length,0);
   await f.call('/api/deposits',{...deposit,request_id:'history-third',location:'H-03'});
   const other=(await f.call('/api/admin/setup',{action:'booth',name:'Other history booth',location:'Another gate'})).body.booths.find(x=>x.name==='Other history booth');
   const invitation=await f.call('/api/admin/setup',{action:'invite',booth_id:other.id,staff_name:'Other staff'});
