@@ -50,9 +50,9 @@ export async function announceVerifiedRelease({manifestBytes,expectedVersionCode
   const remaining=()=>bounds.maxElapsedMs-(now()-started);
   const report=(reason,complete=false,extra={})=>({complete,reason,calls,version_code:versionCode,
     elapsed_ms:Math.max(0,Math.floor(now()-started)),...(last||{}),...extra});
-  async function waitForLease(){
-    if(calls>=bounds.maxCalls||remaining()<=bounds.leaseWaitMs)return false;
-    await sleep(bounds.leaseWaitMs);
+  async function waitForLease(waitMs=bounds.leaseWaitMs){
+    if(calls>=bounds.maxCalls||remaining()<=waitMs)return false;
+    await sleep(waitMs);
     return remaining()>0;
   }
   while(calls<bounds.maxCalls&&remaining()>0){
@@ -76,7 +76,9 @@ export async function announceVerifiedRelease({manifestBytes,expectedVersionCode
       // Rejected signatures/versions and other client errors require a review.
       if(response.status===429||response.status>=500&&response.status<=599){
         if(++transportFailures>=bounds.maxTransportFailures)return report('transport_failed',false,{http_status:response.status});
-        if(!await waitForLease())return report('transport_budget',false,{http_status:response.status});
+        const seconds=Number(response.headers?.get?.('Retry-After'));
+        const waitMs=Number.isSafeInteger(seconds)&&seconds>0&&Number.isSafeInteger(seconds*1000)?Math.max(bounds.leaseWaitMs,seconds*1000):bounds.leaseWaitMs;
+        if(!await waitForLease(waitMs))return report('transport_budget',false,{http_status:response.status,...(seconds>0?{retry_after_seconds:seconds}:{})});
         continue;
       }
       return report('rejected',false,{http_status:response.status});

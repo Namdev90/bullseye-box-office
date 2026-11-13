@@ -4,6 +4,7 @@ const ANDROID_RELEASE_REPOSITORY='https://github.com/Namdev90/bullseye-box-offic
 const ANDROID_RELEASE_LATEST='https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest';
 const ANDROID_RELEASE_BASELINE=23;
 let androidReleaseVerificationKey;
+let androidReleaseCheckAfter=0;
 
 function androidReleaseBytes(manifest){
   return new TextEncoder().encode(['sharepass-android-update-v1',manifest.packageName,manifest.versionCode,
@@ -31,12 +32,19 @@ async function verifiedAndroidRelease(manifest){
 }
 
 async function publishedAndroidRelease(manifest){
+  if(Date.now()<androidReleaseCheckAfter)return null;
   const response=await fetch(ANDROID_RELEASE_LATEST,{redirect:'manual',signal:AbortSignal.timeout(5000),
     headers:{Accept:'application/vnd.github+json','User-Agent':'SharePass-release-notifier','X-GitHub-Api-Version':'2022-11-28'}});
   if(!response.ok){
     console.error('SharePass GitHub release verification HTTP '+response.status+
       ' (remaining '+response.headers.get('X-RateLimit-Remaining')+', reset '+response.headers.get('X-RateLimit-Reset')+')');
-    return response.status===401||response.status===403||response.status===429||response.status>=500?null:false;
+    if(response.status===401||response.status===403||response.status===429||response.status>=500){
+      const now=Date.now();
+      androidReleaseCheckAfter=Math.max(...[now+60000,Number(response.headers.get('X-RateLimit-Reset'))*1000,
+        now+Number(response.headers.get('Retry-After'))*1000].filter(Number.isSafeInteger));
+      return null;
+    }
+    return false;
   }
   const reader=response.body?.getReader();
   if(!reader)return false;
@@ -143,7 +151,7 @@ async function androidReleaseWebhook(request,env){
     const published=await publishedAndroidRelease(manifest);
     if(published===null){
       const response=error('GitHub release verification is temporarily unavailable. Retry the same signed release.',503);
-      response.headers.set('Retry-After','60');return response;
+      response.headers.set('Retry-After',String(Math.max(1,Math.ceil((androidReleaseCheckAfter-Date.now())/1000))));return response;
     }
     if(!published)return error('The signed release is not the current published GitHub update.',409);
     await db.prepare(`UPDATE sharepass_android_release_state SET version_code=?,version_name=?,manifest=?,accepted_at=?

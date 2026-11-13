@@ -87,6 +87,8 @@ test('upstream GitHub unavailability is retryable and cannot accept a release or
   for(const githubStatus of [401,403,429,503]){
     const f=fixture({githubStatus});t.after(f.close);f.phone('ready');
     assert.equal((await f.call()).status,503);
+    assert.equal((await f.call()).status,503);
+    assert.equal(f.calls.length,1,'Wait for the upstream retry window before another GitHub request');
     assert.equal(f.sqlite.prepare('SELECT version_code FROM sharepass_android_release_state').get().version_code,23);
     assert.equal(f.messages.length,0);
   }

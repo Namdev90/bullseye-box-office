@@ -39,6 +39,15 @@ test('waits the full sixty-second lease when counts stop progressing',async()=>{
   assert.equal(f.result.complete,true);assert.deepEqual(f.waits,[60000]);
 });
 
+test('honors upstream Retry-After and stops when that window exceeds the bounded run',async()=>{
+  const response=seconds=>new Response('{}',{status:503,headers:{'Retry-After':String(seconds)}});
+  const waited=await fixture([response(120),status(1,0)]);
+  assert.equal(waited.result.complete,true);assert.deepEqual(waited.waits,[120000]);
+  const bounded=await fixture([response(900),status(1,0)]);
+  assert.equal(bounded.result.reason,'transport_budget');assert.equal(bounded.result.retry_after_seconds,900);
+  assert.equal(bounded.calls.length,1);assert.deepEqual(bounded.waits,[]);
+});
+
 test('an initially leased batch waits before retrying and does not falsely complete',async()=>{
   const f=await fixture([status(0,4),status(4,0)]);
   assert.deepEqual(f.waits,[60000]);assert.equal(f.result.delivered,4);
