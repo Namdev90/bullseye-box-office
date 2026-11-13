@@ -11,6 +11,9 @@ test('message recipient reads stay bounded to the visible owner-scoped page',asy
   assert(body.messages.every(message=>message.responses.length===12));
   assert(!response.text.includes('PRIVATE_OTHER_'));
   assert.equal(metrics.recipientQueries,1,'Fetch the selected page recipients in one scoped query');
+  const recent=fixture.plans().find(query=>query.sql.includes('ORDER BY created_at DESC,id DESC LIMIT 50'));
+  assert(recent.plan.some(detail=>detail.includes('sharepass_staff_prompt_recent')));
+  assert(recent.plan.every(detail=>!detail.includes('TEMP B-TREE')),'The recent-message page must read index order');
   assert.equal((await fixture.call('/api/admin/staff-messages','outsider')).status,403);
 });
 
