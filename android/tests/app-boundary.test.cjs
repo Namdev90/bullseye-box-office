@@ -5,7 +5,7 @@ const root=path.join(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 test('Android launcher opens a native desk with internet and optional notifications',()=>{
  const manifest=read('android-app/src/main/AndroidManifest.xml');
- assert.deepEqual([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match=>match[1]),['android.permission.INTERNET','android.permission.POST_NOTIFICATIONS','android.permission.REQUEST_INSTALL_PACKAGES']);
+ assert.deepEqual([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match=>match[1]),['android.permission.INTERNET','android.permission.CAMERA','android.permission.POST_NOTIFICATIONS','android.permission.REQUEST_INSTALL_PACKAGES']);
  assert(manifest.includes('android:autoVerify="true"')&&manifest.includes('android:path="/app-setup"'));
  assert(manifest.includes('android:authorities="${applicationId}.updates" android:exported="false"'));
  assert(manifest.includes('android:allowBackup="false"'));
@@ -138,11 +138,14 @@ test('native stock workflows preserve physical verification before confirmation'
  assert(desk.includes('steps.get(index).show(index == 0 ? exit : () -> show(index - 1), () -> show(index + 1))'));
  assert(desk.includes('wizard.text("Shelf or slot"'));
  const prepare=desk.slice(desk.indexOf('private void prepare('),desk.indexOf('private void pendingList('));
- const packet=prepare.indexOf('wizard.text("Match the packet label"');
+ const packet=prepare.indexOf('String packetId = deposit.getString("packet_id")');
  const counts=prepare.indexOf('quantitySteps(wizard, selected, available)');
  const release=prepare.indexOf('"/release"');
  assert(packet>=0 && packet<counts && counts<release);
- assert(prepare.includes('value.equalsIgnoreCase(packetId)'));
+ assert(!prepare.includes('wizard.text("Match the packet label"'));
+ assert(prepare.includes('.put("packet_id", packetId).put("claim_token", result.getString("claim_token"))'));
+ assert(prepare.includes('.put("version", deposit.getInt("version"))'));
+ assert(prepare.includes('.put("handover_confirmed", true)'));
  assert(desk.includes('button("Select all available"'));
  assert(desk.includes('name.setAutofillHints(View.AUTOFILL_HINT_NAME)'));
  assert(desk.includes('quantitySteps(wizard, selected, available)'));

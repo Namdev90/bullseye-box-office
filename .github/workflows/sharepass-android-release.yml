@@ -31,7 +31,7 @@ jobs:
   verify-and-publish:
     if: github.repository == 'Namdev90/bullseye-box-office' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -56,6 +56,7 @@ jobs:
           fi
           test -x "$sdk_root/build-tools/36.0.0/zipalign"
       - name: Verify the approved draft and publish its exact assets
+        id: publish_release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,4 +122,13 @@ jobs:
           gh api -X PATCH "$api/$release_id" -F draft=false -f "make_latest=$PROMOTE_LATEST" > "$dir/published.json"
           jq -e --arg tag "$RELEASE_TAG" '(.draft|not) and (.prerelease|not) and .tag_name==$tag' "$dir/published.json" > /dev/null
           [[ "$(snapshot "$dir/draft.json")" == "$(snapshot "$dir/published.json")" ]]
+          printf 'manifest_path=%s\n' "$dir/$manifest" >> "$GITHUB_OUTPUT"
           jq -r '.html_url' "$dir/published.json"
+      - name: Announce the verified latest Android update
+        if: ${{ success() && inputs.promote_latest && steps.publish_release.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 7
+        env:
+          VERIFIED_MANIFEST_PATH: ${{ steps.publish_release.outputs.manifest_path }}
+          EXPECTED_VERSION_CODE: ${{ inputs.version_code }}
+        run: node android/tools/announce-sharepass-release.mjs "$VERIFIED_MANIFEST_PATH" "$EXPECTED_VERSION_CODE"

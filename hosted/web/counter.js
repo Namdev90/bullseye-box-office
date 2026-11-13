@@ -10,6 +10,8 @@ let queueToken, queueView=0, queueSignature, suggestion, refreshSequence=0, view
 let staffMessages=[], openStaffMessage, replying=false;
 const seenStaffMessages=new Set(), uncertainStaffReplies=new Map();
 let staffMessageCursor;
+let deskMode="deposit",boothQrUrl="",queuePollTimer,historyData=[],historyFilter="all",historyCursor,historyLoading=false,historyPending=[];
+let previousQueueTokens;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -40,6 +42,8 @@ function show(id){
   queueView++;
   byId('home').classList.toggle('back-hidden', ['desk','loading','profile'].includes(id));
   byId('menu').hidden = ['loading','profile'].includes(id);
+  byId('desk-tabs').hidden=!['desk','history'].includes(id);
+  byId('tab-history').ariaPressed=String(id==='history');
   for(const section of document.querySelectorAll('main>section')) section.hidden = section.id !== id;
   if(view === 'share' && id !== 'share') draft.clear();
   byId('error').textContent = '';
@@ -52,13 +56,15 @@ function show(id){
   view = id;
   wizards[id]?.show(0,false);
   if(id === 'desk'){
-    byId('deposit-action').textContent=register?'New deposit':'Show deposit QR';
+    byId('deposit-action').textContent=register?'New deposit':'Open printable booth QR';
+    setDeskMode(deskMode);
     byId('staff-message-open').hidden=Boolean(register)||!staffMessages.length;
     renderRecovery().catch(error=>{if(view==='desk')byId('error').textContent=error.message;});
-    byId('queue-panel').hidden=Boolean(register);
+    byId('queue-panel').hidden=Boolean(register)||deskMode!=='deposit';
     if(!register)showDeskQr();
   }
   if(id==='desk'&&staff&&!register)refreshQueue(queueView);
+  if(id==='history'){byId('tab-deposit').ariaPressed='false';byId('tab-collect').ariaPressed='false';loadHistory();}
   byId(id).querySelector('h1, button')?.focus();
 }
 
@@ -85,10 +91,14 @@ async function renderRecovery(){
   const entries = state.deposits.filter(item=>item.pending_collection);
   list.replaceChildren(...entries.map(item=>{
     const button = document.createElement('button');
-    button.textContent = 'Resume handover · '+item.location;
+    button.textContent = 'Resume handover · '+pickupLocation(item);
     button.onclick = () => showHandover({deposit:item,collection:item.pending_collection});
     return button;
   }));
+}
+
+function pickupLocation(deposit){
+  return /^Packet [A-F0-9]{12}$/.test(deposit.location||'')&&deposit.packet_id?deposit.packet_id:deposit.location;
 }
 
 function renderCounts(form,limits){
@@ -101,6 +111,60 @@ function renderCounts(form,limits){
       '<button type="button" aria-label="Add one '+label+'" data-step="1">+</button></div></div>';
   }).join('');
 }
+
+async function loadHistory(more=false){
+  if(historyLoading||view!=='history')return;
+  historyLoading=true;
+  const current=staff;
+  byId('history-status').textContent='Loading booth history…';
+  try{
+    const result=register?register.state(scope.event_id):await fetchJson('/api/history?limit=100'+
+      (more&&historyCursor?'&cursor='+encodeURIComponent(historyCursor):''));
+    if(staff!==current||view!=='history')return;
+    const entries=Array.isArray(result.deposits)?result.deposits:[];
+    historyData=more?[...new Map([...historyData,...entries].map(item=>[item.id,item])).values()]:entries;
+    historyPending=Array.isArray(result.pending_handovers)?result.pending_handovers:historyData.filter(item=>item.pending_collection);
+    historyCursor=result.next_cursor||null;
+    renderHistory();
+  }catch(error){
+    if(view==='history')byId('history-status').textContent=error.message;
+  }finally{historyLoading=false;}
+}
+
+function renderHistory(){
+  const entries=historyFilter==='pending'?historyPending:historyData;
+  byId('history-all').ariaPressed=String(historyFilter==='all');
+  byId('history-pending').ariaPressed=String(historyFilter==='pending');
+  byId('history-list').replaceChildren(...entries.map(item=>{
+    const row=document.createElement('li');row.className='history-entry';
+    const name=document.createElement('h2');name.textContent=item.depositor_label||'Pass deposit';
+    const badge=document.createElement('span');badge.className='history-badge'+(item.pending_collection?' pending':'');
+    const available=Object.values(item.remaining||{}).reduce((sum,value)=>sum+Number(value||0),0);
+    badge.textContent=item.pending_collection?'Handover awaiting confirmation':available?'Available for pickup':'Completed';
+    const counts=document.createElement('p');counts.textContent='Remaining · '+balance(item.remaining||{});
+    const details=document.createElement('small');
+    const created=new Date(item.created_at||item.createdAt||'');
+    details.textContent=[pickupLocation(item),pickupLocation(item)===item.packet_id?'':item.packet_id,Number.isNaN(created.getTime())?'':created.toLocaleString([],{
+      dateStyle:'medium',timeStyle:'short'
+    })].filter(Boolean).join(' · ');
+    row.append(name,badge,counts,details);
+    if(item.pending_collection){
+      const reserved=document.createElement('p');reserved.textContent='Reserved · '+balance(item.pending_collection.quantities);
+      const resume=document.createElement('button');resume.type='button';resume.className='primary';resume.textContent='Resume this handover';
+      resume.onclick=()=>showHandover({deposit:item,collection:item.pending_collection});
+      row.append(reserved,resume);
+    }
+    return row;
+  }));
+  byId('history-status').textContent=entries.length?entries.length+' '+(historyFilter==='pending'?'pending handovers':'deposits')+' shown.':
+    historyFilter==='pending'?'No pending handovers at this booth.':'No deposits at this booth yet.';
+  byId('history-more').hidden=!historyCursor;
+}
+
+byId('history-all').onclick=()=>{historyFilter='all';renderHistory();};
+byId('history-pending').onclick=()=>{historyFilter='pending';renderHistory();};
+byId('history-refresh').onclick=()=>loadHistory();
+byId('history-more').onclick=()=>loadHistory(true);
 
 function setCounts(form,counts){
   for(const {id} of passTypes) byId(form+'-'+id).value = counts[id] ?? 0;
@@ -141,8 +205,6 @@ inlineLookup.onsubmit=event=>{event.preventDefault();perform(()=>findPasses(inli
 sharePassAutoAdvance(inlineLookup.elements.code,value=>view==='desk'&&/^[0-9]{4}$/.test(value),
   ()=>inlineLookup.requestSubmit());
 const pickupForm=byId('collect-form');
-sharePassAutoAdvance(pickupForm.elements.packet,value=>view==='collect'&&
-  value.trim().toUpperCase()===match?.deposit.packet_id,()=>pickupForm.requestSubmit());
 const lookupForm=byId('lookup-form');
 sharePassAutoAdvance(lookupForm.elements.code,value=>!byId('lookup').hidden&&byId('lookup-reference').hidden&&/^[0-9]{4}$/.test(value),
   ()=>lookupForm.requestSubmit());
@@ -222,6 +284,7 @@ async function refreshQueue(generation,manual=false){
   try{
     {
       const result=await fetchJson('/api/queue',null,AbortSignal.timeout(5500));
+      if(view==='desk'&&!boothQrUrl)showDeskQr();
       if(generation!==queueView)return;
       const drafts=result.drafts||[];
       staffMessages=result.messages||[];
@@ -235,9 +298,8 @@ async function refreshQueue(generation,manual=false){
         byId('queue-list').replaceChildren(...drafts.map(item=>{
           const row=document.createElement('li');
           const button=document.createElement('button');
-          button.type='button';
-          button.className='queue-entry';
-          const text=document.createElement('span');
+          button.type='button';button.className='primary';button.textContent='Review and receive';
+          const text=document.createElement('div');text.className='queue-entry-details';
           const name=document.createElement('strong');
           name.textContent=item.name;
           const counts=document.createElement('small');
@@ -246,12 +308,17 @@ async function refreshQueue(generation,manual=false){
           const reference=document.createElement('span');
           reference.className='queue-reference';
           reference.textContent=item.queue_ref||'Review';
-          button.append(text,reference);
+          text.append(reference);
           button.onclick=()=>perform(()=>openQueueDraft(item.token));
-          row.append(button);
+          const actions=document.createElement('div');actions.className='queue-actions';actions.append(button);
+          row.append(text,actions);
           return row;
         }));
       }
+      const tokens=new Set(drafts.map(item=>item.token));
+      if(previousQueueTokens&&drafts.some(item=>!previousQueueTokens.has(item.token)))announceQueueArrival(drafts.length);
+      previousQueueTokens=tokens;
+      byId('queue-count').textContent=String(drafts.length)+' waiting';
       const waiting=drafts.length?drafts.length+(drafts.length===1?' customer waiting':' customers waiting'):'No customer forms waiting.';
       const status=manual?'Connected. '+waiting:waiting;
       if(byId('queue-status').textContent!==status)byId('queue-status').textContent=status;
@@ -261,7 +328,7 @@ async function refreshQueue(generation,manual=false){
     if(manual&&(error.status===401||error.status===403)){
       byId('queue-status').textContent='Staff session needs to reconnect.';
       location.assign('/staff');
-    }else byId('queue-status').textContent='Queue offline. Try Refresh / reconnect again.';
+    }else byId('queue-status').textContent='Waiting for connection. Retrying automatically…';
   }
 }
 
@@ -376,25 +443,61 @@ byId('queue-alerts').onclick=async()=>{
     }
     subscription||=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
     await fetchJson('/api/web-push',{endpoint:subscription.endpoint});
-    await registration.showNotification('SharePass test alert',{body:'Use device sound settings to set the alert volume.',tag:'sharepass-test'});
-    status.textContent='Server alerts are on. Use device sound settings to adjust volume.';
+    status.textContent='Booth notifications are on.';
+    reportBrowserStatus();
   }catch{status.textContent='Browser alerts could not be enabled. Use Refresh / reconnect.';}
 };
 
+function setDeskMode(mode){
+  deskMode=mode;
+  byId('desk-code-form').hidden=mode!=='collect';
+  byId('deposit-panel').hidden=mode!=='deposit';
+  byId('queue-panel').hidden=Boolean(register)||mode!=='deposit';
+  byId('tab-deposit').ariaPressed=String(mode==='deposit'&&view!=='history');
+  byId('tab-collect').ariaPressed=String(mode==='collect'&&view!=='history');
+}
+for(const mode of ['deposit','collect'])byId('tab-'+mode).onclick=()=>{
+  deskMode=mode;show('desk');
+  if(mode==='collect')inlineLookup.elements.code.focus();
+};
+byId('tab-history').onclick=()=>show('history');
+byId('settings-open').onclick=()=>show('settings');
+byId('copy-deposit-link').onclick=()=>{if(boothQrUrl)window.sharePassCopyText(boothQrUrl,byId('desk-link-status'));};
+function reportBrowserStatus(){
+  if(!staff?.internal)return;
+  fetchJson('/api/device/status',{platform:'web',...('Notification' in window?{notifications_enabled:Notification.permission==='granted'}:{})}).catch(()=>{});
+}
+function scheduleQueuePoll(){
+  clearTimeout(queuePollTimer);
+  queuePollTimer=setTimeout(async()=>{
+    if(staff&&!register&&!document.hidden)await refreshQueue(++queueView);
+    scheduleQueuePoll();
+  },6000);
+}
+function announceQueueArrival(count){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  navigator.serviceWorker?.getRegistration('/').then(registration=>registration?.showNotification('New SharePass deposit',{
+    body:count+' customer '+(count===1?'form is':'forms are')+' waiting at your booth.',tag:'sharepass-queue',icon:'/assets/sharepass-approved-logo.jpg',data:{url:'/staff'}
+  })).catch(()=>{});
+}
 let deskQrLoading=false;
 async function showDeskQr(){
   const tile=byId('desk-deposit-qr');
-  if(view!=='desk'||!staff||register||deskQrLoading||tile.firstChild||
-      getComputedStyle(tile).getPropertyValue('--desk-qr').trim()!=='block')return;
+  if(view!=='desk'||!staff||register||deskQrLoading||tile.firstChild)return;
   deskQrLoading=true;
   try{
-    const poster=await fetchJson('/api/booth');
+    const poster=staff.booth_url?{url:staff.booth_url}:await fetchJson('/api/booth');
     if(view!=='desk'||register)return;
     const url=new URL(poster.url,location.origin);
     if(url.origin!==location.origin||!/^\/booth\/[a-f0-9-]{36}$/.test(url.pathname))return;
+    boothQrUrl=url.href;
     tile.replaceChildren(draft.qrImage(url.href,'QR for the customer deposit form'));
     tile.hidden=false;
-  }catch{/* Open deposit remains available for retry. */}
+    byId('copy-deposit-link').disabled=false;
+    const share=byId('share-deposit-link');
+    share.href='https://wa.me/?text='+encodeURIComponent('Leave your passes with SharePass by Bullseye Entertainment. Fill in your details here, then hand the passes to staff: '+boothQrUrl);
+    share.hidden=false;byId('desk-link-status').textContent='This booth QR stays the same for every customer.';
+  }catch{byId('desk-link-status').textContent='Connecting to your booth… Open Settings to retry if needed.';}
   finally{deskQrLoading=false;}
 }
 if('ResizeObserver' in window)new ResizeObserver(showDeskQr).observe(byId('desk'));
@@ -626,11 +729,15 @@ function openLookup(code=''){
 }
 
 async function findPasses(code=lookupForm.elements.code.value){
+  const generation=viewRevision,session=staff;
   const reference=view==='lookup'&&!byId('lookup-reference').hidden?lookupForm.elements.reference.value.trim():'';
   match=undefined;
   try{
-    match=await request('/api/verify',{collection_code:code,...(reference?{collection_reference:reference}:{})});
+    const result=await request('/api/verify',{collection_code:code,...(reference?{collection_reference:reference}:{})});
+    if(generation!==viewRevision||session!==staff)return;
+    match=result;
   }catch(error){
+    if(generation!==viewRevision||session!==staff)return;
     if(!error.pickupReferenceRequired)throw error;
     openLookup(code);
     byId('lookup-reference').hidden=false;
@@ -640,8 +747,10 @@ async function findPasses(code=lookupForm.elements.code.value){
   }
   if(!match.claim_token) throw new Error('This packet is stored at another counter.');
   byId('collect-form').reset();
-  byId('pickup-location').hidden=match.deposit.location.startsWith('Packet ');
-  byId('slot').textContent = match.deposit.location;
+  byId('pickup-location').hidden=false;
+  byId('slot').textContent = pickupLocation(match.deposit);
+  byId('pickup-customer').textContent=match.deposit.depositor_label||'Group pickup';
+  byId('collect-form').elements.packet.value=match.deposit.packet_id;
   renderCounts('collect',match.deposit.remaining);
   show('collect');
 }
@@ -649,13 +758,13 @@ async function findPasses(code=lookupForm.elements.code.value){
 async function reserve(){
   const form = byId('collect-form');
   showHandover(await request('/api/deposits/'+match.deposit.id+'/release',{
-    packet_id:form.elements.packet.value,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form)
+    packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form)
   }));
 }
 
 function showHandover(result){
   pending = result.collection;
-  byId('handover-summary').textContent = balance(pending.quantities)+' · '+result.deposit.location;
+  byId('handover-summary').textContent = balance(pending.quantities)+' · '+pickupLocation(result.deposit);
   show('handover');
 }
 
@@ -676,6 +785,7 @@ function showBalance(result){
 const updatesForm=byId('pickup-updates-form');
 byId('pickup-updates-open').onclick=()=>{
   updatesForm.reset();
+  updatesForm.elements.phone.value=receipt.depositor_phone||receipt.depositor_receipt?.address||'';
   byId('pickup-updates-off').hidden=!receipt.update_channel;
   show('pickup-updates');
 };
@@ -688,6 +798,7 @@ function saveUpdates(channel){
     });
     updatesForm.reset();
     receipt.update_channel=result.update_channel;
+    receipt.depositor_phone=phone?'+'+phone:receipt.depositor_phone;
     show('saved');
   });
 }
@@ -723,7 +834,7 @@ const steps = [
   ()=>{document.querySelector('.qr-scan')?.close();openLookup();byId('lookup-form').elements.code.value = receipt.collection_code;},
   findPasses,
   ()=>{byId('collect-form').elements.packet.value=receipt.deposit.packet_id;},
-  ()=>wizards.collect.show(1),
+  ()=>wizards.collect.show(0),
   ()=>setCounts('collect',{normal:2,vip:1}),
   reserve,
   confirm
@@ -835,10 +946,15 @@ async function runRefresh(action,send,recovering=false){
   }
 }
 
-byId('refresh-saved-code').onclick=()=>{
-  if(recovery)return perform(recover);
-  openRefresh();
-};
+byId('refresh-saved-code').onclick=()=>perform(async()=>{
+  if(recovery)return recover();
+  if(!receipt?.deposit?.packet_id||!/^[0-9]{4}$/.test(receipt.collection_code||''))throw new Error('Open a current deposit receipt first.');
+  const code=receipt.collection_code;
+  const action={path:'/api/codes/refresh',body:{request_id:crypto.randomUUID(),packet_id:receipt.deposit.packet_id}};
+  setRecovery(action);
+  byId('saved-code').textContent='••••';
+  await runRefresh(action,()=>fetchJson(action.path,{...action.body,collection_code:code}));
+});
 byId('cancel-refresh').onclick=()=>show(receipt?'saved':'desk');
 refreshForm.onsubmit=event=>{
   event.preventDefault();
@@ -890,6 +1006,10 @@ function ready(context){
   seenStaffMessages.clear();
   uncertainStaffReplies.clear();
   staff=context;
+  previousQueueTokens=undefined;queueSignature=undefined;
+  historyData=[];historyPending=[];historyCursor=null;byId('history-list').replaceChildren();byId('queue-list').replaceChildren();
+  boothQrUrl='';byId('desk-deposit-qr').replaceChildren();
+  byId('copy-deposit-link').disabled=true;byId('share-deposit-link').hidden=true;
   byId('admin-link').hidden=!staff.admin;
   if(staff.booth_label)byId('desk').querySelector('.eyebrow').textContent='SharePass · '+staff.booth_label;
   if(staff.internal)byId('signout-link').href='/disconnect';
@@ -906,6 +1026,9 @@ function ready(context){
   clearLegacyStaffReply();
   intakeToken=sessionStorage.getItem('sharepass-intake:'+staff.session_key);
   show('desk');
+  scheduleQueuePoll();
+  if(staff.internal)reportBrowserStatus();
+  if('Notification' in window&&Notification.permission==='granted')byId('queue-alerts').onclick();
 }
 
 byId('profile-form').onsubmit=event=>{

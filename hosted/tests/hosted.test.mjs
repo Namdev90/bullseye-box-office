@@ -284,7 +284,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'28');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'29');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -885,7 +885,8 @@ test('a recycled code requires the new receipt and never redirects an old messag
     assert.equal((await f.call('/api/context')).body.pickup_code_reuse_enabled,false);
     assert.equal((await create('reuse-disabled','reuse-disabled')).status,409);
     delete env.SHAREPASS_ALLOW_CODE_REUSE;
-    assert.equal((await f.call('/api/context')).body.pickup_code_reuse_enabled,true);
+    assert.equal((await f.call('/api/context')).body.pickup_code_reuse_enabled,false);
+    env.SHAREPASS_ALLOW_CODE_REUSE='1';
     const attempts=await Promise.all([create('reuse-candidate-A','reuse-candidate-A'),create('reuse-candidate-B','reuse-candidate-B')]);
     assert.deepEqual(attempts.map(r=>r.status).sort(),[200,409]);
     const current=attempts.find(r=>r.status===200).body.deposit;
@@ -1084,4 +1085,145 @@ test('staff desk has an install manifest and a scoped Android setup link with we
     assert.equal(response.status,200);
     assert.equal(new URL(response.body.qr_url).pathname,'/app-setup');
   }finally{f.close();}
+});
+
+test('deposit intake rejects the same normalized depositor and collector phone without creating a draft',async t=>{
+  const f=fixture();t.after(f.close);
+  const path='/api/public'+new URL((await f.call('/api/booth')).body.url).pathname;
+  const quantities={normal:1,vip:0,vvip:0};
+  const input={request_id:crypto.randomUUID(),intake_version:2,name:'Fixture depositor',phone:'+91 9876543210',update_channel:'whatsapp',quantities,
+    recipients:[{name:'Fixture collector',phone:'98765 43210',quantities}]};
+  for(const phone of ['98765 43210','00919876543210','09876543210','+91 (98765) 43210']){
+    const rejected=await f.call(path,{...input,recipients:[{...input.recipients[0],phone}]},'');
+    assert.equal(rejected.status,400);
+    assert.match(rejected.body.error,/different WhatsApp number/);
+  }
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_booth_queue').get().n,0);
+  assert.equal((await f.call('/api/deposits',{...deposit,depositor_phone:'+919876543210',recipient_phone:'9876543210'})).status,400);
+  assert.equal((await f.call(path,{...input,recipients:[{...input.recipients[0],phone:'+919876543211'}]},'')).status,200);
+  const confirmed=await f.call('/api/queue/'+input.request_id+'/confirm',{custody_confirmed:true});
+  assert.equal(confirmed.body.depositor_phone,'919876543210');
+  assert.equal(confirmed.body.depositor_name,input.name);
+  assert.equal(confirmed.body.depositor_receipt.address,'919876543210');
+  assert.equal(confirmed.body.deposit.depositor_phone,undefined);
+  assert.equal(confirmed.body.update_channel,'whatsapp');
+  const updatePath='/api/deposits/'+confirmed.body.deposit.id+'/updates';
+  assert.equal((await f.call(updatePath,{request_id:crypto.randomUUID(),packet_id:confirmed.body.deposit.packet_id,channel:'none'})).status,200);
+  const rotated=await f.call('/api/codes/refresh',{request_id:crypto.randomUUID(),
+    packet_id:confirmed.body.deposit.packet_id,collection_code:confirmed.body.collection_code});
+  assert.equal(rotated.status,200);
+  assert.equal(rotated.body.depositor_phone,'919876543210');
+  assert.equal(rotated.body.depositor_receipt.address,'919876543210');
+  assert.ok(rotated.body.depositor_receipt.message.includes(rotated.body.collection_code));
+  assert.ok(!rotated.body.depositor_receipt.message.includes(confirmed.body.collection_code));
+  assert.equal(rotated.body.update_channel,'');
+  assert.equal(rotated.body.update_address,'');
+  assert.equal((await f.call(updatePath,{request_id:crypto.randomUUID(),packet_id:confirmed.body.deposit.packet_id,
+    channel:'whatsapp',phone:'+919876543212'})).status,200);
+  const current=await f.call('/api/codes/refresh',{request_id:crypto.randomUUID(),
+    packet_id:confirmed.body.deposit.packet_id,collection_code:rotated.body.collection_code});
+  assert.equal(current.status,200);
+  assert.equal(current.body.update_channel,'whatsapp');
+  assert.equal(current.body.update_address,'919876543212');
+  assert.equal(current.body.depositor_phone,'919876543210');
+});
+
+test('device setup derives its label and authenticated status reports retain the phone registry after sign-out',async t=>{
+  const f=fixture();t.after(f.close);
+  const invitation=await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'Fixture operator'});
+  assert.equal(invitation.status,200);
+  assert.equal(invitation.body.devices[0].label,"Fixture operator's phone");
+  assert.equal(invitation.body.devices[0].first_connected_at,null);
+  const token='Y'.repeat(43),headers={'X-SharePass-Session':token};
+  const pair=await f.call('/api/device/connect',{code:invitation.body.code,verifier:token},'');
+  assert.equal(pair.status,200);
+  const call=(path,body)=>f.call(path,body,'',undefined,headers);
+  assert.equal(pair.body.booth_url,(await call('/api/context')).body.booth_url);
+  assert.equal(pair.body.booth_url,(await call('/api/booth')).body.url);
+  assert.equal((await f.call('/api/device/status',{platform:'android'})).status,401);
+  assert.equal((await call('/api/device/status',{app_version_code:-1})).status,400);
+  assert.equal((await call('/api/device/status',{app_version:'0.9.14',app_version_code:24,platform:'android',notifications_enabled:true})).status,200);
+  let phone=(await f.call('/api/admin/setup')).body.devices[0];
+  assert.equal(phone.app_version,'0.9.14');assert.equal(phone.app_version_code,24);
+  assert.equal(phone.notifications_enabled,true);assert.equal(phone.push_registered,false);
+  assert.equal(phone.staff_name,'Fixture operator');assert.ok(phone.first_connected_at>0&&phone.last_seen_at>=phone.first_connected_at);
+  assert.equal(phone.digest,undefined);
+  assert.equal((await call('/api/device/status',{notifications_enabled:false})).status,200);
+  assert.equal((await call('/api/mobile/logout',{})).status,200);
+  phone=(await f.call('/api/admin/setup')).body.devices[0];
+  assert.equal(phone.active,false);assert.equal(phone.paired,false);assert.equal(phone.notifications_enabled,false);
+  assert.equal(phone.app_version,'0.9.14');
+  assert.equal((await call('/api/device/status',{app_version:'unknown'})).status,401);
+});
+
+test('History paginates booth records without private codes or contacts and keeps pending handovers independently available',async t=>{
+  const f=fixture();t.after(f.close);
+  const first=(await f.call('/api/deposits',{...deposit,request_id:'history-first',location:'H-01',custom_code:'0420'})).body;
+  await f.call('/api/deposits/'+first.deposit.id+'/updates',{request_id:'history-contact',packet_id:first.deposit.packet_id,
+    channel:'whatsapp',name:'Private name',phone:'+12025550199'});
+  const claim=(await f.call('/api/verify',{collection_code:first.collection_code})).body;
+  const reserved=await f.call('/api/deposits/'+first.deposit.id+'/release',{
+    request_id:'history-release',claim_token:claim.claim_token,packet_id:first.deposit.packet_id,version:claim.deposit.version,
+    quantities:{normal:1,vip:0,vvip:0}});
+  assert.equal(reserved.status,200);
+  await f.call('/api/deposits',{...deposit,request_id:'history-second',location:'H-02'});
+  await f.call('/api/deposits',{...deposit,request_id:'history-third',location:'H-03'});
+  const other=(await f.call('/api/admin/setup',{action:'booth',name:'Other history booth',location:'Another gate'})).body.booths.find(x=>x.name==='Other history booth');
+  const invitation=await f.call('/api/admin/setup',{action:'invite',booth_id:other.id,staff_name:'Other staff'});
+  const token='H'.repeat(43),headers={'X-SharePass-Session':token};
+  await f.call('/api/device/connect',{code:invitation.body.code,verifier:token},'');
+  assert.equal((await f.call('/api/history',undefined,'',undefined,headers)).body.deposits.length,0);
+  assert.equal((await f.call('/api/history',undefined,'')).status,401);
+  assert.equal((await f.call('/api/history?cursor=bad')).status,400);
+  const ids=new Set();let cursor=null;
+  do{
+    const page=await f.call('/api/history?limit=1'+(cursor?'&cursor='+encodeURIComponent(cursor):''));
+    assert.equal(page.status,200);assert.equal(page.body.deposits.length,1);
+    assert.equal(page.body.pending_handovers.length,1);
+    assert.equal(page.body.pending_handovers[0].pending_collection.id,reserved.body.collection.id);
+    assert.equal(page.body.deposits[0].active_collection_code,undefined);
+    assert.equal(page.body.deposits[0].update_contact,undefined);
+    assert.ok(!JSON.stringify(page.body).includes('12025550199'));
+    assert.ok(!ids.has(page.body.deposits[0].id));ids.add(page.body.deposits[0].id);
+    cursor=page.body.next_cursor;
+  }while(cursor);
+  assert.equal(ids.size,3);
+});
+
+test('automatic code allocation exhausts the requested favorites before ordinary numbers and respects disabled owner choices',async t=>{
+  const f=fixture();t.after(f.close);
+  const favorites=new Set(['4200','0420','0069','0690','6969','6999','6769','6767']);
+  for(let index=0;index<8;index++){
+    const result=await f.call('/api/deposits',{...deposit,request_id:'favorite-'+index,location:'F-'+index});
+    assert.equal(result.status,200);assert.ok(favorites.delete(result.body.collection_code),result.body.collection_code);
+  }
+  assert.equal(favorites.size,0);
+  const next=await f.call('/api/codes/suggest');
+  assert.equal(next.status,200);assert.match(next.body.code,/^[0-9]{4}$/);
+  const fresh=fixture();t.after(fresh.close);
+  for(const code of ['4200','0420','0069','0690','6969','6999','6769']){
+    assert.equal((await fresh.call('/api/admin/code-policy',{action:'override',code,score:null,enabled:false})).status,200);
+  }
+  assert.equal((await fresh.call('/api/codes/suggest')).body.code,'6767');
+});
+
+test('code rotation invalidates old codes and claims and never recycles the retired code even with legacy reuse enabled',async t=>{
+  const f=fixture({env:{SHAREPASS_ALLOW_CODE_REUSE:'1'}});t.after(f.close);
+  const original=(await f.call('/api/deposits',{...deposit,custom_code:'0420',quantities:{normal:1,vip:0,vvip:0}})).body;
+  const stale=(await f.call('/api/verify',{collection_code:'0420'})).body;
+  const input={request_id:crypto.randomUUID(),packet_id:original.deposit.packet_id,collection_code:'0420'};
+  const rotated=await f.call('/api/codes/refresh',input);
+  assert.equal(rotated.status,200);assert.notEqual(rotated.body.collection_code,'0420');
+  assert.equal((await f.call('/api/codes/refresh',input)).body.collection_code,rotated.body.collection_code);
+  assert.equal((await f.call('/api/verify',{collection_code:'0420'})).status,409);
+  const release=(claim,request_id)=>f.call('/api/deposits/'+original.deposit.id+'/release',{
+    request_id,claim_token:claim.claim_token,packet_id:original.deposit.packet_id,version:claim.deposit.version,
+    quantities:{normal:1,vip:0,vvip:0}});
+  assert.equal((await release(stale,'retired-stale-claim')).status,409);
+  const current=(await f.call('/api/verify',{collection_code:rotated.body.collection_code})).body;
+  const picked=(await release(current,'retired-valid-claim')).body;
+  assert.equal((await f.call('/api/collections/'+picked.collection.id+'/handover',{
+    request_id:'retired-handover',handover_confirmed:true,version:picked.collection.version})).status,200);
+  assert.equal((await f.call('/api/deposits',{...deposit,request_id:'retired-reuse',location:'R-02',custom_code:'0420'})).status,409);
+  assert.notEqual((await f.call('/api/codes/suggest')).body.code,rotated.body.collection_code);
 });

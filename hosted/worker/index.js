@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'28',
+  'X-SharePass-Version':'29',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -73,6 +73,10 @@ function validate(body,path,operator,booth='B1'){
   if(!quantities)return null;
   if(path==='/api/deposits'){
     if(body.custody_confirmed!==true||typeof body.location!=='string'||!body.location.trim()||body.location.length>30||/[\u0000-\u001f\u007f]/.test(body.location))return null;
+    const depositor=body.depositor||{phone:body.depositor_phone||body.phone};
+    const recipients=Array.isArray(body.recipients)?body.recipients:
+      body.collector?[body.collector]:body.recipient_phone?[{phone:body.recipient_phone}]:[];
+    if(!separateCollectorPhones(depositor,recipients))return null;
     const options=codeOptions(body);
     return options?{...common,location:body.location.trim(),custody_confirmed:true,quantities,...options}:null;
   }
@@ -177,6 +181,7 @@ export default {async fetch(request,env,ctx){
     }
     if(path.startsWith('/api/')){
       if(request.headers.get('Sec-Fetch-Site')==='cross-site')return error('Cross-site access is blocked.',403);
+      if(path==='/api/public/android-release')return await androidReleaseWebhook(request,env);
       if(path==='/api/device/connect'&&request.method==='POST'){
         const origin=request.headers.get('Origin');
         if(origin&&origin!==url.origin)return error('Cross-origin changes are blocked.',403);
@@ -239,9 +244,20 @@ export default {async fetch(request,env,ctx){
       const staff=configured||await access(email,env,owner);
       if(!staff)return error('Ask the SharePass owner to grant access to your signed-in account.',403);
       const context={...staffContext(staff,env),internal:!!configured,owner_password_session:passwordOwner&&!configured};
-      const allowCodeReuse=env.SHAREPASS_ALLOW_CODE_REUSE!=='0';
-      if(request.method==='GET'&&path==='/api/context')return json(staff.admin?{...context,pickup_code_reuse_enabled:allowCodeReuse}:context);
+      // A short code is never silently reassigned under the default desk flow.
+      // Explicit legacy reuse retains the current-receipt reference safeguard.
+      const allowCodeReuse=env.SHAREPASS_ALLOW_CODE_REUSE==='1';
+      if(request.method==='GET'&&path==='/api/context'){
+        if(configured)await recordDeviceSeen(env.DB,configured);
+        const poster=await boothPosterDetails(env.DB,staff,url.origin);
+        const enriched={...context,...(poster?{booth_url:poster.url}:{})};
+        return json(staff.admin?{...enriched,pickup_code_reuse_enabled:allowCodeReuse}:enriched);
+      }
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);
+      if(path==='/api/device/status'){
+        if(!configured||request.method!=='POST')return error('Use a paired SharePass device.',401);
+        return await deviceStatus(request,env.DB,configured);
+      }
       if(path==='/api/mobile/authorize'&&request.method==='POST'){
         if(deviceToken||configured||passwordOwner)return error('Use verified ChatGPT sign-in to approve this pairing link.',403);
         return await authorizeMobile(env.DB,staff,(await bodyJson(request))?.challenge);
@@ -305,6 +321,7 @@ export default {async fetch(request,env,ctx){
       if(path==='/api/web-push')return await webPushSubscription(request,env,staff);
       if(path==='/api/booth'&&request.method==='GET')return await boothPoster(env.DB,staff,url.origin);
       if(path==='/api/queue'&&request.method==='GET')return await queueList(env.DB,staff);
+      if(path==='/api/history'&&request.method==='GET')return await ledgerHistory(env.DB,staff,url.searchParams);
       if(path.startsWith('/api/queue/')){
         const [token,action,...extra]=path.slice('/api/queue/'.length).split('/');
         if(!intakeTokenPattern.test(token)||extra.length||(action!==undefined&&action!=='confirm'))return boothMissing();
@@ -335,9 +352,10 @@ export default {async fetch(request,env,ctx){
         const candidate=row&&JSON.parse(row.payload);
         const deposit=candidate?.booth_id===(staff.booth_id||'B1')&&candidate.packet_id===packet?candidate:null;
         if(!deposit)return error('The collection code and physical packet label must match.',404);
-        return await guestReceiptResult(await mutate(env.DB,staff.workspace,path,{event_id:EVENT,booth_id:staff.booth_id||'B1',operator:staff.operator,
+        const refreshed=await mutate(env.DB,staff.workspace,path,{event_id:EVENT,booth_id:staff.booth_id||'B1',operator:staff.operator,
           request_id:input.request_id,collection_code:code,packet_id:packet,location:deposit.location,valid_minutes:1440},
-          staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse),env,ctx,staff);
+          staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed),env,ctx,staff);
       }
       if(path==='/api/intakes'&&request.method==='POST')return await startIntake(env.DB,staff,url.origin);
       if(path.startsWith('/api/intakes/')){

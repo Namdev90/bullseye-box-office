@@ -34,6 +34,7 @@ form.onsubmit=async event=>{
   }
   submit.disabled=true;
   errorLine.textContent='';
+  if('Notification' in window&&'PushManager' in window&&Notification.permission==='default')Notification.requestPermission().catch(()=>{});
   try{
     const response=await fetch('/api/device/connect',{
       method:'POST',cache:'no-store',credentials:'same-origin',
@@ -45,3 +46,5 @@ form.onsubmit=async event=>{
   }catch(error){errorLine.textContent=error.message;}
   finally{submit.disabled=false;}
 };
+
+sharePassAutoAdvance(code,value=>!hasInvite&&/^[0-9]{4}$/.test(value),()=>form.requestSubmit());

@@ -6,46 +6,59 @@
 <title>SharePass · Bullseye Entertainment</title>
 <link rel="stylesheet" href="/counter.css">
 <link rel="manifest" href="/staff.webmanifest">
-<link rel="apple-touch-icon" href="/assets/desk-icon-192.png">
+<link rel="apple-touch-icon" href="/assets/sharepass-approved-logo.jpg">
+<meta name="theme-color" content="#08090b">
+<link rel="stylesheet" href="/brand.css">
+<script defer src="/brand.js"></script>
 </head>
 <body><div class="shell" id="shell">
   <header>
     <button class="home" id="home">← Desk</button>
-    <details id="menu"><summary>Account</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo">Run demo</button><button id="install-staff-desk" hidden>Install staff desk</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a></div></details>
+    <details id="menu"><summary>Account</summary><div><a id="admin-link" class="menu-link" href="/account" hidden>Manage account</a><button id="demo">Run demo</button><button id="install-staff-desk" hidden>Install staff desk</button><button id="settings-open">Settings</button><button id="help">Help</button><a id="signout-link" class="menu-link" href="/signout-with-chatgpt?return_to=%2F" target="_top">Sign out</a></div></details>
   </header>
   <div class="demo-bar" id="demo-bar" hidden>
     <span>Demo register</span><button id="pause">Pause</button><button id="replay">Replay</button><button id="leave">Exit demo</button>
   </div>
   <main>
+    <nav id="desk-tabs" hidden class="desk-tabs" aria-label="Pass desk"><button id="tab-deposit" type="button" aria-pressed="true">Deposit</button><button id="tab-collect" type="button" aria-pressed="false">Collect</button><button id="tab-history" type="button" aria-pressed="false">History</button></nav>
     <section id="loading"><h1 tabindex="-1">Opening register</h1><p id="access-note" role="status"></p><a class="menu-link" href="/" id="return-home" hidden>Back to opening</a></section>
     <section id="profile" hidden><h1 tabindex="-1">Register your profile</h1><form id="profile-form">
       <label class="field">Your name <input name="name" autocomplete="name" maxlength="80" required></label>
       <button class="primary">Continue</button>
     </form></section>
     <section id="desk" hidden><div class="desk-heading"><div><p class="eyebrow">SharePass · Box office</p><h1 tabindex="-1">Pass desk</h1></div></div><div class="desk-priority">
-      <form id="desk-code-form" class="desk-collect">
+      <form id="desk-code-form" class="desk-collect" hidden>
         <h2>Collect passes</h2>
         <label class="field">Collection code <input name="code" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" enterkeyhint="search" aria-describedby="desk-code-hint"></label>
         <p id="desk-code-hint" class="code-hint">Enter the 4 digits on the pickup receipt.</p>
         <button class="primary">Find passes</button>
       </form>
-      <section class="desk-deposit">
+      <section class="desk-deposit" id="deposit-panel">
         <h2>Deposit passes</h2>
         <p>Let the depositor scan and enter their details.</p>
         <div id="desk-deposit-qr" class="intake-qr" hidden></div>
-        <button class="action" id="deposit-action" type="button">Show deposit QR</button>
+        <div class="desk-share-actions"><button id="copy-deposit-link" type="button" disabled>Copy form link</button><a id="share-deposit-link" class="menu-link" target="_blank" rel="noopener noreferrer" hidden>WhatsApp draft</a></div>
+        <p id="desk-link-status" class="quiet-status" role="status"></p>
+        <button class="action" id="deposit-action" type="button">Open printable booth QR</button>
       </section>
     </div><div id="recovery" class="stack recovery"></div>
     <button type="button" id="staff-message-open" hidden>Staff messages</button>
     <div class="queue-panel" id="queue-panel" hidden>
       <div class="queue-heading"><h2>Booth queue</h2>
-        <div class="quick-choices"><button id="refresh-queue" class="outline-action" type="button">Refresh / reconnect</button><button id="poster-open" class="outline-action" type="button">Booth poster QR</button></div></div>
-      <button id="queue-alerts" class="outline-action" type="button">Enable alerts</button>
-      <button id="one-time-intake" class="outline-action" type="button">One-time form</button>
-      <p id="queue-alert-status" role="status"></p>
+        <span id="queue-count" class="queue-head-count" role="status"></span></div>
       <p id="queue-status" role="status"></p>
       <ul class="queue-list" id="queue-list"></ul>
     </div></section>
+    <section id="history" hidden><h1 tabindex="-1">History</h1>
+      <p>Deposits and handovers at this booth.</p>
+      <div class="history-filters"><button id="history-all" type="button" aria-pressed="true">All deposits</button><button id="history-pending" type="button" aria-pressed="false">Pending handovers</button></div>
+      <p id="history-status" class="quiet-status" role="status"></p><ul id="history-list" class="history-list"></ul>
+      <button id="history-more" type="button" hidden>Load more deposits</button><button id="history-refresh" type="button">Refresh history</button>
+    </section>
+    <section id="settings" hidden><h1 tabindex="-1">Settings</h1>
+      <div class="stack settings-group"><h2>Connection and alerts</h2><button id="queue-alerts" type="button">Enable booth notifications</button><p id="queue-alert-status" class="quiet-status" role="status"></p><button id="refresh-queue" type="button">Refresh connection</button></div>
+      <details class="quiet-tools"><summary>Additional deposit tools</summary><div class="stack"><button id="poster-open" type="button">Print booth QR</button><button id="one-time-intake" type="button">One-time customer form</button></div></details>
+    </section>
     <section id="booth-poster" hidden><h1 tabindex="-1">Booth poster</h1>
       <div class="booth-poster">
         <img src="/assets/sharepass-approved-logo.jpg" alt="SharePass by Bullseye Entertainment" width="106">
@@ -120,9 +133,9 @@
       <div class="wizard-nav"><button class="primary" data-wizard-next>Save deposit</button></div>
     </form></section>
     <section id="saved" hidden><h1 tabindex="-1">Passes deposited</h1><div class="stack">
-      <div class="receipt"><p>Collection code</p><div class="code" id="saved-code"></div><p id="saved-expiry" hidden></p><p id="saved-packet"></p></div>
+      <div class="receipt"><p>Collection code</p><div class="code-with-action"><div class="code" id="saved-code" aria-live="polite"></div><button id="refresh-saved-code" type="button" aria-label="Refresh collection code; old code will stop working" title="Refresh code">↻</button></div><p id="saved-expiry" hidden></p><p id="saved-packet"></p></div>
       <div id="depositor-receipt"></div><button id="share-action" class="primary">Share code</button>
-      <button id="refresh-saved-code" type="button">Refresh code</button><button id="pickup-updates-open" type="button">Pickup updates</button><button id="saved-done">Done</button>
+      <button id="pickup-updates-open" type="button">Pickup updates</button><button id="saved-done">Done</button>
     </div></section>
     <section id="pickup-updates" hidden><h1 tabindex="-1">Pickup updates</h1>
       <form id="pickup-updates-form">
@@ -133,8 +146,8 @@
     </section>
     <section id="refresh-code" hidden><h1 tabindex="-1">Refresh collection code</h1>
       <form id="refresh-code-form">
-        <p>Match the physical packet. The old code will stop working. Share the replacement with the collectors.</p>
-        <label class="field">Physical packet label <input name="packet" required maxlength="12" autocomplete="off" autocapitalize="characters"></label>
+        <p>The previous refresh was interrupted. Recover the same request before changing any passes.</p>
+        <input name="packet" type="hidden">
         <label class="field" id="refresh-original-code" hidden>Original collection code before the interrupted refresh
           <input name="code" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" autocomplete="off" spellcheck="false">
         </label>
@@ -151,11 +164,11 @@
       <button class="primary">Find passes</button>
     </form></section>
     <section id="collect" hidden><h1 tabindex="-1">Prepare pickup</h1><form id="collect-form">
-      <fieldset data-wizard-page data-next-label="Check packet label"><legend>Match the packet</legend>
-        <div class="location" id="pickup-location"><p>Storage reference</p><strong id="slot"></strong></div>
-        <label class="field">Match the packet label <input name="packet" required autocomplete="off" spellcheck="false"></label>
+      <fieldset data-wizard-page><legend>Review this pickup</legend>
+        <div class="location" id="pickup-location"><p>Pickup details</p><strong id="slot"></strong><p id="pickup-customer"></p></div>
+        <input name="packet" type="hidden">
+        <p>Choose the passes you are handing over now.</p><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button>
       </fieldset>
-      <fieldset data-wizard-page><legend>Choose the passes for this pickup</legend><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button></fieldset>
       <div class="wizard-nav"><button class="primary" data-wizard-next>Prepare handover</button></div>
     </form></section>
     <section id="handover" hidden><h1 tabindex="-1">Hand over passes</h1><div class="stack">
@@ -165,7 +178,7 @@
     <section id="done" hidden><h1 tabindex="-1">Passes handed over</h1><div class="stack">
       <div class="receipt"><h2>Remaining</h2><p id="balance"></p></div><div id="pickup-update-draft"></div><button id="done-action" class="primary">Done</button>
     </div></section>
-    <section id="guide" hidden><h1 tabindex="-1">Help</h1><p>Deposit passes after counting them and putting the packet on the shelf. When someone gives you a code, find the packet and match its label. Confirm only after handing over the selected passes.</p><p>Run demo opens a separate practice register.</p></section>
+    <section id="guide" hidden><h1 tabindex="-1">Help</h1><p>Deposit passes after counting them and putting the packet on the shelf. When someone gives you a code, review the matching deposit and choose the passes for this pickup. Confirm only after handing over the selected passes.</p><p>Run demo opens a separate practice register.</p></section>
     <p class="error" id="error" role="alert"></p>
   </main>
 </div>

@@ -1,4 +1,6 @@
-const NUMERIC_FAVORITES={1337:100,4040:99,4242:98,8008:97,7777:96,'0420':95,1010:94,1234:90,7070:88};
+const NUMERIC_FIRST_CHOICES=['4200','0420','0069','0690','6969','6999','6769','6767'];
+const NUMERIC_FAVORITES={4200:100,'0420':100,'0069':100,'0690':100,6969:100,6999:100,6769:100,6767:100,
+  1337:99,4040:98,4242:97,8008:96,7777:95,5555:94,6666:94,1010:93,1234:92,7070:88};
 const numericMaster=new Map(CODE_MASTER.filter(([code])=>/^[0-9]{4}$/.test(code)).map(row=>[row[0],row]));
 for(const [code,score] of Object.entries(NUMERIC_FAVORITES)){
   const [,kind,rank,,tier,tags,sensitive]=numericMaster.get(code)??[code,'Number',0,0,'Featured','General',false];
@@ -12,7 +14,8 @@ function codeWeights(theme='',overrides={}){
   return NUMERIC_CODE_MASTER.flatMap(([code,,rank,score,tier,tags,sensitive])=>{
     const override=overrides[code];
     if(override?.enabled===false)return [];
-    if(sensitive&&!contains('adults only'))return [];
+    // These are the owner's selected four-digit pickup codes. Preserve owner
+    // overrides; numeric jokes do not need a hidden content filter.
     const matches=contains(code)||tags.split(';').some(tag=>tag.trim().length>3&&tag.trim().toLowerCase()!=='general'&&contains(tag.trim().toLowerCase()));
     return [[code,Math.max(1,override?.score??score??1)*(matches?16:tier==='Featured'?3:1)+(rank?1:0)]];
   });

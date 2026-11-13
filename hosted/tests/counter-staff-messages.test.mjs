@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 const source=readFileSync(new URL('../web/counter.js',import.meta.url),'utf8');
 const html=readFileSync(new URL('../web/counter.html',import.meta.url),'utf8');
 const path='/api/staff-messages/reply';
-const context={session_key:'synthetic',staff_label:'Synthetic staff'};
+const context={session_key:'synthetic',staff_label:'Synthetic staff',booth_url:'/booth/11111111-1111-4111-8111-111111111111'};
 const messages=['first','second','third'].map(id=>({id,message:id}));
 const gate=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {resolve,promise};};
 // Complete script, real registered handlers; synthetic DOM/transport, not a browser.
@@ -19,7 +19,7 @@ async function page({storage=new Map(),send=async()=>Response.json({replied:true
   const node=id=>{assert(ids.has(id),id);if(!nodes.has(id))nodes.set(id,new Node(id));return nodes.get(id);};
   const replies=[...html.matchAll(/data-staff-reply="([^"]+)"/g)].map(m=>{const n=new Node(m[1]);n.dataset.staffReply=m[1];return n;});
   const document={getElementById:node,hidden:false,querySelector:()=>node('staff-message').open?node('staff-message'):null,querySelectorAll:s=>s==='[data-staff-reply]'?replies:[],createElement:t=>new Node(t),addEventListener(){}};
-  const sandbox={document,window:{SharePassDrafts:{clear(){}},addEventListener(){}},navigator:{},crypto,AbortSignal,URL,location:{origin:'https://synthetic.test'},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},DemoStore:class{passTypes=[];},sharePassSteps:()=>({show(){}}),sharePassAutoAdvance(){},fetch:async(p,init={})=>{
+  const sandbox={document,window:{SharePassDrafts:{clear(){},qrImage:()=>new Node('qr')},addEventListener(){}},navigator:{},crypto,AbortSignal,URL,location:{origin:'https://synthetic.test'},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},DemoStore:class{passTypes=[];},sharePassSteps:()=>({show(){}}),sharePassAutoAdvance(){},fetch:async(p,init={})=>{
     const body=init.body?JSON.parse(init.body):undefined;calls.push({path:p,body});
     if(p==='/api/context')return Response.json(context);
     if(p==='/api/queue')return Response.json({drafts:[],messages:pending});

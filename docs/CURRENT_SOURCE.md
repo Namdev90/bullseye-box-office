@@ -1,5 +1,17 @@
 # SharePass source and release record
 
+## Recording review · 13 November 2026
+
+The recording review produced hosted web v29 and an Android 0.9.14 / version code 24 candidate. Web v29 is published from protected Sites commit `3773e5b1fa38cd6b810a453bb811b7c68c373fd8`; its response header reports 29. The source below mirrors the implementation with neutral public assets and synthetic catalogue inputs.
+
+The update simplifies staff pairing, keeps the stable deposit QR and queue together, prevents duplicate depositor/collector contacts, advances completed contact details, polls guest receipts automatically, prefills pickup contacts, rotates memorable collection codes, removes manual packet-label entry, and adds History with independent pending handovers. Verified server packet binding, stale-version protection, request recovery, and explicit physical-handover confirmation remain in place. Branding uses the approved artwork in the protected release, with black, red and silver controls.
+
+The device registry records reported app version, notification state and last seen. New signed Android releases can announce themselves through a signature-verified, publication-verified, bounded and deduplicated webhook. Release notices trigger signed-feed verification; they do not authorize installation.
+
+Verification covered 249 hosted tests against both protected and sanitized builds, a synthetic browser deposit/rotation/pickup/history/setup flow, private Android assembly and lint (zero errors), native policy/harness checks, and exact artwork/asset/alignment checks. A protected register snapshot of 17 tables and 31 rows restored successfully; both additive migrations preserved every existing row. No physical phone test or live push-delivery test was performed.
+
+**Android remains unsigned and unpublished.** The private candidate is 1,025,501 bytes, SHA-256 `7ae608e684fee071103093475ee99c2e37426e0850d041641fe38ea27d18aa5b`. It requires the existing review signing key before it can replace an installed app or become a signed update release. No replacement identity was created. The published Android channel remains 0.9.13 / version code 23.
+
 ## Source map
 
 | Location | Purpose |

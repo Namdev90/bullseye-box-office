@@ -153,20 +153,13 @@ public final class MainActivity extends Activity {
         int gap = DeskSurface.dp(this, 8);
         LinearLayout stage = new LinearLayout(this);
         stage.setOrientation(LinearLayout.VERTICAL);
-        ImageView artwork = new ImageView(this) {
+        BrandArtwork artwork = new BrandArtwork(this, false) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
-                int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), viewport.paneHeight(),
-                    DeskSurface.dp(MainActivity.this, 96), DeskSurface.dp(MainActivity.this, 210));
+                int available = viewport == null ? getResources().getDisplayMetrics().heightPixels : viewport.paneHeight();
+                int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), available, DeskSurface.dp(MainActivity.this, 220), DeskSurface.dp(MainActivity.this, 240));
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
             }
         };
-        artwork.setContentDescription("SharePass by Bullseye Entertainment");
-        artwork.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        try (java.io.InputStream image = getAssets().open("assets/sharepass-approved-logo.jpg")) {
-            artwork.setImageBitmap(BitmapFactory.decodeStream(image));
-        } catch (IOException error) {
-            artwork.setContentDescription("SharePass");
-        }
         LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-1, -2);
         stage.addView(artwork, art);
         LinearLayout pass = new LinearLayout(this);
@@ -185,22 +178,25 @@ public final class MainActivity extends Activity {
         pass.addView(caption);
         pass.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, DeskSurface.dp(this, 12)));
         Button open = new Button(this);
-        open.setText("Open register");
+        open.setText("Staff registration / Open register");
         DeskSurface.button(open, true);
         open.setOnClickListener(view -> startActivity(new android.content.Intent(this, HostedDeskActivity.class)));
         LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-1, -2);
         action.topMargin = gap;
         pass.addView(open, action);
+        Button admin = new Button(this);
+        admin.setText("Admin login");
+        DeskSurface.button(admin, false);
+        admin.setOnClickListener(view -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(HostedRegisterClient.ORIGIN + "/owner-signin"))); }
+            catch (android.content.ActivityNotFoundException missing) { Toast.makeText(this, "Open SharePass in your browser to sign in.", Toast.LENGTH_LONG).show(); }
+        });
+        LinearLayout.LayoutParams adminAction = new LinearLayout.LayoutParams(-1, -2);
+        adminAction.topMargin = gap;
+        pass.addView(admin, adminAction);
         updates = new AppUpdates(this, () -> true);
-        if (updates.isEnabled()) {
-            Button updatesButton = new Button(this);
-            updatesButton.setText("App updates");
-            DeskSurface.button(updatesButton, false);
-            updatesButton.setOnClickListener(view -> updates.options());
-            LinearLayout.LayoutParams updateAction = new LinearLayout.LayoutParams(-1, -2);
-            updateAction.topMargin = gap;
-            pass.addView(updatesButton, updateAction);
-        }
+        UpdateNotifications.ensureChannel(this);
+        if (getIntent().getBooleanExtra("checkSharePassUpdate", false) || UpdateNotifications.TYPE.equals(getIntent().getStringExtra("type"))) updates.requestCheck();
         LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2, 1f);
         passLayout.setMargins(gap, gap, gap, gap);
         stage.addView(pass, passLayout);
@@ -209,8 +205,7 @@ public final class MainActivity extends Activity {
         scroll.addView(stage);
         showSurface(scroll, 560);
         if (Build.VERSION.SDK_INT >= 26 && android.animation.ValueAnimator.areAnimatorsEnabled()) {
-            artwork.setAlpha(0f);
-            artwork.animate().alpha(1f).setDuration(380).start();
+            artwork.animateOpening();
             pass.setTranslationY(DeskSurface.dp(this, 10));
             pass.animate().translationY(0).setDuration(280).start();
         }

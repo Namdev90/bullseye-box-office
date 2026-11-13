@@ -18,9 +18,13 @@ function collect(dir,prefix=''){
 }
 collect('web');
 if(artworkPath)assets['/assets/sharepass-approved-logo.jpg']=['image/jpeg',readFileSync(artworkPath).toString('base64')];
+for(const size of [192,512]){
+  const iconPath=process.env['SHAREPASS_ICON_'+size+'_PATH'];
+  if(iconPath)assets['/assets/desk-icon-'+size+'.png']=['image/png',readFileSync(iconPath).toString('base64')];
+}
 const engine=['phone','demo-store'].map(file=>readFileSync('web/'+file+'.js','utf8')).join('\n');
 const registry='const CODE_MASTER='+JSON.stringify(loadCodeCatalogue())+';'+String.fromCharCode(10);
-const worker=['code-policy','mobile','intake','booth','setup','push','web-push','owner','ledger','staff-prompts','index'].map(file=>readFileSync('worker/'+file+'.js','utf8')).join('\n');
+const worker=['code-policy','mobile','intake','booth','setup','push','web-push','owner','ledger','staff-prompts','release-public-key','release','index'].map(file=>readFileSync('worker/'+file+'.js','utf8')).join('\n');
 mkdirSync('dist/server',{recursive:true});mkdirSync('dist/.openai',{recursive:true});
 writeFileSync('dist/server/index.js','const assets='+JSON.stringify(assets)+';\n'+engine+'\n'+registry+worker);
 copyFileSync(hostingConfig||'.openai/hosting.json','dist/.openai/hosting.json');

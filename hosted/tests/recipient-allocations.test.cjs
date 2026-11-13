@@ -158,11 +158,14 @@ test('the actual public intake receipt prepares unequal personal plans without a
  Object.assign(context,{
   form:{reset(){},hidden:false},recipientList:element('div'),receipt:element('section'),reference:element('p'),
   receiptShare:element('div'),statusLine:element('p'),receiptState:element('p'),
-  booth:true,alertKey:'',requestId:null,lastReceipt:'',lastCode:'',
+  booth:true,alertKey:'',requestId:null,lastReceipt:'',lastCode:'',receiptPolls:0,
+  scheduleReceiptPoll:()=>context.receiptPolls++,
   result:{status:'confirmed',queue_ref:'FIX123',collection_code:base.code,collection_reference:base.reference,
    booth:base.booth,recipients:json(people)}
  });
- const check=element('button');p.document.getElementById=id=>{assert.equal(id,'check-receipt');return check;};
+ const check=element('button'),sync=element('p');p.document.getElementById=id=>{
+  assert(['check-receipt','receipt-sync-status'].includes(id));return id==='check-receipt'?check:sync;
+ };
  const source=readFileSync(join(__dirname,'../web/intake.js'),'utf8');
  const start=source.indexOf('function showReceipt(result){'),end=source.indexOf('async function prepareReceiptAlerts(',start);
  assert(start>=0&&end>start,'Execute the production showReceipt function, not a reimplemented call');
@@ -180,6 +183,7 @@ test('the actual public intake receipt prepares unequal personal plans without a
  vm.runInContext('showReceipt(result);',context);
  links=context.receiptShare.querySelectorAll('a');assert.equal(links.length,2);
  assert.deepEqual(links.map(link=>new URL(link.href).searchParams.get('text')),messages);
+ assert.equal(context.receiptPolls,2,'Each visible receipt schedules the automatic status check');
  assert.deepEqual(p.externalCalls,[]);
 });
 

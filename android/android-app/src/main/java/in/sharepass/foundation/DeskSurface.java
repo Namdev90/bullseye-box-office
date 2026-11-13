@@ -16,11 +16,11 @@ import android.view.View;
 import android.widget.Button;
 
 final class DeskSurface {
-    static final int INK = 0xff292321;
-    static final int MUTED = 0xff64564e;
-    static final int BRASS = 0xff7e3039;
-    private static final int PAPER = 0xfffff7e9;
-    private static final int ACCENT = 0xff871e35;
+    static final int INK = 0xfff6f6f7;
+    static final int MUTED = 0xffbbbcc3;
+    static final int BRASS = 0xffff4458;
+    private static final int PAPER = 0xffffffff;
+    private static final int ACCENT = 0xffe41638;
 
     private DeskSurface() {}
 
@@ -36,29 +36,29 @@ final class DeskSurface {
     }
 
     static Drawable backdrop(Context context) {
-        return plate(context, new int[]{0xfffff9ed, 0xfff8eddc, 0xffefe0cb}, 0, 0);
+        return plate(context, new int[]{0xff030304, 0xff08090b, 0xff101114}, 0, 0);
     }
 
     static Drawable panel(Context context) {
-        return plate(context, new int[]{0xfffffbf2, 0xfff4e6d1}, 18, 0xffc9b29a);
+        return plate(context, new int[]{0xff202126, 0xff141519}, 18, 0xff51535c);
     }
 
     static Drawable input(Context context) {
         StateListDrawable state = new StateListDrawable();
-        int[] inset = {0xfffffdf8, 0xfffff9ee};
+        int[] inset = {0xff101115, 0xff17181d};
         state.addState(new int[]{android.R.attr.state_focused}, plate(context, inset, 12, ACCENT));
-        state.addState(new int[0], plate(context, inset, 12, 0xffaa9482));
+        state.addState(new int[0], plate(context, inset, 12, 0xff565862));
         return state;
     }
 
     private static Drawable buttonFace(Context context, boolean primary, int edge, boolean pressed) {
         if (!primary) {
-            int face = pressed ? 0xfff0e2ce : 0xfffff9ee;
+            int face = pressed ? 0xffb6bac3 : 0xffe3e5ea;
             return plate(context, new int[]{face, face}, 12, edge);
         }
-        int[] colors = pressed ? new int[]{0xff811e34, 0xff65182a} : new int[]{0xff9a2742, 0xff771d32};
+        int[] colors = pressed ? new int[]{0xffb30929, 0xff83061d} : new int[]{0xfff12647, 0xffbd0c2a};
         LayerDrawable material = new LayerDrawable(new Drawable[]{
-            plate(context, new int[]{0xff5c1828, 0xff4b1422}, 15, 0),
+            plate(context, new int[]{0xff77031c, 0xff4e0715}, 15, 0),
             plate(context, colors, 14, edge)
         });
         material.setLayerInset(1, 0, dp(context, pressed ? 2 : 0), 0, dp(context, pressed ? 1 : 4));
@@ -67,18 +67,18 @@ final class DeskSurface {
 
     static void button(Button button, boolean primary) {
         Context context = button.getContext();
-        int edge = primary ? 0xff6f1c2f : 0xffb49a86;
+        int edge = primary ? 0xff8a0921 : 0xff8d929c;
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed}, buttonFace(context, primary, edge, true));
         states.addState(new int[]{android.R.attr.state_focused}, buttonFace(context, primary, ACCENT, false));
         if (!primary) states.addState(new int[]{android.R.attr.state_selected},
-            plate(context, new int[]{0xfff5ddd9, 0xfff5ddd9}, 12, ACCENT));
+            plate(context, new int[]{0xfffafbfc, 0xffc8cbd3}, 12, ACCENT));
         states.addState(new int[0], buttonFace(context, primary, edge, false));
         button.setBackgroundTintList(null);
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(primary ? 0x33fff0d9 : 0x1f871e35), states, null));
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setTextColor(primary ? PAPER : INK);
+        button.setTextColor(primary ? PAPER : 0xff17181c);
         button.setTextSize(16);
         button.setGravity(Gravity.CENTER);
         button.setMinHeight(dp(context, primary ? 54 : 48));
@@ -88,12 +88,12 @@ final class DeskSurface {
     static void roundButton(Button button) {
         Context context = button.getContext();
         StateListDrawable states = new StateListDrawable();
-        int[] face = {0xfffffbf2, 0xfff1e0c9};
+        int[] face = {0xffe9ebf0, 0xffbec3cd};
         states.addState(new int[]{android.R.attr.state_focused}, plate(context, face, 24, ACCENT));
-        states.addState(new int[0], plate(context, face, 24, 0xffb49a86));
+        states.addState(new int[0], plate(context, face, 24, 0xff8d929c));
         button.setBackgroundTintList(null);
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x1f871e35), states, null));
-        button.setTextColor(INK);
+        button.setTextColor(0xff17181c);
         button.setTextSize(18);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         button.setGravity(Gravity.CENTER);
@@ -106,7 +106,7 @@ final class DeskSurface {
         View divider = new View(context) {
             final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
             {
-                paint.setColor(0xffb59c87);
+                paint.setColor(0xff484b55);
                 paint.setStrokeWidth(dp(context, 1));
                 paint.setPathEffect(new DashPathEffect(new float[]{dp(context, 3), dp(context, 5)}, 0));
             }

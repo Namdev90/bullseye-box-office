@@ -28,6 +28,7 @@ function syncContinue(){
 const phoneError='Enter a valid WhatsApp number. Include the country code for international numbers.';
 let requestId;
 let lastReceipt,lastCode;
+let receiptPollTimer,receiptChecking=false,receiptFailures=0;
 const alertButton=document.getElementById('receipt-alerts');
 const alertStatus=document.getElementById('receipt-alert-status');
 const alertCacheName='sharepass-receipt-alerts';
@@ -93,7 +94,12 @@ function syncRecipients(){
   remainingLabel.hidden=!multiple;
   const difference=passTypes.filter(([key])=>left[key]!==0).map(([key,label])=>label+' '+Math.abs(left[key])+(left[key]<0?' over':' left'));
   remainingLabel.textContent=difference.length?difference.join(' · '):'All passes allocated';
-  ready.hidden=!rows.length||!allocationComplete(recipients)||recipients.some(person=>!person.name||!person.phone);
+  const depositor=sharePassPhone(guestPhone.value);
+  for(const row of rows){
+    const phone=row.querySelector('[name=recipient_phone]');
+    phone.setCustomValidity(depositor&&sharePassPhone(phone.value)===depositor?'Use a different WhatsApp number from the depositor.':'');
+  }
+  ready.hidden=!rows.length||!allocationComplete(recipients)||recipients.some(person=>!person.name||!person.phone||person.phone===depositor);
   addRecipient.disabled=rows.length>=20;
 }
 function addCollector(){
@@ -110,6 +116,7 @@ function addCollector(){
   }
   row.querySelector('.remove-recipient').onclick=()=>{row.remove();syncRecipients();addRecipient.focus();};
   row.addEventListener('input',syncRecipients);
+  row.addEventListener('change',syncRecipients);
   row.addEventListener('keydown',event=>{
     if(event.key==='Enter'&&event.target.matches('input')&&!event.isComposing){
       event.preventDefault();
@@ -117,7 +124,8 @@ function addCollector(){
       else if(event.target===phone&&!ready.hidden)document.getElementById('send-customer').focus();
     }
   });
-  sharePassAutoAdvance(phone,sharePassPhoneComplete,()=>{
+  sharePassContactAdvance(name,()=>phone.focus());
+  sharePassAutoAdvance(phone,value=>sharePassPhoneComplete(value)&&phone.validity.valid,()=>{
     if(!ready.hidden){window.sharePassMorph(ready);document.getElementById('send-customer').focus();}
   });
   recipientList.append(row);
@@ -143,6 +151,10 @@ sharePassSteps(form,{onShow:syncContinue,validate(page){
   if(recipients.some(person=>!person.name||!person.phone)){
     errorLine.textContent='Enter each collector’s name and WhatsApp number.';return false;
   }
+  const depositor=sharePassPhone(guestPhone.value);
+  if(recipients.some(person=>person.phone===depositor)){
+    errorLine.textContent='A collector must use a different WhatsApp number from the depositor.';return false;
+  }
   if(!allocationComplete(recipients)){
     errorLine.textContent='Give each collector at least one pass and match the deposit totals for every pass type.';return false;
   }
@@ -157,6 +169,13 @@ if(booth){
     addCollector()?.focus();
   };
   form.addEventListener('input',syncContinue);
+  guestPhone.addEventListener('input',syncRecipients);
+  guestPhone.addEventListener('change',syncRecipients);
+  sharePassContactAdvance(form.elements.name,()=>{
+    if(canContinue()&&passStep.hidden){form.requestSubmit();recipientList.querySelector('[name=recipient_name]').focus();}
+    else if(Object.values(quantities).some(Boolean))guestPhone.focus();
+    else counters.querySelector('[data-delta="1"]').focus();
+  });
   form.addEventListener('change',syncContinue);
   form.addEventListener('focusin',syncContinue);
   const mayAdvance=value=>passStep.hidden&&canContinue()&&sharePassPhoneComplete(value);
@@ -222,6 +241,8 @@ function showReceipt(result){
   }
   lastReceipt=result.status;lastCode=result.collection_code;
   document.getElementById('check-receipt').hidden=!booth||result.status==='closed';
+  document.getElementById('receipt-sync-status').textContent=result.status==='submitted'?'Waiting for staff confirmation. This page updates automatically.':result.status==='closed'?'Deposit closed.':'Receipt updated automatically.';
+  scheduleReceiptPoll();
   if(alertKey&&requestId&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&'caches' in window){
     prepareReceiptAlerts(requestId).catch(()=>{});
   }
@@ -446,27 +467,46 @@ navigator.serviceWorker?.addEventListener('message',event=>{
   if(event.data?.type==='sharepass-receipt'&&event.data.scope===alertScope&&!document.hidden&&!receipt.hidden)checkReceipt();
 });
 let receiptCheck=0;
+function scheduleReceiptPoll(){
+  clearTimeout(receiptPollTimer);
+  if(!booth||!requestId||receipt.hidden||lastReceipt==='closed'||document.hidden)return;
+  const delay=receiptFailures?Math.min(30000,5000*receiptFailures):lastReceipt==='submitted'?4000:12000;
+  receiptPollTimer=setTimeout(checkReceipt,delay);
+}
 async function checkReceipt(){
+  if(receiptChecking||!requestId)return;
+  receiptChecking=true;
   const ticket=requestId,check=++receiptCheck;
   try{
     const result=await customerRequest(null,ticket);
     if(check!==receiptCheck||ticket!==requestId)return;
-    errorLine.textContent='';
+    receiptFailures=0;errorLine.textContent='';
     if(result.status!==lastReceipt||result.collection_code!==lastCode)showReceipt(result);
   }catch{
-    if(check===receiptCheck&&ticket===requestId)errorLine.textContent='Could not check your receipt. Try again when connected.';
-  }
+    receiptFailures++;
+    if(check===receiptCheck&&ticket===requestId)document.getElementById('receipt-sync-status').textContent='Waiting for connection. Retrying automatically…';
+  }finally{receiptChecking=false;scheduleReceiptPoll();}
 }
 
 document.getElementById('check-receipt').onclick=checkReceipt;
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden&&booth&&requestId&&!receipt.hidden&&lastReceipt!=='closed')checkReceipt();
+  else clearTimeout(receiptPollTimer);
 });
+window.addEventListener('online',()=>{if(booth&&requestId&&!receipt.hidden)checkReceipt();});
 form.onsubmit=async event=>{
   event.preventDefault();
   const submit=document.getElementById('send-customer');
   if(submit.disabled)return;
   submit.disabled=true;
+  errorLine.textContent='';
+  // Request permission while Send still has browser user activation. Polling and
+  // the deposit request continue even when notifications are declined.
+  let notificationPermission;
+  if(booth&&alertKey&&'Notification' in window&&'PushManager' in window&&'serviceWorker' in navigator){
+    notificationPermission=Notification.permission==='default'?
+      Notification.requestPermission().catch(()=>Notification.permission):Promise.resolve(Notification.permission);
+  }
   try{
     const body={name:form.elements.name.value.trim(),quantities};
     if(booth)Object.assign(body,{request_id:requestId||=crypto.randomUUID(),phone:'+'+sharePassPhone(guestPhone.value),
@@ -474,6 +514,11 @@ form.onsubmit=async event=>{
     const result=await customerRequest(body);
     if(booth)try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}
     showReceipt(result);
+    if(notificationPermission)notificationPermission.then(async permission=>{
+      if(permission!=='granted'||!requestId||lastReceipt==='closed')return;
+      await prepareReceiptAlerts(requestId);
+      if(!alertsEnabled&&alertScope&&!alertButton.disabled)await alertButton.onclick();
+    }).catch(()=>{});
   }catch(error){errorLine.textContent=error.message;}
   finally{submit.disabled=false;}
 };

@@ -1,12 +1,12 @@
 <resources>
-    <style name="SharePassBase" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="SharePassBase" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#871E35</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#EF2445</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#FFF9ED</item>
-        <item name="android:statusBarColor">#FFF9ED</item>
-        <item name="android:navigationBarColor">#3B292A</item>
+        <item name="android:windowBackground">#030304</item>
+        <item name="android:statusBarColor">#030304</item>
+        <item name="android:navigationBarColor">#030304</item>
     </style>
     <style name="AppTheme" parent="SharePassBase"/>
 </resources>

@@ -7,6 +7,7 @@ plugins { id("com.android.application") }
 
 abstract class PrepareNativeAssets @Inject constructor(private val files: FileSystemOperations) : DefaultTask() {
     @get:InputDirectory abstract val web: DirectoryProperty
+    @get:InputFile @get:Optional abstract val artwork: RegularFileProperty
     @get:OutputDirectory abstract val output: DirectoryProperty
 
     @TaskAction fun prepare() {
@@ -15,8 +16,28 @@ abstract class PrepareNativeAssets @Inject constructor(private val files: FileSy
             include("assets/sharepass-approved-logo.jpg", "vendor/sharepass-qr.js", "vendor/QR-LICENSE.txt", "vendor/QR-SOURCES.md")
             into(output)
         }
+        if (artwork.isPresent) files.copy {
+            from(artwork); into(output.dir("assets")); rename { "sharepass-approved-logo.jpg" }
+        }
     }
 }
+
+abstract class PrepareBrandResources @Inject constructor(private val files: FileSystemOperations) : DefaultTask() {
+    @get:InputFile @get:Optional abstract val artwork: RegularFileProperty
+    @get:OutputDirectory abstract val output: DirectoryProperty
+
+    @TaskAction fun prepare() {
+        // Rebuilding without a private override must remove previously generated private artwork.
+        files.delete { delete(output) }
+        output.get().asFile.mkdirs()
+        if (artwork.isPresent) files.copy {
+            from(artwork); into(output.dir("mipmap-xxxhdpi")); rename { "sharepass_logo.jpg" }
+        }
+    }
+}
+
+val approvedArtwork = providers.gradleProperty("sharepassArtwork").orNull?.let { rootProject.file(it) }
+approvedArtwork?.let { require(it.isFile) { "sharepassArtwork must be an existing approved JPEG." } }
 
 val sharepassOrigin = providers.gradleProperty("sharepassOrigin").orElse("https://sharepass.example.test").get()
 val parsedOrigin = URI(sharepassOrigin)
@@ -64,10 +85,11 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 23
-        versionName = "0.9.13"
+        versionCode = 24
+        versionName = "0.9.14"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
         manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
+        manifestPlaceholders["sharepassLauncherIcon"] = if (approvedArtwork == null) "@drawable/ic_foundation" else "@mipmap/sharepass_logo"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures.resValues = firebaseConfig != null
@@ -92,7 +114,16 @@ android {
 
 val prepareNativeAssets = tasks.register<PrepareNativeAssets>("prepareNativeAssets") {
     web.set(rootProject.layout.projectDirectory.dir("web"))
+    approvedArtwork?.let { artwork.set(it) }
 }
+val prepareBrandResources = tasks.register<PrepareBrandResources>("prepareBrandResources") {
+    approvedArtwork?.let { artwork.set(it) }
+    output.set(layout.buildDirectory.dir("generated/sharepassBrand/res"))
+}
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    variant.sources.res?.addGeneratedSourceDirectory(prepareBrandResources, PrepareBrandResources::output)
+}
+
 androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(prepareNativeAssets, PrepareNativeAssets::output)
 }
@@ -101,6 +132,7 @@ dependencies {
     // Shared Consumer/FileProvider imports must compile without optional Firebase.
     // Match window-java 1.5.1's existing Core runtime dependency.
     implementation("androidx.core:core:1.8.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.window:window-java:1.5.1")
     if (firebaseConfig != null) {
         add("releaseImplementation", platform("com.google.firebase:firebase-bom:35.1.0"))

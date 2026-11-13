@@ -50,6 +50,7 @@ final class AppUpdates {
     private final Runnable nextCheck = this::tick;
     private final boolean enabled;
     private boolean foreground, checking;
+    private boolean requestedCheck;
     private int offeredCode;
     private AtomicBoolean checkingTransfer, downloading;
     private AlertDialog prompt;
@@ -100,18 +101,23 @@ final class AppUpdates {
             && (activity.hasWindowFocus() || prompt != null && prompt.isShowing()) && idle.getAsBoolean();
     }
 
+    void requestCheck() {
+        requestedCheck = true;
+        if (enabled && foreground) { handler.removeCallbacks(nextCheck); handler.post(nextCheck); }
+    }
+
     private void tick() {
-        if (ready()) check(false);
+        if (ready()) {
+            boolean manual = requestedCheck;
+            requestedCheck = false;
+            check(manual);
+        }
         if (foreground) handler.postDelayed(nextCheck, CHECK_INTERVAL);
     }
 
     void offerSetup() {
-        if (!ready() || prefs.getBoolean("asked", false) || prompt != null) return;
-        prefs.edit().putBoolean("asked", true).apply();
-        show(new AlertDialog.Builder(activity).setTitle("SharePass app updates")
-            .setMessage("SharePass downloads verified updates while the desk is idle. Android asks before each install. You can turn off automatic downloads here.")
-            .setNegativeButton("Turn off automatic", (dialog, which) -> prefs.edit().putBoolean("automatic", false).apply())
-            .setPositiveButton("Set up updates", (dialog, which) -> enableAutomatic()));
+        // Checks are automatic; Android install permission is requested only for an actual update.
+        if (ready()) check(false);
     }
 
     void options() {

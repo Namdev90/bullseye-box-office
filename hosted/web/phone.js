@@ -24,7 +24,27 @@ function sharePassAutoAdvance(field,ready,advance,signal){
     },420);
   };
   field.addEventListener('input',schedule,{signal});
+  field.addEventListener('change',schedule,{signal});
+  // Some autofill and paste providers update the value after the event fires.
+  field.addEventListener('paste',()=>setTimeout(()=>schedule({isComposing:false}),0),{signal});
   field.addEventListener('compositionend',schedule,{signal});
+  field.addEventListener('blur',()=>clearTimeout(timer),{signal});
+}
+
+function sharePassContactAdvance(field,advance,signal){
+  let timer;
+  const schedule=()=>{
+    clearTimeout(timer);
+    timer=setTimeout(()=>{
+      if(signal?.aborted||document.activeElement!==field||!field.value.trim()||!field.validity.valid)return;
+      advance();
+    },420);
+  };
+  field.addEventListener('paste',()=>setTimeout(schedule,0),{signal});
+  field.addEventListener('input',event=>{
+    if(!event.isComposing&&event.inputType==='insertReplacementText')schedule();
+  },{signal});
+  field.addEventListener('change',schedule,{signal});
   field.addEventListener('blur',()=>clearTimeout(timer),{signal});
 }
 
