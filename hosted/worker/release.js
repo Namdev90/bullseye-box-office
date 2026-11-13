@@ -33,7 +33,11 @@ async function verifiedAndroidRelease(manifest){
 async function publishedAndroidRelease(manifest){
   const response=await fetch(ANDROID_RELEASE_LATEST,{redirect:'manual',signal:AbortSignal.timeout(5000),
     headers:{Accept:'application/vnd.github+json','User-Agent':'SharePass-release-notifier','X-GitHub-Api-Version':'2022-11-28'}});
-  if(!response.ok)return false;
+  if(!response.ok){
+    console.error('SharePass GitHub release verification HTTP '+response.status+
+      ' (remaining '+response.headers.get('X-RateLimit-Remaining')+')');
+    return false;
+  }
   const reader=response.body?.getReader();
   if(!reader)return false;
   let raw='',size=0;
