@@ -35,6 +35,7 @@ function fixture({published=true,pushStatuses=[],configured=true}={}){
   async function fetchFixture(url,options){
     calls.push(url);
     if(url==='https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest'){
+      assert.equal(options.redirect,'manual','Worker fetch must not follow redirects');
       return Response.json({draft:!published,prerelease:false,tag_name:'android-v'+latest.versionName,
         html_url:repository+'tag/android-v'+latest.versionName,assets:[
           {name:'SharePass-Android-'+latest.versionName+'.apk',state:'uploaded',size:latest.size,
