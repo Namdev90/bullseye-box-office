@@ -1311,8 +1311,12 @@ public final class HostedDeskActivity extends Activity {
                     update.optString("address"), update.optString("message")), false);
             }
             button("Done", this::desk, true);
-            note("Handover confirmed.");
-        } else {receipt(result);note("Passes received. Collection code ready.");}
+            if(!path.equals("/api/collections/history/handover"))note("Handover confirmed.");
+        } else {
+            receipt(result);
+            if(path.equals("/api/codes/refresh")||path.equals("/api/admin/reissue"))note("Collection code updated.");
+            else if(path.equals("/api/deposits")||path.endsWith("/confirm"))note("Passes received. Collection code ready.");
+        }
     }
     private void receipt(JSONObject result) {
         page("Passes deposited", "receipt", this::desk);

@@ -19,3 +19,14 @@ test('action toast replaces its text and timer, hides in background and keeps me
   window.sharePassToast('Copied');document.hidden=true;events.visibilitychange();assert.equal(nodes[0].hidden,true);
   window.sharePassToast('Background');assert.equal(nodes[0].textContent,'Copied');assert.equal(timers.size,0);
 });
+
+test('viewing current or completed history receipts does not announce a new custody action',()=>{
+  const source=readFileSync('web/counter.js','utf8');
+  const receipt=source.slice(source.indexOf('function showReceipt('),source.indexOf('\nfunction openShare('));
+  const balance=source.slice(source.indexOf('function showBalance('),source.indexOf('\nconst updatesForm='));
+  const toasts=[],elements=new Map(),input={collection_code:'0007',deposit:{remaining:{normal:0}},depositor_name:'Synthetic'};
+  const byId=id=>{if(!elements.has(id))elements.set(id,{replaceChildren(){},append(){}});return elements.get(id);};
+  runInNewContext(receipt+'\n'+balance+'\nshowReceipt(input);showBalance(input);',{
+    window:{sharePassToast:message=>toasts.push(message)},byId,input,register:false,show(){},balance:()=>'',sharePassPhone:()=>false});
+  assert.deepEqual(toasts,[]);assert.equal(byId('saved-code').textContent,'0007');
+});
