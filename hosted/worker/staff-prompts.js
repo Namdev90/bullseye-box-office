@@ -61,9 +61,14 @@ async function adminStaffPrompts(request,env,ctx,staff){
   }else if(request.method!=='GET')return error('Page not found.',404);
   const rows=await db.prepare(`SELECT id,booth_id,message,created_at,expires_at,reply,replied_by,replied_at,per_person
     FROM sharepass_staff_prompts WHERE workspace=? ORDER BY created_at DESC,id DESC LIMIT 50`).bind(staff.workspace).all();
-  for(const message of rows.results)if(message.per_person){
-    message.responses=(await db.prepare('SELECT recipient,name,booth_id,reply,replied_at FROM sharepass_staff_prompt_recipients WHERE workspace=? AND prompt_id=? ORDER BY name,recipient')
-      .bind(staff.workspace,message.id).all()).results;
+  const personal=rows.results.filter(message=>message.per_person);
+  if(personal.length){
+    const people=await db.prepare(`SELECT prompt_id,recipient,name,booth_id,reply,replied_at FROM sharepass_staff_prompt_recipients
+      WHERE workspace=? AND prompt_id IN (${personal.map(()=>'?').join(',')}) ORDER BY name,recipient`)
+      .bind(staff.workspace,...personal.map(message=>message.id)).all();
+    const responses=new Map(personal.map(message=>[message.id,[]]));
+    for(const {prompt_id,...person} of people.results)responses.get(prompt_id).push(person);
+    for(const message of personal)message.responses=responses.get(message.id);
   }
   return json({messages:rows.results,inbox:await pendingStaffPrompts(db,staff)});
 }
