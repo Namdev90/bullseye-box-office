@@ -19,7 +19,7 @@ function release(versionCode=24,versionName='0.9.14',extra={}){
     manifest.apkUrl,manifest.size,manifest.sha256,manifest.signerSha256,''].join('\n');
   return {...manifest,signature:sign('RSA-SHA256',Buffer.from(bytes),keys.privateKey).toString('base64')};
 }
-function fixture({published=true,pushStatuses=[],configured=true}={}){
+function fixture({published=true,pushStatuses=[],configured=true,githubStatus=200}={}){
   const sqlite=new DatabaseSync(':memory:');
   for(const file of readdirSync('drizzle').filter(file=>file.endsWith('.sql')).sort())sqlite.exec(readFileSync('drizzle/'+file,'utf8'));
   const DB={prepare(sql){return {bind(...values){
@@ -36,6 +36,7 @@ function fixture({published=true,pushStatuses=[],configured=true}={}){
     calls.push(url);
     if(url==='https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest'){
       assert.equal(options.redirect,'manual','Worker fetch must not follow redirects');
+      if(githubStatus!==200)return new Response('{}',{status:githubStatus});
       return Response.json({draft:!published,prerelease:false,tag_name:'android-v'+latest.versionName,
         html_url:repository+'tag/android-v'+latest.versionName,assets:[
           {name:'SharePass-Android-'+latest.versionName+'.apk',state:'uploaded',size:latest.size,
@@ -80,6 +81,15 @@ test('release broadcasts reject forged, altered, old, draft and mismatched publi
   const draft=fixture({published:false});t.after(draft.close);
   assert.equal((await draft.call()).status,409);assert.equal(draft.messages.length,0);
   f.badDigest();assert.equal((await f.call()).status,409);assert.equal(f.messages.length,0);
+});
+
+test('upstream GitHub unavailability is retryable and cannot accept a release or send notifications',async t=>{
+  for(const githubStatus of [401,403,429,503]){
+    const f=fixture({githubStatus});t.after(f.close);f.phone('ready');
+    assert.equal((await f.call()).status,503);
+    assert.equal(f.sqlite.prepare('SELECT version_code FROM sharepass_android_release_state').get().version_code,23);
+    assert.equal(f.messages.length,0);
+  }
 });
 
 test('a published signed release notifies only eligible paired phones, privately and idempotently',async t=>{
