@@ -19,7 +19,7 @@ function release(versionCode=24,versionName='0.9.14',extra={}){
     manifest.apkUrl,manifest.size,manifest.sha256,manifest.signerSha256,''].join('\n');
   return {...manifest,signature:sign('RSA-SHA256',Buffer.from(bytes),keys.privateKey).toString('base64')};
 }
-function fixture({published=true,pushStatuses=[],configured=true,githubStatus=200}={}){
+function fixture({published=true,pushStatuses=[],configured=true,githubStatus=200,githubHeaders={}}={}){
   const sqlite=new DatabaseSync(':memory:');
   for(const file of readdirSync('drizzle').filter(file=>file.endsWith('.sql')).sort())sqlite.exec(readFileSync('drizzle/'+file,'utf8'));
   const DB={prepare(sql){return {bind(...values){
@@ -36,7 +36,7 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
     calls.push(url);
     if(url==='https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest'){
       assert.equal(options.redirect,'manual','Worker fetch must not follow redirects');
-      if(githubStatus!==200)return new Response('{}',{status:githubStatus});
+      if(githubStatus!==200)return new Response('{}',{status:githubStatus,headers:githubHeaders});
       return Response.json({draft:!published,prerelease:false,tag_name:'android-v'+latest.versionName,
         html_url:repository+'tag/android-v'+latest.versionName,assets:[
           {name:'SharePass-Android-'+latest.versionName+'.apk',state:'uploaded',size:latest.size,
@@ -58,7 +58,7 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
   async function call(manifest=latest){
     const response=await sandbox.worker.fetch(new Request('https://test.example/api/public/android-release',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(manifest)}),env);
-    return {status:response.status,body:await response.json()};
+    return {status:response.status,body:await response.json(),retryAfter:response.headers.get('Retry-After')};
   }
   function phone(id,{active=1,expires=clock.now+3600000,version=23,notifications=1,registered=true}={}){
     sqlite.prepare(`INSERT INTO sharepass_configured_devices(workspace,id,staff_id,label,invite,setup_code,invite_expires,digest,session_expires,active)
@@ -87,8 +87,21 @@ test('upstream GitHub unavailability is retryable and cannot accept a release or
   for(const githubStatus of [401,403,429,503]){
     const f=fixture({githubStatus});t.after(f.close);f.phone('ready');
     assert.equal((await f.call()).status,503);
+    assert.equal((await f.call()).status,503);
+    assert.equal(f.calls.length,1,'Wait for the upstream retry window before another GitHub request');
     assert.equal(f.sqlite.prepare('SELECT version_code FROM sharepass_android_release_state').get().version_code,23);
     assert.equal(f.messages.length,0);
+  }
+});
+
+test('secondary retry delays ignore an unexhausted primary quota reset',async t=>{
+  const reset=String(Math.ceil((Date.now()+3600000)/1000));
+  for(const remaining of ['12','0']){
+    const f=fixture({githubStatus:403,githubHeaders:{'X-RateLimit-Remaining':remaining,'X-RateLimit-Reset':reset,'Retry-After':'120'}});
+    t.after(f.close);const response=await f.call();assert.equal(response.status,503);
+    if(remaining==='12')assert.equal(response.retryAfter,'120');
+    else assert(Number(response.retryAfter)>3500);
+    assert.equal((await f.call()).status,503);assert.equal(f.calls.length,1);
   }
 });
 
