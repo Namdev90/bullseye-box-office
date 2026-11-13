@@ -26,7 +26,7 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
     const stmt=sqlite.prepare(sql),all=()=>({results:stmt.all(...values)}),run=()=>({meta:{changes:stmt.run(...values).changes}});
     return {first:async()=>stmt.get(...values)||null,all,run,execute:()=>stmt.columns().length?all():run()};
   }};},async batch(statements){sqlite.exec('BEGIN');try{const result=statements.map(s=>s.execute());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
-  const calls=[],messages=[],clock={now:Date.now()};
+  const calls=[],messages=[],authorizations=[],clock={now:Date.now()};
   class Clock extends Date{static now(){return clock.now;}}
   let latest=release(),badDigest=false;
   const env={DB,...(configured?{SHAREPASS_FCM_SERVICE_ACCOUNT:JSON.stringify({
@@ -35,6 +35,7 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
   async function fetchFixture(url,options){
     calls.push(url);
     if(url==='https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest'){
+      authorizations.push(options.headers.Authorization);
       assert.equal(options.redirect,'manual','Worker fetch must not follow redirects');
       if(githubStatus!==200)return new Response('{}',{status:githubStatus,headers:githubHeaders});
       return Response.json({draft:!published,prerelease:false,tag_name:'android-v'+latest.versionName,
@@ -55,9 +56,9 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
     .replace(/const ANDROID_RELEASE_SPKI='[^']+';/,"const ANDROID_RELEASE_SPKI='"+spki+"';")
     .replace('export default {async fetch','globalThis.worker={async fetch');
   runInNewContext(source,sandbox);
-  async function call(manifest=latest){
+  async function call(manifest=latest,authorization){
     const response=await sandbox.worker.fetch(new Request('https://test.example/api/public/android-release',{
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(manifest)}),env);
+      method:'POST',headers:{'Content-Type':'application/json',...(authorization?{Authorization:authorization}:{})},body:JSON.stringify(manifest)}),env);
     return {status:response.status,body:await response.json(),retryAfter:response.headers.get('Retry-After')};
   }
   function phone(id,{active=1,expires=clock.now+3600000,version=23,notifications=1,registered=true}={}){
@@ -67,8 +68,18 @@ function fixture({published=true,pushStatuses=[],configured=true,githubStatus=20
       VALUES(?,?,?,?,?)`).run(id,clock.now,clock.now,version,notifications);
     if(registered)sqlite.prepare('INSERT INTO sharepass_push_tokens(device_id,token) VALUES(?,?)').run(id,'fixture-push-token-'+id);
   }
-  return {call,phone,sqlite,calls,messages,clock,setLatest:value=>{latest=value;},badDigest:()=>{badDigest=true;},close:()=>sqlite.close()};
+  return {call,phone,sqlite,calls,messages,authorizations,clock,setLatest:value=>{latest=value;},badDigest:()=>{badDigest=true;},close:()=>sqlite.close()};
 }
+
+test('release verification accepts opaque current GitHub installation tokens while rejecting malformed or oversized headers',async t=>{
+  const f=fixture();t.after(f.close);
+  const authorization='Bearer ghs_12345_'+['a'.repeat(160),'b'.repeat(160),'c'.repeat(160)].join('.');
+  assert.equal((await f.call({...release(),sha256:'b'.repeat(64)},authorization)).status,400);
+  for(const value of ['Basic synthetic','Bearer bad token','Bearer '+'a'.repeat(8193)])assert.equal((await f.call(release(),value)).status,400);
+  assert.equal(f.calls.length,0);assert.equal(f.sqlite.prepare('SELECT version_code FROM sharepass_android_release_state').get().version_code,23);
+  const result=await f.call(release(),authorization);assert.equal(result.status,200);assert.equal(result.body.accepted,true);
+  assert.deepEqual(f.authorizations,[authorization]);assert(!JSON.stringify(result).includes(authorization));
+});
 
 test('release broadcasts reject forged, altered, old, draft and mismatched published artifacts',async t=>{
   const f=fixture();t.after(f.close);

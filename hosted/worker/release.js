@@ -151,7 +151,7 @@ async function androidReleaseWebhook(request,env){
   }else{
     // The read-only Actions token lives only in this request and is sent to the fixed GitHub origin without redirects.
     const authorization=request.headers.get('Authorization');
-    if(authorization&&!/^Bearer [A-Za-z0-9_-]{1,255}$/.test(authorization))return error('Invalid release verification authorization.',400);
+    if(authorization&&(authorization.length>8192||!/^Bearer [A-Za-z0-9._~+/-]+=*$/.test(authorization)))return error('Invalid release verification authorization.',400);
     const published=await publishedAndroidRelease(manifest,authorization);
     if(published?.retryAfter){
       const response=error('GitHub release verification is temporarily unavailable. Retry the same signed release.',503);
