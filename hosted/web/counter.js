@@ -720,6 +720,7 @@ async function saveDeposit(){
 }
 
 function showReceipt(result,privateIntake=false){
+  window.sharePassToast?.('Passes received. Collection code ready.');
   if(privateIntake)rememberIntake(null);
   receipt=result;
   byId('saved-code').textContent = receipt.collection_code;
@@ -827,6 +828,7 @@ async function confirm(){
 }
 
 function showBalance(result){
+  window.sharePassToast?.('Handover confirmed.');
   byId('balance').textContent = balance(result.deposit.remaining);
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();

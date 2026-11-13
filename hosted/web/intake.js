@@ -213,6 +213,9 @@ async function customerRequest(body,statusId){
   return result;
 }
 function showReceipt(result){
+  if(result.status!==lastReceipt||result.collection_code!==lastCode)window.sharePassToast?.(
+    result.status==='confirmed'?'Passes approved. Your code and WhatsApp buttons are ready.':
+    result.status==='submitted'?'Sent to booth. Waiting for confirmation.':result.status==='closed'?'Deposit closed.':'Receipt updated.');
   form.hidden=false;
   form.reset();recipientList.replaceChildren();form.hidden=true;
   receipt.hidden=false;

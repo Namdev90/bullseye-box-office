@@ -41,6 +41,56 @@ const scope={event_id:'training-event-001',booth_id:'B1'};
 const state='/api/state?event_id=training-event-001';
 const deposit={...scope,request_id:'deposit-0001',location:'A-01',custody_confirmed:true,quantities:{normal:4,vip:2,vvip:0}};
 
+test('archived-booth expired pickups can be recovered idempotently without reopening intake or invitations',async t=>{
+  const f=fixture();t.after(f.close);
+  const created=(await f.call('/api/deposits',{...deposit,custom_code:'0007',valid_minutes:5})).body;
+  const saved=JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(created.deposit.id).payload);
+  saved.code_expires_at=Date.now()-1000;
+  f.sqlite.prepare('UPDATE sharepass_ledger_deposits SET payload=? WHERE id=?').run(JSON.stringify(saved),saved.id);
+  assert.equal((await f.call('/api/admin/setup',{action:'archive-booth',booth_id:'B1',confirmed:true})).status,200);
+  const replace={request_id:crypto.randomUUID(),booth_id:'B1',collection_code:'0007',packet_id:saved.packet_id,
+    location:saved.location,custom_code:'0133',valid_minutes:60};
+  const recovered=await f.call('/api/admin/reissue',replace);assert.equal(recovered.status,200);
+  assert.equal(recovered.body.collection_code,'0133');
+  assert.equal((await f.call('/api/admin/reissue',replace)).body.replayed,true);
+  assert.deepEqual((await f.call('/api/verify',{collection_code:'0133'})).body.deposit.remaining,deposit.quantities);
+  assert.equal((await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'New staff'})).status,400);
+  assert.equal((await f.call('/api/deposits',{...deposit,request_id:'new-archived-deposit'})).status,409);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,1);
+});
+
+test('owner alerts ignore a different-booth cookie and preserve the separate staff subscription and delivery',async t=>{
+  const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const env={SHAREPASS_WEB_PUSH_PUBLIC_KEY:Buffer.from(await crypto.subtle.exportKey('raw',pair.publicKey)).toString('base64url'),
+    SHAREPASS_WEB_PUSH_PRIVATE_JWK:JSON.stringify(await crypto.subtle.exportKey('jwk',pair.privateKey))};
+  const jobs=[],sends=[],f=fixture({env,ctx:{waitUntil:job=>jobs.push(job)}});t.after(f.close);
+  t.mock.method(globalThis,'fetch',async url=>{sends.push(url);return new Response(null,{status:201});});
+  const booth=(await f.call('/api/admin/setup',{action:'booth',name:'Other booth',location:'Other'})).body.booths.find(b=>b.name==='Other booth');
+  const invite=(await f.call('/api/admin/setup',{action:'invite',booth_id:booth.id,staff_name:'Other staff'})).body;
+  const token='X'.repeat(43);assert.equal((await f.call('/api/device/connect',{code:invite.code,verifier:token},'')).status,200);
+  const cookie={Cookie:'__Host-sharepass-staff='+token},device={'X-SharePass-Session':token};
+  const staffEndpoint='https://fcm.googleapis.com/fcm/send/synthetic-other-staff',ownerEndpoint='https://fcm.googleapis.com/fcm/send/synthetic-owner';
+  assert.equal((await f.call('/api/web-push',{endpoint:staffEndpoint},'',undefined,cookie)).status,200);
+  const original=f.sqlite.prepare('SELECT * FROM sharepass_web_push WHERE endpoint=?').get(staffEndpoint);
+  assert.equal(original.booth_id,booth.id);assert(original.device_id);
+  assert.equal((await f.call('/api/admin/web-push',undefined,'',undefined,device)).status,404);
+  assert.equal((await f.call('/api/admin/web-push',undefined,'',undefined,cookie)).status,401);
+  assert.equal((await f.call('/api/admin/web-push',{endpoint:ownerEndpoint},'account-one','https://foreign.example',cookie)).status,403);
+  assert.equal((await f.call('/api/admin/web-push',{endpoint:staffEndpoint},'account-one',undefined,cookie)).status,409);
+  assert.equal((await f.call('/api/admin/web-push',{endpoint:ownerEndpoint},'account-one',undefined,cookie)).status,200);
+  assert.deepEqual(f.sqlite.prepare('SELECT * FROM sharepass_web_push WHERE endpoint=?').get(staffEndpoint),original);
+  const owner=f.sqlite.prepare('SELECT * FROM sharepass_web_push WHERE endpoint=?').get(ownerEndpoint);
+  assert.equal(owner.operator,'account-one');assert.equal(owner.booth_id,'B1');assert.equal(owner.device_id,null);
+  const send=async booth_id=>{
+    sends.length=0;assert.equal((await f.call('/api/admin/staff-messages',{id:crypto.randomUUID(),booth_id,message:'Synthetic owner alert',per_person:true})).status,200);
+    await Promise.all(jobs.splice(0));return [...sends].sort();
+  };
+  assert.deepEqual(await send('B1'),[ownerEndpoint]);assert.deepEqual(await send(booth.id),[staffEndpoint]);
+  assert.deepEqual(await send('all'),[ownerEndpoint,staffEndpoint].sort());
+  f.sqlite.prepare('UPDATE sharepass_configured_devices SET active=0 WHERE id=?').run(original.device_id);
+  assert.deepEqual(await send('all'),[ownerEndpoint]);
+});
+
 test('admin messages stay booth-scoped and accept only the first selectable reply',async t=>{
   const f=fixture();
   t.after(f.close);
@@ -284,7 +334,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'34');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'35');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -292,7 +342,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js?v=34-'));
+  assert((await signed.text()).includes('src="/counter.js?v=35-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });

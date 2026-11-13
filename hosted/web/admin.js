@@ -71,13 +71,13 @@ function renderSetup(data){
   if(!data.devices.length)deviceList.append(item('No devices yet','Set up a staff device to connect it to a booth.'));
   for(const select of [inviteForm.elements.booth_id,reissueForm.elements.booth_id]){
     const previous=select.value;
-    select.replaceChildren(...data.booths.filter(booth=>!booth.archived).map(booth=>{
+    select.replaceChildren(...data.booths.filter(booth=>select===reissueForm.elements.booth_id||!booth.archived).map(booth=>{
       const option=document.createElement('option');
       option.value=booth.id;
       option.textContent=booth.name;
       return option;
     }));
-    if(boothNames.has(previous))select.value=previous;
+    if([...select.options].some(option=>option.value===previous))select.value=previous;
   }
   openInvite.disabled=!data.booths.some(booth=>!booth.archived);
 }
@@ -90,6 +90,7 @@ async function updateSetup(body,message){
     const data=await request('/api/admin/setup',body);
     renderSetup(data);
     setupStatus.textContent=message||'';
+    if(message)window.sharePassToast?.(message);
     return data;
   }catch(error){setupStatus.textContent=error.message;}
   finally{busy=false;}
@@ -132,6 +133,7 @@ async function loadStaffMessages(body){
       later.onclick=()=>{adminDeferred.add(message.id);card.remove();};actions.append(later);card.append(actions);personal.append(card);
     }
     status.textContent=body?'Message sent.':messages.length?'':'No staff messages yet.';
+    if(body)window.sharePassToast?.('Message sent.');
     return true;
   }catch(error){status.textContent=error.message;return false;}
 }
@@ -145,6 +147,7 @@ async function replyAdminMessage(message,reply){
     if(saved&&saved.reply!==reply)throw new Error('Retry the saved response first.');
     sessionStorage.setItem(key,JSON.stringify({reply}));
     await request('/api/admin/staff-messages/reply',{id:message.id,reply});
+    window.sharePassToast?.('Reply sent.');
     try{sessionStorage.removeItem(key);}catch{}
   }catch{failed=true;}
   finally{
@@ -407,12 +410,21 @@ async function enableAdminAlerts(){
   if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))return;
   const permission=Notification.permission==='default'?await Notification.requestPermission():Notification.permission;
   if(permission!=='granted')return;
-  const {public_key}=await request('/api/web-push');if(!public_key)return;
-  const registration=await navigator.serviceWorker.register('/queue-alert-worker.js');
-  await navigator.serviceWorker.ready;
+  const {public_key}=await request('/api/admin/web-push');if(!public_key)return;
+  const registration=await navigator.serviceWorker.register('/queue-alert-worker.js',{scope:'/admin-alerts/'});
+  if(registration.active?.state!=='activated'){
+    const worker=registration.installing||registration.waiting||registration.active;
+    if(!worker)throw new Error('Administrator alerts could not start.');
+    await new Promise((resolve,reject)=>{
+      const finish=error=>{clearTimeout(timer);worker.removeEventListener('statechange',changed);error?reject(error):resolve();};
+      const changed=()=>{if(worker.state==='activated')finish();else if(worker.state==='redundant')finish(new Error('Administrator alerts could not start.'));};
+      const timer=setTimeout(()=>finish(new Error('Administrator alerts did not start. Retry after reloading.')),10000);
+      worker.addEventListener('statechange',changed);changed();
+    });
+  }
   const key=Uint8Array.from(atob(public_key.replace(/-/g,'+').replace(/_/g,'/')+'='),char=>char.charCodeAt(0));
   const subscription=await registration.pushManager.getSubscription()||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-  await request('/api/web-push',{endpoint:subscription.endpoint});
+  await request('/api/admin/web-push',{endpoint:subscription.endpoint});
 }
 navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='sharepass-queue'&&!sendingMessage)loadStaffMessages();});
 if('Notification' in window&&Notification.permission==='granted')enableAdminAlerts().catch(()=>{});

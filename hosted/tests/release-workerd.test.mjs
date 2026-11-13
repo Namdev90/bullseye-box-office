@@ -18,17 +18,25 @@ test('Workerd validates a published release and rejects redirects without follow
   const outboundService=request=>{
     calls.push(request.url);
     assert.equal(request.url,'https://api.github.com/repos/Namdev90/bullseye-box-office/releases/latest');
+    if(request.headers.has('Authorization')){
+      assert.equal(request.headers.get('Authorization'),'Bearer synthetic_read_token');
+      return Response.json(release);
+    }
     if(calls.length===1)return Response.json(release);
     if(calls.length===2)return new Response(null,{status:302,headers:{Location:'https://untrusted.example/release'}});
     return new Response(null,{status:403,headers:{'X-RateLimit-Remaining':'0'}});
   };
   const script=readFileSync('worker/release.js','utf8')+
-    '\nexport default {async fetch(){return Response.json({published:await publishedAndroidRelease('+JSON.stringify(manifest)+')});}};';
+    '\nexport default {async fetch(request){return Response.json({published:await publishedAndroidRelease('+JSON.stringify(manifest)+',request.headers.get("Authorization"))});}};';
   const runtime=new Miniflare({cf:false,modules:true,script,compatibilityDate:'2026-01-01',outboundService});
   try{
     assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/')).json(),{published:true});
     assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/')).json(),{published:false});
-    assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/')).json(),{published:null});
+    assert((await (await runtime.dispatchFetch('http://localhost/')).json()).published.retryAfter>=60);
     assert.equal(calls.length,3,'A redirect must never contact its destination');
+    assert((await (await runtime.dispatchFetch('http://localhost/')).json()).published.retryAfter>0);
+    assert.equal(calls.length,3,'Anonymous requests respect the quota backoff');
+    assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/',{headers:{Authorization:'Bearer synthetic_read_token'}})).json(),{published:true});
+    assert.equal(calls.length,4,'Read-only authenticated verification has its own quota');
   }finally{await runtime.dispose();}
 });

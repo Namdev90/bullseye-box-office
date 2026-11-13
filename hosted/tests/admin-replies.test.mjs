@@ -8,7 +8,7 @@ test('administrator replies retain uncertain intent, reject changed retries and 
   const start=source.indexOf('async function replyAdminMessage('),end=source.indexOf('messageForm.onsubmit',start);
   assert(start>=0&&end>start);
   const saved=new Map(),sent=[],committed=new Map(),status={textContent:''};let loseReply=true,failStorage=false;
-  const context={adminReplying:new Set(),byId:()=>status,loadStaffMessages:async()=>{},
+  const context={window:{},adminReplying:new Set(),byId:()=>status,loadStaffMessages:async()=>{},
     sessionStorage:{getItem:key=>saved.get(key)||null,setItem(key,value){if(failStorage)throw new Error('Storage failure');saved.set(key,value);},removeItem:key=>saved.delete(key)},
     request:async(path,body)=>{assert.equal(path,'/api/admin/staff-messages/reply');sent.push({...body});committed.set(body.id,body.reply);if(loseReply){loseReply=false;throw new Error('Synthetic lost reply');}return {replied:true};}};
   const reply=runInNewContext('('+source.slice(start,end).trim()+')',context),message={id:'synthetic-message'};

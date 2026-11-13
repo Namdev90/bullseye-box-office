@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'34',
+  'X-SharePass-Version':'35',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -287,6 +287,10 @@ export default {async fetch(request,env,ctx){
       if(path==='/api/admin/staff-messages/reply'&&request.method==='POST'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);
         return await replyToStaffPrompt(request,env.DB,staff);
+      }
+      if(path==='/api/admin/web-push'){
+        if(!staff.admin||deviceToken)return error('Page not found.',404);
+        return await webPushSubscription(request,env,staff);
       }
       if(path==='/api/admin/code-policy'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);

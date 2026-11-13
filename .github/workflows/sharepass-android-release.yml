@@ -124,11 +124,12 @@ jobs:
           [[ "$(snapshot "$dir/draft.json")" == "$(snapshot "$dir/published.json")" ]]
           printf 'manifest_path=%s\n' "$dir/$manifest" >> "$GITHUB_OUTPUT"
           jq -r '.html_url' "$dir/published.json"
-      - name: Announce the verified latest Android update
-        if: ${{ success() && inputs.promote_latest && steps.publish_release.outcome == 'success' }}
-        continue-on-error: true
-        timeout-minutes: 7
-        env:
-          VERIFIED_MANIFEST_PATH: ${{ steps.publish_release.outputs.manifest_path }}
-          EXPECTED_VERSION_CODE: ${{ inputs.version_code }}
-        run: node android/tools/announce-sharepass-release.mjs "$VERIFIED_MANIFEST_PATH" "$EXPECTED_VERSION_CODE"
+  announce:
+    needs: verify-and-publish
+    if: inputs.promote_latest
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sharepass-announce-release.yml
+    with:
+      tag: ${{ inputs.tag }}
+      version_code: ${{ inputs.version_code }}

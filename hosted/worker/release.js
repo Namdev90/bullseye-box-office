@@ -31,18 +31,19 @@ async function verifiedAndroidRelease(manifest){
   }catch{return false;}
 }
 
-async function publishedAndroidRelease(manifest){
-  if(Date.now()<androidReleaseCheckAfter)return null;
+async function publishedAndroidRelease(manifest,authorization){
+  if(!authorization&&Date.now()<androidReleaseCheckAfter)return {retryAfter:Math.ceil((androidReleaseCheckAfter-Date.now())/1000)};
   const response=await fetch(ANDROID_RELEASE_LATEST,{redirect:'manual',signal:AbortSignal.timeout(5000),
-    headers:{Accept:'application/vnd.github+json','User-Agent':'SharePass-release-notifier','X-GitHub-Api-Version':'2022-11-28'}});
+    headers:{Accept:'application/vnd.github+json','User-Agent':'SharePass-release-notifier','X-GitHub-Api-Version':'2022-11-28',...(authorization?{Authorization:authorization}:{})}});
   if(!response.ok){
     console.error('SharePass GitHub release verification HTTP '+response.status+
       ' (remaining '+response.headers.get('X-RateLimit-Remaining')+', reset '+response.headers.get('X-RateLimit-Reset')+')');
     if(response.status===401||response.status===403||response.status===429||response.status>=500){
       const now=Date.now();
-      androidReleaseCheckAfter=Math.max(...[now+60000,response.headers.get('X-RateLimit-Remaining')==='0'?Number(response.headers.get('X-RateLimit-Reset'))*1000:0,
+      const retryAt=Math.max(...[now+60000,response.headers.get('X-RateLimit-Remaining')==='0'?Number(response.headers.get('X-RateLimit-Reset'))*1000:0,
         now+Number(response.headers.get('Retry-After'))*1000].filter(Number.isSafeInteger));
-      return null;
+      if(!authorization)androidReleaseCheckAfter=retryAt;
+      return {retryAfter:Math.ceil((retryAt-now)/1000)};
     }
     return false;
   }
@@ -148,10 +149,13 @@ async function androidReleaseWebhook(request,env){
       return error('This version was already announced with different release metadata.',409);
     }
   }else{
-    const published=await publishedAndroidRelease(manifest);
-    if(published===null){
+    // The read-only Actions token lives only in this request and is sent to the fixed GitHub origin without redirects.
+    const authorization=request.headers.get('Authorization');
+    if(authorization&&!/^Bearer [A-Za-z0-9_-]{1,255}$/.test(authorization))return error('Invalid release verification authorization.',400);
+    const published=await publishedAndroidRelease(manifest,authorization);
+    if(published?.retryAfter){
       const response=error('GitHub release verification is temporarily unavailable. Retry the same signed release.',503);
-      response.headers.set('Retry-After',String(Math.max(1,Math.ceil((androidReleaseCheckAfter-Date.now())/1000))));return response;
+      response.headers.set('Retry-After',String(published.retryAfter));return response;
     }
     if(!published)return error('The signed release is not the current published GitHub update.',409);
     await db.prepare(`UPDATE sharepass_android_release_state SET version_code=?,version_name=?,manifest=?,accepted_at=?

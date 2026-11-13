@@ -1,0 +1,54 @@
+name: Announce published SharePass Android release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published Android tag
+        required: true
+        type: string
+      version_code:
+        description: Published Android version code
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      version_code:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sharepass-release-announcement
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    if: github.repository == 'Namdev90/bullseye-box-office' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Announce exact signed manifest with ephemeral read-only verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHAREPASS_GITHUB_READ_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^android-v(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})$ ]]
+          [[ "$VERSION_CODE" =~ ^[1-9][0-9]{0,9}$ ]]
+          dir=$(mktemp -d "$RUNNER_TEMP/sharepass-announce.XXXXXXXX")
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern sharepass-android-update.json --dir "$dir"
+          node android/tools/announce-sharepass-release.mjs "$dir/sharepass-android-update.json" "$VERSION_CODE"
