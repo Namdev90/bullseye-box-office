@@ -24,7 +24,7 @@ test('Workerd validates a published release and rejects redirects without follow
   };
   const script=readFileSync('worker/release.js','utf8')+
     '\nexport default {async fetch(){return Response.json({published:await publishedAndroidRelease('+JSON.stringify(manifest)+')});}};';
-  const runtime=new Miniflare({modules:true,script,compatibilityDate:'2026-01-01',outboundService});
+  const runtime=new Miniflare({cf:false,modules:true,script,compatibilityDate:'2026-01-01',outboundService});
   try{
     assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/')).json(),{published:true});
     assert.deepEqual(await (await runtime.dispatchFetch('http://localhost/')).json(),{published:false});

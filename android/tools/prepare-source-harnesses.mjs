@@ -38,6 +38,12 @@ export function extractJavaMethod(source, signature) {
 
 export function sourceHarnesses() {
   return [
+    ['DirectHandoverTest', 'HostedRegisterClient', [
+      'JSONObject stockChange(String path, JSONObject body) throws Exception',
+      'JSONObject stockChange(String path, JSONObject body, boolean finalize) throws Exception',
+      'JSONObject recover() throws Exception', 'JSONObject completeConfirmedHandover() throws Exception',
+      'private JSONObject finishStockChange(String path, JSONObject body) throws Exception',
+    ]],
     ['AppUpdatesFocusTest', 'AppUpdates', [
       'void start()', 'void stop()', 'void cancelDownload()', 'void focusChanged(boolean focused)',
       'private boolean ready()', 'private void install(UpdatePolicy.Release release, File file)',

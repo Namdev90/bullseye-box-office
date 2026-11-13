@@ -165,20 +165,21 @@ public final class MainActivity extends Activity {
         LinearLayout pass = new LinearLayout(this);
         pass.setOrientation(LinearLayout.VERTICAL);
         pass.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        pass.setBackground(DeskSurface.panel(this));
+        pass.setBackgroundColor(android.graphics.Color.BLACK);
         pass.setPadding(DeskSurface.dp(this, 14), DeskSurface.dp(this, 10), DeskSurface.dp(this, 14), DeskSurface.dp(this, 14));
         TextView caption = new TextView(this);
         caption.setText("Staff pass desk");
         caption.setTextColor(DeskSurface.INK);
         caption.setTextSize(19);
         caption.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        caption.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        caption.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_ticket_layers, 0, 0, 0);
+        caption.setGravity(android.view.Gravity.CENTER);
+
         caption.setCompoundDrawablePadding(DeskSurface.dp(this, 10));
         pass.addView(caption);
-        pass.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, DeskSurface.dp(this, 12)));
+
         Button open = new Button(this);
         open.setText("Staff registration / Open register");
+        open.setMinHeight(DeskSurface.dp(this,56));
         DeskSurface.button(open, true);
         open.setOnClickListener(view -> startActivity(new android.content.Intent(this, HostedDeskActivity.class)));
         LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-1, -2);
@@ -197,7 +198,7 @@ public final class MainActivity extends Activity {
         updates = new AppUpdates(this, () -> true);
         UpdateNotifications.ensureChannel(this);
         if (getIntent().getBooleanExtra("checkSharePassUpdate", false) || UpdateNotifications.TYPE.equals(getIntent().getStringExtra("type"))) updates.requestCheck();
-        LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2, 1f);
+        LinearLayout.LayoutParams passLayout = new LinearLayout.LayoutParams(-1, -2);
         passLayout.setMargins(gap, gap, gap, gap);
         stage.addView(pass, passLayout);
         ScrollView scroll = new ScrollView(this);

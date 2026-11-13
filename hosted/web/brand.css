@@ -49,10 +49,10 @@ body.sharepass-brand{background:#000;color:var(--paper)}
 .sharepass-brand .brand img{border-radius:1rem;animation:none}
 .brand-illustration{position:relative}
 .logo-slice{position:absolute;inset:0;background:url('/assets/sharepass-approved-logo.jpg') center/100% 100% no-repeat;pointer-events:none;opacity:0}
-.logo-signature{clip-path:inset(0 0 80% 0);animation:brand-signature .7s .04s both}
-.logo-handoff{clip-path:polygon(0 18%,42% 29%,46% 43%,67% 36%,70% 54%,40% 57%,0 47%);animation:brand-handoff .8s .08s both}
-.logo-receiving{clip-path:polygon(37% 55%,100% 52%,100% 74%,52% 67%,38% 61%);animation:brand-receiving .8s .14s both}
-.logo-title{clip-path:inset(72% 0 4% 0);animation:brand-title .7s .26s both}
+.logo-signature{clip-path:inset(0 0 80% 0);animation:brand-signature 1.2s both}
+.logo-handoff{clip-path:polygon(0 18%,42% 29%,46% 43%,67% 36%,70% 54%,40% 57%,0 47%);animation:brand-handoff 1.2s both}
+.logo-receiving{clip-path:polygon(37% 55%,100% 52%,100% 74%,52% 67%,38% 61%);animation:brand-receiving 1.2s both}
+.logo-title{clip-path:inset(72% 0 4% 0);animation:brand-title 1.2s both}
 .brand-motion>img{animation:brand-complete 1.05s both!important}
 @keyframes brand-signature{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:none}}
 @keyframes brand-handoff{from{opacity:0;transform:translate(-22px,-5px) rotate(-2deg)}to{opacity:1;transform:none}}
@@ -123,3 +123,13 @@ body.sharepass-brand{background:#000;color:var(--paper)}
 
 .sharepass-brand .opening{background:#000}
 .sharepass-brand .opening .register-ticket span+span::before{content:"";display:block;width:.55rem;height:.55rem;border:solid currentColor;border-width:2px 2px 0 0;transform:rotate(45deg)}
+.opening-actions{justify-items:center;margin-inline:auto}
+.opening-actions .primary{min-height:56px;width:100%;font-size:1.05rem}
+.opening-actions .menu-link{max-width:94%;min-height:46px}
+.confirmation{display:flex;align-items:center;gap:.7rem;padding:.75rem 0;line-height:1.5}
+.confirmation input{flex:0 0 24px;min-height:24px}
+.admin-list li.personal-message{display:block}.personal-message .wizard-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.65rem}
+.sharepass-wordmark{font-size:clamp(18px,5vw,24px)}
+.history-filters{display:flex;gap:.5rem;flex-wrap:wrap;position:sticky;top:calc(var(--brand-rail-height) + 62px);z-index:5;background:#08090b;padding:.5rem 0}
+.sharepass-brand button:active,.sharepass-brand .menu-link:active{box-shadow:inset 0 2px 5px #0005;transform:translateY(1px)}
+@media(prefers-reduced-motion:reduce){.sharepass-brand button:active,.sharepass-brand .menu-link:active{transform:none}}

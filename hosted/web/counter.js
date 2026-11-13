@@ -12,6 +12,7 @@ const seenStaffMessages=new Set(), uncertainStaffReplies=new Map();
 let staffMessageCursor;
 let deskMode="deposit",boothQrUrl="",queuePollTimer,historyData=[],historyFilter="all",historyCursor,historyLoading=false,historyPending=[];
 let previousQueueTokens;
+let historyLoaded=false;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -114,6 +115,7 @@ function renderCounts(form,limits){
 
 async function loadHistory(more=false){
   if(historyLoading||view!=='history')return;
+  if(!more&&historyLoaded){renderHistory();return;}
   historyLoading=true;
   const current=staff;
   byId('history-status').textContent='Loading booth history…';
@@ -125,6 +127,7 @@ async function loadHistory(more=false){
     historyData=more?[...new Map([...historyData,...entries].map(item=>[item.id,item])).values()]:entries;
     historyPending=Array.isArray(result.pending_handovers)?result.pending_handovers:historyData.filter(item=>item.pending_collection);
     historyCursor=result.next_cursor||null;
+    historyLoaded=true;
     renderHistory();
   }catch(error){
     if(view==='history')byId('history-status').textContent=error.message;
@@ -144,7 +147,7 @@ function renderHistory(){
     const counts=document.createElement('p');counts.textContent='Remaining · '+balance(item.remaining||{});
     const details=document.createElement('small');
     const created=new Date(item.created_at||item.createdAt||'');
-    details.textContent=[pickupLocation(item),pickupLocation(item)===item.packet_id?'':item.packet_id,Number.isNaN(created.getTime())?'':created.toLocaleString([],{
+    details.textContent=[/^Packet |^PKT-/.test(pickupLocation(item))?'':pickupLocation(item),Number.isNaN(created.getTime())?'':created.toLocaleString([],{
       dateStyle:'medium',timeStyle:'short'
     })].filter(Boolean).join(' · ');
     row.append(name,badge,counts,details);
@@ -153,6 +156,20 @@ function renderHistory(){
       const resume=document.createElement('button');resume.type='button';resume.className='primary';resume.textContent='Resume this handover';
       resume.onclick=()=>showHandover({deposit:item,collection:item.pending_collection});
       row.append(reserved,resume);
+    }
+    const open=document.createElement('button');open.type='button';open.textContent='Open receipt';
+    open.onclick=()=>perform(async()=>{
+      const current=await fetchJson('/api/deposits/'+item.id+'/receipt');
+      if(current.deposit.handover_pending){
+        if(current.deposit.pending_collection)showHandover({deposit:current.deposit,collection:current.deposit.pending_collection});
+        else byId('error').textContent='This handover is awaiting confirmation by its operator.';
+      }else if(Object.values(current.deposit.remaining).some(Boolean))showReceipt(current,false);
+      else showBalance(current);
+    });
+    row.append(open);
+    if(available&&!item.handover_pending&&!item.pending_collection){
+      const collect=document.createElement('button');collect.type='button';collect.textContent='Collect passes';
+      collect.onclick=()=>perform(async()=>{const current=await fetchJson('/api/deposits/'+item.id+'/receipt');openLookup(current.collection_code);lookupForm.elements.reference.value=current.deposit.packet_id;byId('lookup-reference').hidden=false;await findPasses();});row.append(collect);
     }
     return row;
   }));
@@ -163,7 +180,7 @@ function renderHistory(){
 
 byId('history-all').onclick=()=>{historyFilter='all';renderHistory();};
 byId('history-pending').onclick=()=>{historyFilter='pending';renderHistory();};
-byId('history-refresh').onclick=()=>loadHistory();
+byId('history-refresh').onclick=()=>{historyLoaded=false;loadHistory();};
 byId('history-more').onclick=()=>loadHistory(true);
 
 function setCounts(form,counts){
@@ -239,14 +256,17 @@ function setRecovery(action){
 async function submit(action){
   try{
     const result=await fetchJson(action.path,action.body);
+    historyLoaded=false;
     setRecovery(null);
     return result;
   }catch(error){
-    if(error.notExecuted) setRecovery(null);
+    if(knownFailure(error)) setRecovery(null);
     else throw new Error('The result is uncertain. Return to the desk and recover the last action before handling more passes.');
     throw error;
   }
 }
+
+function knownFailure(error){return error.notExecuted&&error.status!==401&&error.status!==403;}
 
 function request(path,body){
   if(register)return register.request(path,{...scope,...body,request_id:crypto.randomUUID()});
@@ -273,6 +293,10 @@ async function recover(){
     return refreshQueue(++queueView);
   }
   if(action.path==='/api/codes/refresh')return recoverRefresh(action);
+  if(action.finalize){
+    try{return await finishDirectHandover(await fetchJson(action.path,action.body));}
+    catch(error){if(knownFailure(error)&&recovery===action)setRecovery(null);throw error;}
+  }
   const result=await submit(action);
   if(action.path==='/api/deposits'||action.path.endsWith('/confirm'))showReceipt(result,action.path.startsWith('/api/intakes/'));
   else if(action.path.endsWith('/release'))showHandover(result);
@@ -307,7 +331,7 @@ async function refreshQueue(generation,manual=false){
           text.append(name,counts);
           const reference=document.createElement('span');
           reference.className='queue-reference';
-          reference.textContent=item.queue_ref||'Review';
+          reference.textContent=item.collection_code?'Code '+item.collection_code:'Review';
           text.append(reference);
           button.onclick=()=>perform(()=>openQueueDraft(item.token));
           const actions=document.createElement('div');actions.className='queue-actions';actions.append(button);
@@ -410,6 +434,7 @@ for(const button of document.querySelectorAll('[data-staff-reply]'))button.oncli
 };
 
 function refreshStaffQueue(){
+  historyLoaded=false;
   if(!register&&staff&&!['loading','profile'].includes(view))refreshQueue(++queueView);
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshStaffQueue();});
@@ -462,6 +487,7 @@ for(const mode of ['deposit','collect'])byId('tab-'+mode).onclick=()=>{
 };
 byId('tab-history').onclick=()=>show('history');
 byId('settings-open').onclick=()=>show('settings');
+  byId('desk-refresh').onclick=()=>perform(async()=>{historyLoaded=false;historyData=[];if(view==='history')await loadHistory();else ready(await fetchJson('/api/context'));});
 byId('copy-deposit-link').onclick=()=>{if(boothQrUrl)window.sharePassCopyText(boothQrUrl,byId('desk-link-status'));};
 function reportBrowserStatus(){
   if(!staff?.internal)return;
@@ -472,7 +498,7 @@ function scheduleQueuePoll(){
   queuePollTimer=setTimeout(async()=>{
     if(staff&&!register&&!document.hidden)await refreshQueue(++queueView);
     scheduleQueuePoll();
-  },6000);
+  },60000);
 }
 function announceQueueArrival(count){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
@@ -540,7 +566,9 @@ async function openQueueDraft(token){
   queueReviewForm.reset();
   suggestion=undefined;
   byId('queue-code-options').open=false;
+  byId('queue-code-options').hidden=result.intake_version===2;
   showQueueCode();
+  if(result.intake_version===2)byId('queue-confirm-summary').textContent='The pickup code is generated after you confirm receipt of the passes.';
   byId('queue-name').textContent=result.name;
   byId('queue-counts').textContent=balance(result.quantities);
   const contact=byId('queue-contact');
@@ -695,7 +723,7 @@ function showReceipt(result,privateIntake=false){
   if(privateIntake)rememberIntake(null);
   receipt=result;
   byId('saved-code').textContent = receipt.collection_code;
-  byId('saved-packet').textContent = 'Label the packet '+receipt.deposit.packet_id;
+  byId('saved-packet').textContent = receipt.depositor_name||receipt.deposit.depositor_label||'';
   const expiry=byId('saved-expiry');
   const expiresAt=receipt.deposit.code_expires_at;
   expiry.hidden=!Number.isFinite(expiresAt);
@@ -730,7 +758,12 @@ function openLookup(code=''){
 
 async function findPasses(code=lookupForm.elements.code.value){
   const generation=viewRevision,session=staff;
-  const reference=view==='lookup'&&!byId('lookup-reference').hidden?lookupForm.elements.reference.value.trim():'';
+  let reference=view==='lookup'&&!byId('lookup-reference').hidden?lookupForm.elements.reference.value.trim():'';
+  if(reference.startsWith('https://')){
+    const receipt=draft.receiptDetails(reference);
+    if(receipt.code!==code)throw new Error('The receipt link has a different collection code.');
+    reference=receipt.reference;
+  }
   match=undefined;
   try{
     const result=await request('/api/verify',{collection_code:code,...(reference?{collection_reference:reference}:{})});
@@ -748,7 +781,7 @@ async function findPasses(code=lookupForm.elements.code.value){
   if(!match.claim_token) throw new Error('This packet is stored at another counter.');
   byId('collect-form').reset();
   byId('pickup-location').hidden=false;
-  byId('slot').textContent = pickupLocation(match.deposit);
+  byId('slot').textContent = /^Packet |^PKT-/.test(pickupLocation(match.deposit))?'':pickupLocation(match.deposit);
   byId('pickup-customer').textContent=match.deposit.depositor_label||'Group pickup';
   byId('collect-form').elements.packet.value=match.deposit.packet_id;
   renderCounts('collect',match.deposit.remaining);
@@ -757,9 +790,30 @@ async function findPasses(code=lookupForm.elements.code.value){
 
 async function reserve(){
   const form = byId('collect-form');
-  showHandover(await request('/api/deposits/'+match.deposit.id+'/release',{
+  if(!form.elements.name_confirmed.checked)throw new Error('Confirm the depositor’s name and physical handover.');
+  const path='/api/deposits/'+match.deposit.id+'/release',body={
     packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form)
-  }));
+  };
+  if(register)return finishDirectHandover(await request(path,body));
+  if(recovery)throw new Error('Recover the last action first.');
+  const action={path,body:{...body,request_id:crypto.randomUUID()},finalize:true};
+  setRecovery(action);
+  const controls=[...form.querySelectorAll('button,input')];controls.forEach(control=>control.disabled=true);
+  // Keep physical-handover intent until the confirmation request is journaled.
+  try{await finishDirectHandover(await fetchJson(action.path,action.body));}
+  catch(error){
+    if(knownFailure(error)&&recovery===action)setRecovery(null);
+    if(error.notExecuted)throw error;
+    throw new Error('Recover the saved handover from the desk before handing over any more passes.');
+  }
+  finally{controls.forEach(control=>control.disabled=false);}
+}
+
+async function finishDirectHandover(result){
+  const collection=result.collection;
+  if(register){pending=collection;return confirm();}
+  const action={path:'/api/collections/'+collection.id+'/handover',body:{version:collection.version,handover_confirmed:true,request_id:crypto.randomUUID()}};
+  setRecovery(action);showBalance(await submit(action));
 }
 
 function showHandover(result){
@@ -777,18 +831,20 @@ function showBalance(result){
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();
   if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){
-    compose.append(draft.composeLink(result.depositor_update,'Open depositor WhatsApp draft'));
+    compose.append(draft.composeLink(result.depositor_update,Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
   }
   show('done');
 }
 
 const updatesForm=byId('pickup-updates-form');
-byId('pickup-updates-open').onclick=()=>{
-  updatesForm.reset();
-  updatesForm.elements.phone.value=receipt.depositor_phone||receipt.depositor_receipt?.address||'';
-  byId('pickup-updates-off').hidden=!receipt.update_channel;
+byId('back-from-update').onclick=()=>show('saved');
+byId('pickup-updates-open').onclick=()=>perform(async()=>{
+  const current=await fetchJson('/api/deposits/'+receipt.deposit.id+'/receipt');
+  const target=byId('prepared-depositor-update');target.replaceChildren();
+  if(current.depositor_update)target.append(draft.composeLink(current.depositor_update,'Open depositor WhatsApp draft'));
+  else target.textContent='No depositor WhatsApp contact was provided.';
   show('pickup-updates');
-};
+});
 function saveUpdates(channel){
   perform(async()=>{
     const phone=channel==='whatsapp'?draft.normalizePhone(updatesForm.elements.phone.value):'';
@@ -878,6 +934,11 @@ byId('leave').onclick = leaveDemo;
 
 byId('home').onclick = byId('saved-done').onclick = byId('done-action').onclick = demoAction(()=>show('desk'));
 byId('help').onclick = demoAction(()=>show('guide'));
+byId('help-alerts').onclick=async()=>{
+  const button=byId('help-alerts');button.disabled=true;
+  try{await byId('queue-alerts').onclick();byId('help-alert-status').textContent=byId('queue-alert-status').textContent;}
+  finally{button.disabled=false;}
+};
 byId('deposit-action').onclick = demoAction(()=>{
   if(register)return openDeposit();
   if(recovery)return perform(recover);
@@ -1000,6 +1061,7 @@ for(const [id,action] of [['deposit-form',saveDeposit],['lookup-form',findPasses
   });
 }
 function ready(context){
+  historyLoaded=false;
   if(byId('staff-message').open)byId('staff-message').close();
   staffMessages=[];
   openStaffMessage=undefined;

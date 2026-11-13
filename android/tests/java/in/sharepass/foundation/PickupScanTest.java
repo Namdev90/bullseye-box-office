@@ -20,6 +20,15 @@ public final class PickupScanTest {
         check(message, "0069", "PKT-1234ABCD");
         check("https://wa.me/919876543210?text=" + URLEncoder.encode(message, StandardCharsets.UTF_8), "0069", "PKT-1234ABCD");
         check("SharePass pickup code: 4200", "4200", "");
+        String origin="https://sharepass.example.test",link=WhatsAppDraft.pickupLink(origin,"0069","PKT-1234ABCD");
+        var receipt=PickupScan.parse(link,origin);
+        if(!receipt.code().equals("0069")||!receipt.reference().equals("PKT-1234ABCD"))throw new AssertionError("Receipt identity missing");
+        var shared=PickupScan.parse("SharePass use code 0069.\nReceipt: "+link,origin);
+        if(!shared.equals(receipt))throw new AssertionError("Shared receipt differs");
+        for(String bad:new String[]{link.replace(origin,"https://evil.example"),link+".other",link.replace("0069","4200")}){
+            try{PickupScan.parse("SharePass use code 0069.\nReceipt: "+bad,origin);throw new AssertionError("Accepted mismatched receipt");}
+            catch(IllegalArgumentException expected){}
+        }
         for (String invalid : new String[]{null, "", "069", "00690", "12a4", "PKT-1234ABCD", "use code 0069", "SharePass code 0069",
             "https://evil.example/?text=" + URLEncoder.encode(message, StandardCharsets.UTF_8),
             "https://wa.me@evil.example/?text=" + URLEncoder.encode(message, StandardCharsets.UTF_8),

@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'30',
+  'X-SharePass-Version':'34',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -13,8 +13,13 @@ function decodeAsset(path){
   const bytes=Uint8Array.from(atob(base64),value=>value.charCodeAt(0));
   return {type,bytes};
 }
-function page(path){
-  return new Response(decodeAsset(path).bytes,{headers:{...security,'Content-Type':'text/html; charset=utf-8',
+function page(path,booth=''){
+  let html=new TextDecoder().decode(decodeAsset(path).bytes).replace(/((?:src|href)="\/[^"?]+\.(?:js|css|jpg|png))"/g,'$1?v='+security['X-SharePass-Version']+'-'+ASSET_VERSION+'"');
+  if(booth){
+    const safe=String(booth).replace(/[&<>"']/g,value=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[value]));
+    html=html.replace('</head>','<meta property="og:title" content="SharePass · '+safe+'"><meta property="og:description" content="Leave physical passes at '+safe+' and receive a pickup receipt."></head>');
+  }
+  return new Response(html,{headers:{...security,'Content-Type':'text/html; charset=utf-8',
     'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}});
 }
 async function bodyJson(request){
@@ -144,6 +149,7 @@ export default {async fetch(request,env,ctx){
       if(session){owner=session.id;email=session.email;passwordOwner=true;}
     }
     if(request.method==='GET'&&(path==='/'||path==='/index.html'))return page('/opening.html');
+    if(request.method==='GET'&&path==='/pickup')return page('/pickup.html');
     if(path==='/.well-known/assetlinks.json'&&request.method==='GET'){
       return json([{
         relation:['delegate_permission/common.handle_all_urls'],
@@ -163,7 +169,10 @@ export default {async fetch(request,env,ctx){
       return page('/pair.html');
     }
     if((path.startsWith('/intake/')||path.startsWith('/booth/'))&&request.method==='GET'){
-      return intakeTokenPattern.test(path.split('/')[2]||'')&&path.split('/').length===3?page('/intake.html'):intakeUnavailable();
+      const token=path.split('/')[2];
+      if(!intakeTokenPattern.test(token||'')||path.split('/').length!==3)return intakeUnavailable();
+      const booth=env.DB&&path.startsWith('/booth/')?await env.DB.prepare('SELECT name FROM sharepass_configured_booths WHERE poster_token=?').bind(token).first():null;
+      return page('/intake.html',booth?.name||'Box office');
     }
     if(request.method==='GET'&&path==='/staff'){
       if(!owner){
@@ -250,7 +259,8 @@ export default {async fetch(request,env,ctx){
       if(request.method==='GET'&&path==='/api/context'){
         if(configured)await recordDeviceSeen(env.DB,configured);
         const poster=await boothPosterDetails(env.DB,staff,url.origin);
-        const enriched={...context,...(poster?{booth_url:poster.url}:{})};
+        const booth=await boothConfiguration(env.DB,staff.workspace,staff.booth_id||'B1');
+        const enriched={...context,booth_archived:!!booth?.archived,...(poster?{booth_url:poster.url}:{})};
         return json(staff.admin?{...enriched,pickup_code_reuse_enabled:allowCodeReuse}:enriched);
       }
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);
@@ -273,6 +283,10 @@ export default {async fetch(request,env,ctx){
       if(path==='/api/admin/staff-messages'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);
         return await adminStaffPrompts(request,env,ctx,staff);
+      }
+      if(path==='/api/admin/staff-messages/reply'&&request.method==='POST'){
+        if(!staff.admin||deviceToken)return error('Page not found.',404);
+        return await replyToStaffPrompt(request,env.DB,staff);
       }
       if(path==='/api/admin/code-policy'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);
@@ -318,6 +332,8 @@ export default {async fetch(request,env,ctx){
       }
       if(!staff.name)return error('Register your staff profile first.',403);
       if(path==='/api/staff-messages/reply'&&request.method==='POST')return await replyToStaffPrompt(request,env.DB,staff);
+      const receiptPath=/^\/api\/deposits\/([a-f0-9-]{36})\/receipt$/.exec(path);
+      if(receiptPath&&request.method==='GET')return await currentDepositReceipt(env.DB,staff,receiptPath[1]);
       if(path==='/api/web-push')return await webPushSubscription(request,env,staff);
       if(path==='/api/booth'&&request.method==='GET')return await boothPoster(env.DB,staff,url.origin);
       if(path==='/api/queue'&&request.method==='GET')return await queueList(env.DB,staff);
@@ -381,6 +397,11 @@ export default {async fetch(request,env,ctx){
       return /\/(release|handover)$/.test(path)?await guestReceiptResult(result,env,ctx,staff):result;
     }
     const asset=request.method==='GET'&&!path.endsWith('.html')&&decodeAsset(path);
-    return asset?new Response(asset.bytes,{headers:{...security,'Content-Type':asset.type}}):error('Page not found.',404);
+    if(!asset)return error('Page not found.',404);
+    const etag='"sharepass-'+security['X-SharePass-Version']+'-'+ASSET_VERSION+'-'+encodeURIComponent(path)+'"';
+    const headers={...security,'Content-Type':asset.type,ETag:etag,
+      'Cache-Control':url.search==='?v='+security['X-SharePass-Version']+'-'+ASSET_VERSION?'public, max-age=86400, immutable':'no-cache'};
+    return new Response(request.headers.get('If-None-Match')===etag?null:asset.bytes,
+      {status:request.headers.get('If-None-Match')===etag?304:200,headers});
   }catch{return error('The shared register is unavailable. Recover the same action before another handover.',503,false);}
 }};

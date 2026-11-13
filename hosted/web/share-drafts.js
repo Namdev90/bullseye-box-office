@@ -49,11 +49,23 @@
    'Your planned share: '+counts+' passes.':allocated?
    'Your planned share: '+planned+' passes.\nGroup balance on this receipt: '+counts+' passes.':
    'The receipt lists '+counts+' passes for our group.')+' SharePass by Bullseye Entertainment.\n\n'+
-   (eventName?.trim()?'For '+eventName.trim()+', use code ':'Use code ')+code+(reference?' and pickup reference '+reference:'')+' to collect from '+booth.trim()+(location?.trim()?', '+location.trim():'')+'.'+expires+'\n\n'+
+   (eventName?.trim()?'For '+eventName.trim()+', use code ':'Use code ')+code+(reference&&!/^[0-9]{4}$/.test(code)?' and pickup reference '+reference:'')+' to collect from '+booth.trim()+(location?.trim()?', '+location.trim():'')+'.'+expires+'\n\n'+
+   (reference&&/^[0-9]{4}$/.test(code)?'Receipt: '+receiptUrl(code,reference)+'\n\n':'')+
    'Shared group code. Staff must confirm availability; pickups are not tracked per person.';
   const url=composeUrl(recipient,message);
   if(url.length>1200)throw new Error('Shorten the pickup details for this QR.');
   return Object.freeze({message,url,recipient,name:name.trim()});
+ }
+ function receiptUrl(code,reference,origin=globalThis.location?.origin||'https://sharepass.example.test'){
+  if(!/^[0-9]{4}$/.test(code)||!/^PKT-[A-F0-9]{8}$/.test(reference))throw new Error('Use a current pickup receipt.');
+  const url=new URL(origin);
+  if((url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))||url.origin!==origin)throw new Error('Use the SharePass site origin.');
+  return origin+'/pickup#'+code+'.'+reference;
+ }
+ function receiptDetails(value,origin=globalThis.location?.origin){
+  const url=new URL(value);const match=/^#([0-9]{4})\.(PKT-[A-F0-9]{8})$/.exec(url.hash);
+  if(url.origin!==origin||url.pathname!=='/pickup'||url.search||url.username||url.password||!match)throw new Error('Paste the current SharePass receipt link.');
+  return {code:match[1],reference:match[2]};
  }
  function node(tag,text,className){
   const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;
@@ -186,5 +198,5 @@
   const parent=container.closest('dialog');parent?.addEventListener('close',()=>{if(!parent.open)clear();},{signal});
   window.addEventListener('pagehide',clear,{signal});
  }
- window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,normalizePhone,qrImage,clear});
+ window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,normalizePhone,qrImage,receiptUrl,receiptDetails,clear});
 })();

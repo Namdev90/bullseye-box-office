@@ -39,6 +39,9 @@ final class WhatsAppDraft {
         return message(code,event,booth,location,counts,name,reference,null);
     }
     static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation){
+        return message(code,event,booth,location,counts,name,reference,allocation,"");
+    }
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation,String origin){
         // Validate pickup/contact details through the same rules for either message kind.
         validateDetails(code,event,booth,location,name,reference);
         String quantities=passCounts(counts);
@@ -50,9 +53,14 @@ final class WhatsAppDraft {
                 "Your planned share: "+planned+" passes.\nGroup balance on this receipt: "+quantities+" passes.")+
             " SharePass by Bullseye Entertainment.\n\n"+
             (event.trim().isEmpty()?"Use code ":"For "+event.trim()+", use code ")+code+
-            (reference.isEmpty()?"":" and pickup reference "+reference)+" to collect from "+booth.trim()+
+            (reference.isEmpty()||!origin.isEmpty()?"":" and pickup reference "+reference)+" to collect from "+booth.trim()+
             (location.trim().isEmpty()?"":", "+location.trim())+".\n\n"+
+            (reference.isEmpty()||origin.isEmpty()?"":"Receipt: "+pickupLink(origin,code,reference)+"\n\n")+
             "Shared group code. Staff must confirm availability; pickups are not tracked per person.";
+    }
+    static String pickupLink(String origin,String code,String reference){
+        if(!origin.matches("https://[a-z0-9]+(?:[.-][a-z0-9]+)*")||!code.matches("[0-9]{4}")||!reference.matches("PKT-[A-F0-9]{8}"))throw new IllegalArgumentException("Invalid pickup receipt");
+        return origin+"/pickup#"+code+"."+reference;
     }
     private static void validateDetails(String code,String event,String booth,String location,String name,String reference){
         if(name==null||name.length()>80||name.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Use a name of up to 80 characters");

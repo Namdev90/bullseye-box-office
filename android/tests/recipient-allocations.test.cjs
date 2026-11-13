@@ -30,7 +30,7 @@ test('native formatter receives separate uncoerced original allocations and rece
  assert.match(message,/getJSONObject\("remaining"\)/);
  assert.match(message,/if \(!\(recipient\.quantities instanceof JSONObject\)\) throw/);
  assert.match(message,/allocation = draftCounts\(\(JSONObject\) recipient\.quantities\)/);
- assert.match(message,/optString\("packet_id"\), allocation\)/);
+ assert.match(message,/optString\("packet_id"\), allocation,HostedRegisterClient\.ORIGIN\)/);
  assert.match(message,/counts\.put\(key, quantities\.opt\(key\)\)/);
  assert(!message.includes('optInt('),'Invalid counts must not be coerced or truncated');
  assert(!message.includes('Math.min'),'A group debit cannot be assigned to a person');

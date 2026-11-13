@@ -44,6 +44,11 @@ final class HostedRegisterClient {
     String token() { return saved.optString("token"); }
     boolean hasPending() { return saved.has("pending"); }
     JSONObject receipt() { return saved.optJSONObject("receipt"); }
+    JSONObject openReceipt(String id) throws Exception {
+        JSONObject response=request("/api/deposits/"+id+"/receipt",null);
+        write(copy().put("receipt",response));
+        return response;
+    }
     void rememberUpdateChannel(String channel, String address) throws Exception {
         JSONObject updated=copy();
         JSONObject receipt=updated.optJSONObject("receipt");
@@ -161,9 +166,14 @@ final class HostedRegisterClient {
     }
 
     JSONObject stockChange(String path, JSONObject body) throws Exception {
+        return stockChange(path,body,false);
+    }
+
+    JSONObject stockChange(String path, JSONObject body, boolean finalize) throws Exception {
         if (hasPending()) throw new IOException("Recover the previous action before changing stock.");
         body.put("request_id", UUID.randomUUID().toString());
         JSONObject action = new JSONObject().put("path", path).put("body", body);
+        if (finalize) action.put("finalize",true);
         write(copy().put("pending", action));
         return recover();
     }
@@ -172,7 +182,16 @@ final class HostedRegisterClient {
         JSONObject action = saved.getJSONObject("pending");
         String path = action.getString("path");
         JSONObject body = action.getJSONObject("body");
-        return retryPickup(path, () -> finishStockChange(path, body));
+        JSONObject response=retryPickup(path, () -> finishStockChange(path, body));
+        return action.optBoolean("finalize")&&path.endsWith("/release")?completeConfirmedHandover():response;
+    }
+
+    JSONObject completeConfirmedHandover() throws Exception {
+        JSONObject handover=saved.optJSONObject("handover");
+        if(handover==null||!handover.optBoolean("finalize_confirmed"))throw new IOException("Confirm the physical handover first.");
+        JSONObject collection=handover.getJSONObject("collection");
+        return stockChange("/api/collections/"+collection.getString("id")+"/handover",
+            new JSONObject().put("version",collection.getInt("version")).put("handover_confirmed",true));
     }
 
     static <T> T retryPickup(String path, Callable<T> action) throws Exception {
@@ -223,6 +242,7 @@ final class HostedRegisterClient {
             }
             updated.put("receipt", response);
         } else if (path.endsWith("/release")) {
+            if(saved.optJSONObject("pending")!=null&&saved.getJSONObject("pending").optBoolean("finalize"))response.put("finalize_confirmed",true);
             updated.put("handover", response);
         } else if (path.endsWith("/handover")) {
             updated.remove("handover");

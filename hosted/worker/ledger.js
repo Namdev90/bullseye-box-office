@@ -130,6 +130,27 @@ async function ledgerReceipt(db,owner,requestId){
   return row?{deposit:JSON.parse(row.payload),receipt:JSON.parse(row.receipt).result,pending:!!row.pending}:null;
 }
 
+async function currentDepositReceipt(db,staff,id){
+  const row=await ledgerStatement(db,'SELECT payload FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND booth=?',staff.workspace,id,staff.booth_id||'B1').first();
+  if(!row)return error('Deposit not found at this booth.',404);
+  const deposit=JSON.parse(row.payload),model=ledgerModel();
+  const pending=await ledgerStatement(db,'SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND pending=1',staff.workspace,id).first();
+  const collection=pending?JSON.parse(pending.payload):null;
+  if(collection&&(staff.admin||collection.created_by===staff.operator))model.collections=[collection];
+  const queue=await ledgerStatement(db,`SELECT q.payload FROM sharepass_booth_queue q JOIN sharepass_ledger_requests r
+    ON r.owner=q.workspace AND r.id='booth-'||q.token WHERE r.owner=? AND r.deposit_id=? AND q.confirmed=1 LIMIT 1`,staff.workspace,id).first();
+  const contact=queue?JSON.parse(queue.payload):{};
+  const currentCode=await ledgerStatement(db,'SELECT code FROM sharepass_ledger_codes WHERE owner=? AND event=? AND deposit_id=? ORDER BY code LIMIT 1',staff.workspace,EVENT,id).first();
+  const update=deposit.update_contact;
+  const updatePhone=update?.channel==='whatsapp'?sharePassPhone(update.address):'';
+  const phone=sharePassPhone(contact.phone)||'',remaining=model.passTypes.filter(type=>deposit.remaining[type.id]>0)
+    .map(type=>deposit.remaining[type.id]+' '+type.label).join(' + ');
+  return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
+    recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
+    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,message:'Hi'+((update.name||contact.name)?' '+(update.name||contact.name):'')+'! SharePass deposit update. '+
+      (remaining?'Still available: '+remaining+'.':'All passes in this deposit have been collected.')}}:{})});
+}
+
 async function ledgerVerify(db,owner,body,legacy,model){
   const now=Date.now();
   const failure=()=>error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
@@ -180,10 +201,14 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
   if(path==='/api/verify')return ledgerVerify(db,owner,body,legacy,model);
   const read=(sql,...args)=>ledgerStatement(db,sql,owner,...args).first();
   const isCreate=path==='/api/deposits',isReissue=path==='/api/admin/reissue'||path==='/api/codes/refresh';
+  const needsActiveBooth=isCreate&&!(intake?.booth||intake?.submitted);
   for(let attempt=0;attempt<8;attempt++){
     const previous=await read('SELECT deposit_id,payload FROM sharepass_ledger_requests WHERE owner=? AND id=?',body.request_id);
     if(replayOnly&&!previous)return intakeUnavailable();
     const stored=previous&&JSON.parse(previous.payload);
+    if(!previous&&needsActiveBooth&&(await boothConfiguration(db,owner,body.booth_id))?.archived){
+      return error('This booth is archived. Existing pickups can still be completed.',409);
+    }
     const parts=path.split('/');
     const collectionId=stored?.result.collection?.id||(parts[2]==='collections'?parts[3]:null);
     const link=!previous&&collectionId?await read('SELECT deposit_id FROM sharepass_ledger_collections WHERE owner=? AND id=?',collectionId):null;
@@ -266,6 +291,7 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
     }
     const d=model.deposits.find(item=>item.id===result.deposit.id);
     const statements=[];
+    if(needsActiveBooth)statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_guard(ok) VALUES(NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1))',owner,body.booth_id));
     if(row){
       statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_guard(ok) VALUES(EXISTS(SELECT 1 FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND revision=?))',owner,row.id,row.revision));
       statements.push(ledgerStatement(db,'UPDATE sharepass_ledger_deposits SET revision=revision+1,payload=? WHERE owner=? AND id=?',ledgerJson(d),owner,d.id));
@@ -286,7 +312,7 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
     for(const entry of model.audit)statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_audit(owner,payload) VALUES(?,?)',owner,ledgerJson(entry)));
     if(intake)statements.push(ledgerStatement(db,'UPDATE '+(intake.booth?'sharepass_booth_queue':'sharepass_intakes')+
       ' SET confirmed=1 WHERE workspace=? AND token=?',owner,intake.token));
-    if(row||allowReuse&&result.collection_code)statements.push(ledgerStatement(db,'DELETE FROM sharepass_ledger_guard WHERE ok=1'));
+    if(row||needsActiveBooth||allowReuse&&result.collection_code)statements.push(ledgerStatement(db,'DELETE FROM sharepass_ledger_guard WHERE ok=1'));
     try{await db.batch(statements);return json(result);}
     catch(exception){
       if(!/CHECK constraint failed: ok|UNIQUE constraint failed: (?:sharepass_ledger_(?:codes|requests|deposits)\.|index 'sharepass_ledger_packet_id')/i.test(String(exception)+' '+String(exception.cause||'')))throw exception;

@@ -54,6 +54,20 @@ function draftPage(){
 const example={name:'Synthetic recipient',phone:'+1 202 555 0101',code:'K7M4',reference:'PKT-1234ABCD',
  eventName:'Concept – Hall & Friends / #2',booth:'Box office',quantities:{normal:1,vip:2}};
 
+test('numeric receipts keep technical identity in a validated receipt link',()=>{
+ const {drafts}=draftTools({URL,location:{origin:'https://sharepass.example.test'}});
+ const result=drafts.depositDraft({...example,code:'0007'});
+ assert(!result.message.includes('pickup reference'));
+ const link='https://sharepass.example.test/pickup#0007.PKT-1234ABCD';
+ assert(result.message.includes(link));
+ assert.equal(JSON.stringify(drafts.receiptDetails(link)),JSON.stringify({code:'0007',reference:'PKT-1234ABCD'}));
+ for(const invalid of ['https://evil.example/pickup#0007.PKT-1234ABCD',
+  'https://sharepass.example.test/pickup?extra=1#0007.PKT-1234ABCD',
+  'https://sharepass.example.test/pickup#0007.PKT-1234ABCD.other',
+  'https://user@sharepass.example.test/pickup#0007.PKT-1234ABCD'])assert.throws(()=>drafts.receiptDetails(invalid));
+ assert.throws(()=>drafts.receiptUrl('0007','PKT-1234ABCD','http://untrusted.example'));
+});
+
 test('each recipient gets their own encoded draft with the receipt reference and exact stock',()=>{
  const {drafts}=draftTools();
  const first=drafts.depositDraft(example);

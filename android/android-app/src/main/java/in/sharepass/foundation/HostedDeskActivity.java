@@ -21,6 +21,8 @@ import android.view.MotionEvent;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.speech.tts.TextToSpeech;
 import android.widget.EditText;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
@@ -54,6 +56,8 @@ public final class HostedDeskActivity extends Activity {
     private Button staffMessageButton;
     private AlertDialog staffMessageDialog;
     private HostedRegisterClient client;
+    private TextToSpeech speech;
+    private boolean speechReady;
     private JSONObject context;
     private LinearLayout content;
     private DeskWindow viewport;
@@ -74,6 +78,9 @@ public final class HostedDeskActivity extends Activity {
     private LinearLayout historyRows;
     private final HashSet<String> historySeenIds = new HashSet<>();
     private String historyCursor;
+    private boolean historyOnlyPending;
+    private JSONObject historySnapshot;
+    private String historySession="";
     private com.journeyapps.barcodescanner.DecoratedBarcodeView scanner;
     private boolean scanningSetup;
     private String scannerSession = "";
@@ -157,6 +164,7 @@ public final class HostedDeskActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        speech=new TextToSpeech(this, result->{speechReady=result==TextToSpeech.SUCCESS;});
         updates = new AppUpdates(this, this::updateIdle);
         requestedQueue = getIntent().getBooleanExtra("openBoothQueue", false);
         if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -178,7 +186,7 @@ public final class HostedDeskActivity extends Activity {
         super.onResume();
         foreground = true;
         QueuePush.counterVisible(true);
-        QueuePush.listen(() -> handler.post(() -> scheduleQueue(0)));
+        QueuePush.listen(() -> handler.post(() -> {historySnapshot=null;scheduleQueue(0);}));
         if (context != null && !context.optString("staff_label", "").isEmpty() && !context.isNull("staff_label")) {
             QueuePush.sync(this, client.token());
         }
@@ -203,6 +211,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
+        if(speech!=null)speech.stop();
         if (scanner != null) scanner.pause();
         if (staffMessageDialog != null) staffMessageDialog.dismiss();
         updates.stop();
@@ -223,6 +232,7 @@ public final class HostedDeskActivity extends Activity {
         releaseQr();
         worker.shutdown();
         polling.shutdown();
+        if(speech!=null){speech.stop();speech.shutdown();}
         super.onDestroy();
     }
     @android.annotation.SuppressLint("GestureBackNavigation")
@@ -270,7 +280,7 @@ public final class HostedDeskActivity extends Activity {
             viewport = new DeskWindow(this);
             setContentView(viewport);
         }
-        viewport.show(scroll, 680);
+
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
         LinearLayout toolbar = new LinearLayout(this);
@@ -285,11 +295,14 @@ public final class HostedDeskActivity extends Activity {
         }
         TextView label = new TextView(this);
         String booth = boothLabel();
-        label.setText(booth.isEmpty() ? "SHAREPASS" : "SHAREPASS   /   " + booth);
-        label.setTextColor(DeskSurface.BRASS);
-        label.setTextSize(11);
+        String staffName=context==null?"":context.optString("staff_label","");
+        label.setText(booth.isEmpty()?"SharePass":booth+(staffName.isEmpty()?"":" · "+staffName));
+        label.setTextColor(DeskSurface.MUTED);
+        label.setTextSize(12);
+        label.setMaxLines(2);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setTypeface(Typeface.DEFAULT_BOLD);
-        label.setLetterSpacing(.12f);
+        label.setLetterSpacing(.02f);
         label.setPadding(goBack == null ? 0 : dp(12), 0, dp(12), 0);
         int labelIndex = toolbar.getChildCount();
         toolbar.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
@@ -298,17 +311,22 @@ public final class HostedDeskActivity extends Activity {
         toolbar.addView(spacer, new LinearLayout.LayoutParams(0, 0, 1));
         if ("desk".equals(name)) {
             Button account = new Button(this);
-            account.setText("Settings");
+            account.setText("↪");
+            account.setContentDescription("Log out");
             DeskSurface.button(account, false);
-            account.setOnClickListener(view -> deskOptions());
+            account.setOnClickListener(view -> logout());
+            Button refresh=new Button(this);refresh.setText("↻");refresh.setContentDescription("Refresh SharePass");DeskSurface.roundButton(refresh);
+            refresh.setOnClickListener(view -> refreshQueueNow());toolbar.addView(refresh,new LinearLayout.LayoutParams(dp(48),dp(48)));
             toolbar.addView(account, new LinearLayout.LayoutParams(-2, -2));
-        } else if (!"opening".equals(name)) {
+        }
+        if (!"opening".equals(name)) {
             Button help = new Button(this);
             help.setText("?");
             help.setContentDescription("Help for " + title);
             DeskSurface.roundButton(help);
             help.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(title)
-                .setMessage(helpText(title, name)).setPositiveButton("Got it", null).show());
+                .setMessage(helpText(title, name)).setPositiveButton("Got it", null)
+                .setNeutralButton("Notifications",(dialog,which)->openAlertSettings()).show());
             toolbar.addView(help, new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
         header.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
@@ -327,9 +345,9 @@ public final class HostedDeskActivity extends Activity {
             }
         });
         BrandArtwork brand = new BrandArtwork(this, true);
-        content.addView(brand, new LinearLayout.LayoutParams(-1, dp(64)));
-        content.addView(header);
-        content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(15)));
+        LinearLayout frame=new LinearLayout(this);frame.setOrientation(LinearLayout.VERTICAL);
+        frame.addView(brand,new LinearLayout.LayoutParams(-1,dp(64)));
+        frame.addView(header);frame.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));viewport.show(frame,680);
         TextView heading = line(title, 30, true);
         heading.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
@@ -502,7 +520,8 @@ public final class HostedDeskActivity extends Activity {
             if (client.token().isEmpty()) login();
             else run(client::context, this::signedIn);
         });
-        button("Connect phone", () -> run(() -> client.connectDevice("invite", invite), this::connected), true);
+        button("Retry connection", () -> run(() -> client.connectDevice("invite", invite), this::connected), true);
+        handler.post(()->run(()->client.connectDevice("invite",invite),this::connected));
     }
     private void connected(JSONObject result) {
         clearQueue();
@@ -549,6 +568,9 @@ public final class HostedDeskActivity extends Activity {
             button("Recover last action", () -> run(client::recover, this::stockResult), true);
             return;
         }
+        if (client.handover() != null && client.handover().optBoolean("finalize_confirmed")) {
+            button("Recover confirmed handover",()->run(client::completeConfirmedHandover,this::stockResult),true);return;
+        }
         if (client.handover() != null) {
             button("Resume handover", () -> handover(client.handover()), true);
             return;
@@ -571,6 +593,8 @@ public final class HostedDeskActivity extends Activity {
         } else if (deskPane == 2) {
             line("History", 23, true);
             line("Recent deposits and handovers for this booth.", 16, false);
+            button(historyOnlyPending?"Show all deposits":"Show pending handovers",()->{historyOnlyPending=!historyOnlyPending;desk();},false);
+            button("Refresh history",()->{historySnapshot=null;desk();},false);
             historyRows = new LinearLayout(this);
             historyRows.setOrientation(LinearLayout.VERTICAL);
             content.addView(historyRows);
@@ -623,6 +647,7 @@ public final class HostedDeskActivity extends Activity {
         content.addView(queueRows);
         queueSnapshot = "";
         renderQueueRows();
+        if(!cached.isEmpty()){scheduleQueue(0);return;}
         String session = client.token();
         polling.execute(() -> {
             try {
@@ -670,9 +695,11 @@ public final class HostedDeskActivity extends Activity {
         rows.addView(loading);
         polling.execute(() -> {
             try {
-                JSONObject result = client.request("/api/history?limit=20" + (cursor.isEmpty() ? "" : "&cursor=" + Uri.encode(cursor)), null);
+                JSONObject result = cursor.isEmpty()&&historySnapshot!=null&&session.equals(historySession)?historySnapshot:
+                    client.request("/api/history?limit=20" + (cursor.isEmpty() ? "" : "&cursor=" + Uri.encode(cursor)), null);
                 runOnUiThread(() -> {
                     if (isDestroyed() || rows != historyRows || !session.equals(client.token())) return;
+                    if(cursor.isEmpty()){historySnapshot=result;historySession=session;}
                     rows.removeView(loading);
                     JSONArray deposits = result.optJSONArray("deposits");
                     if ((deposits == null || deposits.length() == 0) && cursor.isEmpty()) {
@@ -693,18 +720,19 @@ public final class HostedDeskActivity extends Activity {
                         addHistoryCard(rows, deposit);
                     }
                     historyCursor = result.isNull("next_cursor") ? "" : result.optString("next_cursor");
-                    if (!historyCursor.isEmpty()) {
+                    if (!historyOnlyPending && !historyCursor.isEmpty()) {
                         String next = historyCursor;
                         Button more = new Button(this); more.setText("Load more"); DeskSurface.button(more, false); rows.addView(more);
                         more.setOnClickListener(view -> { rows.removeView(more); loadHistory(next); });
                     }
                 });
             } catch (Exception failure) {
-                runOnUiThread(() -> { if (rows == historyRows) loading.setText("History is unavailable. Reconnect in Settings and try again."); });
+                runOnUiThread(() -> { if (rows == historyRows) loading.setText("History is unavailable. Use Refresh and try again."); });
             }
         });
     }
     private void addHistoryCard(LinearLayout rows, JSONObject deposit) {
+        if(historyOnlyPending&&!deposit.optBoolean("handover_pending")&&deposit.optJSONObject("pending_collection")==null)return;
         String id = deposit.optString("id");
         if (id.isEmpty() || !historySeenIds.add(id)) return;
         LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
@@ -712,7 +740,7 @@ public final class HostedDeskActivity extends Activity {
         LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2); bounds.topMargin = dp(10);
         rows.addView(card, bounds);
         TextView detail = new TextView(this); detail.setTextColor(DeskSurface.INK); detail.setTextSize(17);
-        detail.setText(deposit.optString("depositor_label", "Deposit") + " · " + deposit.optString("packet_id")
+        detail.setText(deposit.optString("depositor_label", "Deposit")
             + "\nRemaining · " + balance(deposit.optJSONObject("remaining")));
         card.addView(detail);
         JSONObject pending = deposit.optJSONObject("pending_collection");
@@ -726,6 +754,23 @@ public final class HostedDeskActivity extends Activity {
             Button resume = new Button(this); resume.setText("Resume handover"); DeskSurface.button(resume, true); card.addView(resume);
             resume.setOnClickListener(view -> run(() -> { client.resumeHandover(deposit, pending); return client.handover(); }, this::handover));
         }
+        Button open=new Button(this);open.setText("Open receipt");DeskSurface.button(open,false);card.addView(open);
+        open.setOnClickListener(view->run(()->client.openReceipt(deposit.optString("id")),result->{
+            JSONObject current=result.getJSONObject("deposit"),unfinished=current.optJSONObject("pending_collection");
+            if(current.optBoolean("handover_pending")){
+                if(unfinished!=null){client.resumeHandover(current,unfinished);handover(client.handover());}
+                else note("This handover is awaiting confirmation by its operator.");
+            }else if(hasAvailable(current.optJSONObject("remaining")))receipt(result);
+            else stockResult(result.put("action_path","/api/collections/history/handover"));
+        }));
+        if(pending==null&&!deposit.optBoolean("handover_pending")&&hasAvailable(deposit.optJSONObject("remaining"))){
+            Button collect=new Button(this);collect.setText("Collect passes");DeskSurface.button(collect,false);card.addView(collect);
+            collect.setOnClickListener(view->run(()->client.openReceipt(deposit.optString("id")),result->verifyPickup(result.getString("collection_code"),result.getJSONObject("deposit").getString("packet_id"))));
+        }
+    }
+    private static boolean hasAvailable(JSONObject quantities){
+        for(String key:KEYS)if(quantities!=null&&quantities.optInt(key)>0)return true;
+        return false;
     }
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         if (updates != null && event.getActionMasked() == MotionEvent.ACTION_DOWN) updates.cancelDownload();
@@ -750,18 +795,7 @@ public final class HostedDeskActivity extends Activity {
         }
         return super.dispatchTouchEvent(event);
     }
-    private void deskOptions() {
-        page("Account and settings", "desk-options", this::desk);
-        line("Staff · " + context.optString("staff_label", "Counter"), 18, true);
-        if (!context.isNull("designation")) line(context.optString("designation"), 16, false);
-        if (updates.isEnabled()) button("App updates", updates::options, false);
-        button("Refresh / reconnect", this::refreshQueueNow, false);
-        button(notificationsAllowed() ? "Alert and sound settings" : "Enable booth alerts",
-            notificationsAllowed() ? this::openAlertSettings : this::askNotificationPermission, false);
-        button("Sign out", () -> new AlertDialog.Builder(this).setMessage("Sign out of SharePass on this phone?")
-            .setNegativeButton("Stay", null).setPositiveButton("Sign out", (dialog, which) ->
-                run(() -> { client.logout(); return null; }, result -> { clearQueue(); startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)); finish(); })).show(), false);
-    }
+
     private boolean updateIdle() {
         if (!foreground || busy || context == null || client == null || client.hasPending() || client.handover() != null
                 || !("desk".equals(screen) || "desk-options".equals(screen))) return false;
@@ -793,9 +827,8 @@ public final class HostedDeskActivity extends Activity {
         QueueNotifications.cancel(this);
     }
     private void refreshQueueNow() {
-        manualQueueRefresh=true;
-        note("Connecting…");
-        scheduleQueue(0);
+        historySnapshot=null;
+        run(client::context,this::signedIn);
     }
     private void scheduleQueue(long delay) {
         if (delay >= 2000 && context != null && context.optBoolean("push_first")) delay = Math.max(delay, 15_000);
@@ -845,7 +878,7 @@ public final class HostedDeskActivity extends Activity {
                         manualQueueRefresh=false;
                         if ("desk".equals(screen) || "queue".equals(screen) || "desk-options".equals(screen)) note("Connected. " + waiting.size() + " waiting.");
                     } else if (queueRows != null && !busy) note("");
-                    scheduleQueue(3500);
+                    scheduleQueue(60000);
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -855,7 +888,7 @@ public final class HostedDeskActivity extends Activity {
                         if (!busy) failed(error);
                     } else if (queueRows != null || manualQueueRefresh) note("Connection lost. Reconnecting automatically…");
                     manualQueueRefresh=false;
-                    scheduleQueue(7000);
+                    scheduleQueue(60000);
                 });
             }
         });
@@ -952,12 +985,16 @@ public final class HostedDeskActivity extends Activity {
     private void openAlertSettings() {
         QueueNotifications.ensureChannel(this);
         Intent settings;
-        if (Build.VERSION.SDK_INT >= 26) {
+        if(Build.VERSION.SDK_INT>=26&&!notificationsAllowed()){
+            settings=new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName());
+        } else if (Build.VERSION.SDK_INT >= 26) {
             settings = new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                 .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName())
                 .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, QueueNotifications.CHANNEL);
         } else settings = new Intent(android.provider.Settings.ACTION_SOUND_SETTINGS);
-        startActivity(settings);
+        try{startActivity(settings);}
+        catch(android.content.ActivityNotFoundException unavailable){note("Open SharePass notifications in Android settings.");}
     }
     private void askNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -1029,7 +1066,7 @@ public final class HostedDeskActivity extends Activity {
                     pairingInvite(invite);
                 } else {
                     try {
-                        PickupScan.Details pickup = PickupScan.parse(value);
+                        PickupScan.Details pickup = PickupScan.parse(value,HostedRegisterClient.ORIGIN);
                         desk(pickup.code());
                         verifyPickup(pickup.code(), pickup.reference());
                     } catch (IllegalArgumentException invalid) { desk(); note("Scan a SharePass pickup QR or enter its four-digit code."); }
@@ -1104,7 +1141,7 @@ public final class HostedDeskActivity extends Activity {
     private void queueReview(String token, JSONObject draft, String suggested) throws Exception {
         JSONObject quantities = draft.getJSONObject("quantities");
         page("Match the customer and passes", "queue-review", this::desk);
-        line(draft.optString("name") + " · " + draft.optString("queue_ref"), 22, true);
+        line(draft.optString("name") + (draft.optString("collection_code").isEmpty()?"":" · "+draft.optString("collection_code")), 22, true);
         line(balance(quantities), 24, true);
         String phone = draft.optString("phone");
         if (!phone.isEmpty()) line("Depositor WhatsApp · " + phone, 16, false);
@@ -1123,7 +1160,7 @@ public final class HostedDeskActivity extends Activity {
             if (!suggested.isEmpty()) body.put("suggested_code", suggested);
             return client.stockChange("/api/queue/" + token + "/confirm", body);
         }, this::stockResult), true);
-        button("Refresh code suggestion", () -> run(() -> client.request("/api/codes/suggest?exclude=" + suggested, null),
+        if(draft.optInt("intake_version")!=2)button("Refresh code suggestion", () -> run(() -> client.request("/api/codes/suggest?exclude=" + suggested, null),
             result -> queueReview(token, draft, result.getString("code"))), false);
     }
     private void depositConfirmation(Wizard wizard, String path, DepositDraft draft, JSONObject reviewed) {
@@ -1183,7 +1220,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleIntake(1000);
     }
     private void showQr(String value, String label) throws Exception {
-        qr = QrPreview.create(this, value, label, () -> "desk".equals(screen) ? Math.min(viewport.paneHeight(), dp(310)) : viewport.paneHeight());
+        qr = QrPreview.create(this, value, label, () -> "desk".equals(screen) ? Math.max(dp(160),Math.min(viewport.paneHeight()-dp(350),dp(420))) : viewport.paneHeight());
         content.addView(qr, qrBounds());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
@@ -1217,7 +1254,7 @@ public final class HostedDeskActivity extends Activity {
                         else if ("confirmed".equals(stateName)) {
                             page("Deposit already confirmed", "confirmed", this::desk);
                             button("Start another deposit", () -> run(client::startIntake, this::intake), true);
-                        } else scheduleIntake(2000);
+                        } else scheduleIntake(15000);
                     } catch (Exception error) { failed(error); }
                 });
             } catch (Exception error) {
@@ -1229,7 +1266,7 @@ public final class HostedDeskActivity extends Activity {
                     if (!"intake".equals(screen)) return;
                     if (error instanceof HostedRegisterClient.Rejected && ((HostedRegisterClient.Rejected) error).status < 500) {
                         button("Generate another QR", () -> run(client::startIntake, this::intake), true);
-                    } else scheduleIntake(5000);
+                    } else scheduleIntake(15000);
                 });
             }
         });
@@ -1252,6 +1289,7 @@ public final class HostedDeskActivity extends Activity {
         wizard.start();
     }
     private void stockResult(JSONObject result) throws Exception {
+        historySnapshot=null;
         String path = result.getString("action_path");
         if (path.startsWith("/api/queue/") && context.optBoolean("push_first")) scheduleQueue(0);
         if (path.endsWith("/release")) handover(result);
@@ -1260,7 +1298,7 @@ public final class HostedDeskActivity extends Activity {
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
-                button("Open depositor WhatsApp draft", () -> compose(
+                button(hasAvailable(result.getJSONObject("deposit").getJSONObject("remaining"))?"Depositor update":"Final depositor update", () -> compose(
                     update.optString("address"), update.optString("message")), false);
             }
             button("Done", this::desk, true);
@@ -1271,6 +1309,8 @@ public final class HostedDeskActivity extends Activity {
         line("Collection code", 15, true);
         TextView code = line(result.optString("collection_code"), 44, true);
         code.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        code.setFocusable(true);
+        code.setOnClickListener(view->speakDigits(code.getText().toString()));
         code.setTextColor(DeskSurface.BRASS);
         code.setBackground(DeskSurface.panel(this));
         code.setPadding(dp(14), dp(9), dp(14), dp(9));
@@ -1286,7 +1326,7 @@ public final class HostedDeskActivity extends Activity {
             content.addView(row);
         }
         JSONObject deposit = result.optJSONObject("deposit");
-        line("Receipt reference · " + deposit.optString("packet_id"), 17, false);
+        line(result.optString("depositor_name",deposit.optString("depositor_label")),17,false);
         if (deposit.optLong("code_expires_at") > 0) {
             String time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
                 .format(new java.util.Date(deposit.optLong("code_expires_at")));
@@ -1295,7 +1335,7 @@ public final class HostedDeskActivity extends Activity {
         JSONObject proof = result.optJSONObject("depositor_receipt");
         button("Share code", () -> sharing(result), true);
         if (proof != null) button("Send receipt to depositor", () -> compose(proof.optString("address"), proof.optString("message")), false);
-        button("Pickup updates", () -> pickupPreferences(result), false);
+        button("Depositor update",()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}),false);
 
         button("Done", this::desk, false);
     }
@@ -1353,6 +1393,7 @@ public final class HostedDeskActivity extends Activity {
         };
         autoAdvance(input, value -> value.matches("[0-9]{4}"), find);
         drawKeypad(input);
+        line("or",16,false);
         button("Scan pickup QR", () -> scanQr(false), false);
         retryLookup = button("Retry lookup", find, false);
         retryLookup.setVisibility(initial.matches("[0-9]{4}") ? View.VISIBLE : View.GONE);
@@ -1405,7 +1446,7 @@ public final class HostedDeskActivity extends Activity {
             String key=keys.substring(i,i+1);
             Button button = keypadButton(key,key,() -> {
                 input.requestFocus();
-                if (input.length()<4) { input.append(key);input.setSelection(input.length()); }
+                if (input.length()<4) { speakDigits(key);input.append(key);input.setSelection(input.length()); }
             });
             keysGrid.addView(button, keyBounds(i, preferredColumns));
         }
@@ -1433,30 +1474,40 @@ public final class HostedDeskActivity extends Activity {
         return button;
     }
     private void prepare(JSONObject result, String code) throws Exception {
-        JSONObject deposit = result.getJSONObject("deposit");
-        if (result.isNull("claim_token")) { note("This packet cannot be collected at this counter."); return; }
-        JSONObject available = deposit.getJSONObject("remaining");
-        String packetId = deposit.getString("packet_id");
-
-        int[] selected = new int[KEYS.length];
-        Wizard wizard = new Wizard(() -> desk(code), () -> {});
-        String location = deposit.getString("location");
-        if (!location.startsWith("Packet ")) wizard.review("Find the packet", "Storage reference · " + location, "Next");
-        quantitySteps(wizard, selected, available);
-        wizard.steps.add((previous, next) -> {
-            page("Prepare pickup", "prepare", previous);
-            try {
-                line("Packet · " + packetId, 21, true);
-                line("Depositor · " + deposit.optString("depositor_label", "Not provided"), 17, false);
-                JSONObject amounts = readQuantities(selected);
-                line(balance(amounts), 21, true);
-                line("Check these passes in your hands, then prepare the handover.", 16, false);
-                button("Prepare handover", () -> run(() -> client.stockChange("/api/deposits/" + deposit.getString("id") + "/release",
-                    new JSONObject().put("packet_id", packetId).put("claim_token", result.getString("claim_token"))
-                        .put("version", deposit.getInt("version")).put("quantities", amounts)), this::stockResult), true);
-            } catch (Exception error) { note(error.getMessage()); }
-        });
-        wizard.start();
+        JSONObject deposit=result.getJSONObject("deposit");
+        if(result.isNull("claim_token")){note("Use the booth shown on the receipt.");return;}
+        JSONObject available=deposit.getJSONObject("remaining");
+        page("Hand over passes","prepare",()->desk(code));
+        line("Depositor · "+deposit.optString("depositor_label","Not provided"),21,true);
+        String location=deposit.optString("location");
+        if(!location.startsWith("Packet ")&&!location.startsWith("PKT-"))line(location,17,false);
+        int[] selected=new int[KEYS.length];TextView[] values=new TextView[KEYS.length];
+        for(int i=0;i<KEYS.length;i++){
+            final int index=i,maximum=available.optInt(KEYS[i]);if(maximum==0)continue;
+            LinearLayout row=new LinearLayout(this);row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView label=new TextView(this);label.setText(LABELS[i]+" · "+maximum+" available");label.setTextColor(DeskSurface.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+            TextView count=new TextView(this);count.setText("0");count.setTextColor(DeskSurface.INK);count.setGravity(android.view.Gravity.CENTER);count.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);values[i]=count;
+            row.addView(stepButton("−","Decrease "+LABELS[i],()->setQuantity(selected,index,Math.max(0,selected[index]-1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));
+            row.addView(count,new LinearLayout.LayoutParams(dp(36),-2));
+            row.addView(stepButton("+","Increase "+LABELS[i],()->setQuantity(selected,index,Math.min(maximum,selected[index]+1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(row);
+        }
+        button("Select all available",()->{for(int i=0;i<KEYS.length;i++)if(values[i]!=null)setQuantity(selected,i,available.optInt(KEYS[i]),values[i]);},false);
+        CheckBox confirmed=new CheckBox(this);confirmed.setText("I confirmed the depositor’s name and handed over these passes.");confirmed.setTextColor(DeskSurface.INK);confirmed.setMinHeight(dp(48));content.addView(confirmed);
+        Button finish=button("Confirm handover",()->{
+            try{JSONObject amounts=readQuantities(selected);run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",
+                new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts),true),this::stockResult);}
+            catch(Exception error){note(error.getMessage());}
+        },true);
+        finish.setEnabled(false);confirmed.setOnCheckedChangeListener((button,checked)->finish.setEnabled(checked));
+    }
+    private void speakDigits(String value){
+        android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
+        if(!speechReady||!value.matches("[0-9]{1,4}")||access!=null&&access.isTouchExplorationEnabled())return;
+        speech.speak(value.replaceAll("(?<=.)(?=.)"," "),TextToSpeech.QUEUE_FLUSH,null,"sharepass-code");
+    }
+    private void logout(){
+        new AlertDialog.Builder(this).setTitle("Log out of SharePass?").setNegativeButton("Stay",null)
+            .setPositiveButton("Log out",(dialog,which)->run(()->{client.logout();return null;},result->{clearQueue();startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));finish();})).show();
     }
     private void handover(JSONObject result) {
         JSONObject collection = result.optJSONObject("collection");
@@ -1672,7 +1723,7 @@ public final class HostedDeskActivity extends Activity {
             allocation = draftCounts((JSONObject) recipient.quantities);
         }
         return WhatsAppDraft.message(receipt.getString("collection_code"), "", context.optString("booth_label","Box office"),
-            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation);
+            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation,HostedRegisterClient.ORIGIN);
     }
     private static Map<String,Object> draftCounts(JSONObject quantities) {
         Map<String,Object> counts = new LinkedHashMap<>();

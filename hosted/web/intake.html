@@ -38,16 +38,17 @@
         <p id="allocation-balance" role="status" hidden></p>
         <p id="customer-ready" class="customer-ready" role="status" hidden>✓ Ready to send</p>
       </fieldset>
-      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to staff</button></div>
+      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to booth</button></div>
       <p class="intake-hint">Confirmation appears here automatically. Allow notifications when asked to receive a receipt alert.</p>
     </form>
     <section id="customer-receipt" class="stack" hidden aria-label="Deposit receipt">
       <p id="receipt-state" role="status"></p>
       <div id="receipt-share" class="stack"></div>
       <p class="quiet-status" id="receipt-sync-status" role="status">Checking for staff confirmation automatically…</p>
-      <button id="check-receipt" type="button">Refresh receipt</button>
+      <button id="check-receipt" type="button" hidden>Refresh receipt</button>
       <button id="receipt-alerts" type="button" hidden>Enable receipt alerts</button>
       <p id="receipt-alert-status" role="status" hidden></p>
+      <p class="intake-hint">You can stop SharePass alerts in your browser’s notification settings.</p>
       <a id="finish-receipt" class="menu-link" href="/">Done</a>
     </section>
     <p id="customer-error" class="error" role="alert"></p>

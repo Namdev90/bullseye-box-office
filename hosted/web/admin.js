@@ -17,6 +17,7 @@ const openInvite=byId('open-invite-form');
 const refreshDevices=byId('refresh-devices');
 let busy=false, reissueAttempt;
 let messageBooths=new Map(), messageAttempt, sendingMessage=false;
+const adminDeferred=new Set(),adminReplying=new Set();
 const messageForm=byId('staff-message-form');
 
 async function request(path,body){
@@ -40,13 +41,13 @@ function item(title,detail){
 
 function renderSetup(data){
   const boothNames=new Map(data.booths.map(booth=>[booth.id,booth.name]));
-  messageBooths=boothNames;
+  messageBooths=new Map([...boothNames,["all","All"]]);
   const booth=messageForm.elements.booth_id;
   const selected=booth.value;
-  booth.replaceChildren(...data.booths.map(item=>new Option(item.name,item.id)));
+  booth.replaceChildren(new Option('All','all'),...data.booths.filter(item=>!item.archived).map(item=>new Option(item.name,item.id)));
   if(boothNames.has(selected))booth.value=selected;
   const staffNames=new Map(data.staff.map(person=>[person.id,person.name]));
-  boothList.replaceChildren(...data.booths.map(booth=>item(booth.name,booth.location||'Pickup location not set')));
+  boothList.replaceChildren(...data.booths.map(booth=>{const row=item(booth.name,booth.archived?'Archived':booth.location||'Pickup location not set');if(!booth.archived){const remove=document.createElement('button');remove.type='button';remove.textContent='Delete booth';remove.onclick=()=>{if(confirm('Archive '+booth.name+'? Existing pickups and history will be retained.'))updateSetup({action:'archive-booth',booth_id:booth.id,confirmed:true},'Booth archived.');};row.append(remove);}return row;}));
   deviceList.replaceChildren(...data.devices.map(device=>{
     const status=device.active?(device.paired?'Connected':'Waiting for setup'):'Revoked';
     const lastSeen=device.last_seen_at?new Date(device.last_seen_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'';
@@ -55,7 +56,7 @@ function renderSetup(data){
     const needsUpdate=device.platform!=='web'&&Number.isSafeInteger(device.app_version_code)&&latest?.accepted_at>0&&device.app_version_code<latest.version_code;
     const release=needsUpdate?'Update available · '+latest.version_name:'';
     const notifications=device.notifications_enabled===true?'Notifications on':device.notifications_enabled===false?'Notifications off':'';
-    const row=item(device.staff_name||staffNames.get(device.staff_id)||device.label,[boothNames.get(device.booth_id),device.designation,status,app,release,notifications,lastSeen?'Last seen '+lastSeen:''].filter(Boolean).join(' · '));
+    const row=item(device.staff_name||staffNames.get(device.staff_id)||device.label,[boothNames.get(device.booth_id),status,app,release,notifications,lastSeen?'Last seen '+lastSeen:''].filter(Boolean).join(' · '));
     if(device.active){
       const revoke=document.createElement('button');
       revoke.type='button';
@@ -70,7 +71,7 @@ function renderSetup(data){
   if(!data.devices.length)deviceList.append(item('No devices yet','Set up a staff device to connect it to a booth.'));
   for(const select of [inviteForm.elements.booth_id,reissueForm.elements.booth_id]){
     const previous=select.value;
-    select.replaceChildren(...data.booths.map(booth=>{
+    select.replaceChildren(...data.booths.filter(booth=>!booth.archived).map(booth=>{
       const option=document.createElement('option');
       option.value=booth.id;
       option.textContent=booth.name;
@@ -78,7 +79,7 @@ function renderSetup(data){
     }));
     if(boothNames.has(previous))select.value=previous;
   }
-  openInvite.disabled=!data.booths.length;
+  openInvite.disabled=!data.booths.some(booth=>!booth.archived);
 }
 
 async function updateSetup(body,message){
@@ -109,16 +110,48 @@ for(const button of nav)button.onclick=()=>panel(button.dataset.panel);
 async function loadStaffMessages(body){
   const status=byId('staff-messages-status');
   try{
-    const {messages}=await request('/api/admin/staff-messages',body);
+    const {messages,inbox=[]}=await request('/api/admin/staff-messages',body);
     const labels={done:'Done',working:'Working on it',help:'Need help'};
     byId('staff-messages-list').replaceChildren(...messages.map(message=>item(
       message.message, (messageBooths.get(message.booth_id)||message.booth_id)+' · '+
-      (message.reply?labels[message.reply]+' · '+message.replied_by:message.expires_at<=Date.now()?'Expired':'Waiting for reply'))));
+      (message.responses?message.responses.map(person=>person.name+': '+(labels[person.reply]||'Waiting')).join(' · '):
+        message.reply?labels[message.reply]+' · '+message.replied_by:message.expires_at<=Date.now()?'Expired':'Waiting for reply'))));
+    const personal=byId('personal-message-inbox');personal.replaceChildren();
+    for(const message of inbox){
+      if(adminDeferred.has(message.id))continue;
+      const key='sharepass-admin-reply:'+message.id;
+      let saved;try{saved=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}
+      const card=item(message.message,saved?'Reply not confirmed. Retry the same response.':'Your response');card.classList.add('personal-message');
+      const actions=document.createElement('div');actions.className='wizard-actions';
+      for(const [reply,label] of [['done','Done'],['working','Working'],['help','Need help']]){
+        const button=document.createElement('button');button.type='button';button.textContent=saved?.reply===reply?'Retry '+label:label;
+        button.disabled=adminReplying.has(message.id)||Boolean(saved&&saved.reply!==reply);
+        button.onclick=()=>replyAdminMessage(message,reply);actions.append(button);
+      }
+      const later=document.createElement('button');later.type='button';later.textContent='Later';later.disabled=adminReplying.has(message.id);
+      later.onclick=()=>{adminDeferred.add(message.id);card.remove();};actions.append(later);card.append(actions);personal.append(card);
+    }
     status.textContent=body?'Message sent.':messages.length?'':'No staff messages yet.';
     return true;
   }catch(error){status.textContent=error.message;return false;}
 }
-byId('refresh-staff-messages').onclick=()=>loadStaffMessages();
+byId('refresh-staff-messages').onclick=()=>{adminDeferred.clear();loadStaffMessages();};
+async function replyAdminMessage(message,reply){
+  if(adminReplying.has(message.id))return;
+  adminReplying.add(message.id);const key='sharepass-admin-reply:'+message.id;
+  let failed=false;
+  try{
+    const saved=JSON.parse(sessionStorage.getItem(key)||'null');
+    if(saved&&saved.reply!==reply)throw new Error('Retry the saved response first.');
+    sessionStorage.setItem(key,JSON.stringify({reply}));
+    await request('/api/admin/staff-messages/reply',{id:message.id,reply});
+    try{sessionStorage.removeItem(key);}catch{}
+  }catch{failed=true;}
+  finally{
+    adminReplying.delete(message.id);await loadStaffMessages();
+    if(failed)byId('staff-messages-status').textContent='Reply not confirmed. Retry the same response or choose Later.';
+  }
+}
 messageForm.onsubmit=async event=>{
   event.preventDefault();
   if(sendingMessage)return;
@@ -126,9 +159,10 @@ messageForm.onsubmit=async event=>{
   const message=data.message.trim(),booth_id=data.booth_id;
   if(!message)return;
   if(messageAttempt?.message!==message||messageAttempt.booth_id!==booth_id){
-    messageAttempt={id:crypto.randomUUID(),message,booth_id};
+    messageAttempt={id:crypto.randomUUID(),message,booth_id,per_person:true};
   }
   sendingMessage=true;
+  enableAdminAlerts().catch(()=>{});
   const button=messageForm.querySelector('button');
   button.disabled=true;
   try{
@@ -225,7 +259,7 @@ function showInvitation(data){
 }
 
 const inviteStep=wizard(inviteForm,async fields=>{
-  fields.device_label=(fields.staff_name+' · '+fields.designation).slice(0,80);
+  fields.device_label=fields.staff_name.slice(0,80);
   const data=await updateSetup({action:'invite',...fields});
   if(!data)return;
   try{showInvitation(data);inviteForm.reset();}
@@ -309,7 +343,7 @@ const accountTabs=[...document.querySelectorAll('[data-account]')];
 const reportStatus=byId('report-status');
 const reportRows=byId('report-rows');
 const reportStorage=byId('report-storage');
-let loadedSetup=false,reportBusy=false;
+let loadedSetup=false,reportBusy=false,reportSnapshot=[];
 
 async function loadReport(){
   if(reportBusy)return;
@@ -317,6 +351,7 @@ async function loadReport(){
   reportStatus.textContent='';
   try{
     const data=await request('/api/admin/report');
+    reportSnapshot=data.booths;byId('download-report').disabled=false;
     const storage=data.storage;
     if(Number.isSafeInteger(storage?.used_bytes)){
       const used=new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(storage.used_bytes/1000000);
@@ -343,7 +378,7 @@ async function loadReport(){
 
 function accountPanel(focus=false){
   const hash=location.hash.slice(1);
-  const section=['administration','reports'].includes(hash)?hash:'overview';
+  const section=['overview','reports'].includes(hash)?hash:'administration';
   for(const button of accountTabs){
     const active=button.dataset.account===section;
     button.setAttribute('aria-pressed',active);
@@ -359,9 +394,26 @@ function accountPanel(focus=false){
 for(const button of accountTabs)button.onclick=()=>{location.hash=button.dataset.account;};
 addEventListener('hashchange',()=>accountPanel(true));
 byId('refresh-report').onclick=loadReport;
+function reportCsv(rows){
+  const cell=value=>'"'+String(typeof value==='string'&&/^\s*[=+\-@\t\r]/.test(value)?"'"+value:value).replaceAll('"','""')+'"';
+  return [['Booth','Deposits','Received','Available','Pending','Handed over'],...rows.map(row=>[row.name,row.deposits,row.received,row.available,row.pending,row.handed_over])]
+    .map(row=>row.map(cell).join(',')).join('\r\n')+'\r\n';
+}
+byId('download-report').onclick=()=>{
+  const url=URL.createObjectURL(new Blob([reportCsv(reportSnapshot)],{type:'text/csv;charset=utf-8'}));
+  const link=document.createElement('a');link.href=url;link.download='SharePass-booth-report.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+async function enableAdminAlerts(){
+  if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))return;
+  const permission=Notification.permission==='default'?await Notification.requestPermission():Notification.permission;
+  if(permission!=='granted')return;
+  const {public_key}=await request('/api/web-push');if(!public_key)return;
+  const registration=await navigator.serviceWorker.register('/queue-alert-worker.js');
+  await navigator.serviceWorker.ready;
+  const key=Uint8Array.from(atob(public_key.replace(/-/g,'+').replace(/_/g,'/')+'='),char=>char.charCodeAt(0));
+  const subscription=await registration.pushManager.getSubscription()||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+  await request('/api/web-push',{endpoint:subscription.endpoint});
+}
+navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='sharepass-queue'&&!sendingMessage)loadStaffMessages();});
+if('Notification' in window&&Notification.permission==='granted')enableAdminAlerts().catch(()=>{});
 accountPanel();
-
-// Refresh device health while its registry is visible; do not interrupt setup.
-setInterval(()=>{
-  if(!document.hidden&&!byId('staff').hidden&&!byId('account-administration').hidden&&inviteForm.hidden&&invite.hidden)updateSetup();
-},30000);
