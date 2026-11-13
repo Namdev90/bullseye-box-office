@@ -138,9 +138,9 @@ function renderHistory(){
   byId('history-list').replaceChildren(...entries.map(item=>{
     const row=document.createElement('li');row.className='history-entry';
     const name=document.createElement('h2');name.textContent=item.depositor_label||'Pass deposit';
-    const badge=document.createElement('span');badge.className='history-badge'+(item.pending_collection?' pending':'');
+    const badge=document.createElement('span');badge.className='history-badge'+(item.handover_pending||item.pending_collection?' pending':'');
     const available=Object.values(item.remaining||{}).reduce((sum,value)=>sum+Number(value||0),0);
-    badge.textContent=item.pending_collection?'Handover awaiting confirmation':available?'Available for pickup':'Completed';
+    badge.textContent=item.handover_pending||item.pending_collection?'Handover awaiting confirmation':available?'Available for pickup':'Completed';
     const counts=document.createElement('p');counts.textContent='Remaining · '+balance(item.remaining||{});
     const details=document.createElement('small');
     const created=new Date(item.created_at||item.createdAt||'');
@@ -916,7 +916,9 @@ async function runRefresh(action,send,recovering=false){
       return;
     }
     setRecovery(null);
-    showReceipt({...((original?.deposit.packet_id===action.body.packet_id)?original:{}),...result});
+    const samePacket=original?.deposit.packet_id===action.body.packet_id;
+    showReceipt({...((samePacket)?original:{}),...result,
+      ...(samePacket&&Object.hasOwn(original,'recipients')?{recipients:original.recipients}:{})});
     byId('error').textContent='Code refreshed. Share the replacement with the collectors.';
   }catch(error){
     // A failed lookup/auth check cannot prove the original request did not commit.
