@@ -148,6 +148,25 @@ test('approval replay preserves the request fingerprint recorded before automati
   assert.equal(JSON.parse(f.db.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(accepted.deposit.id).payload).update_contact,undefined);
 });
 
+for(const contact of [null,{channel:'none'},{channel:'whatsapp',address:'12025550109',name:'Recorded synthetic contact'}]){
+  test('approval replay preserves the recorded update_contact value '+JSON.stringify(contact),async t=>{
+    const f=fixture();t.after(f.close);
+    const path='/api/public'+new URL((await f.call('/api/booth')).body.url).pathname,input=draft();
+    await f.call(path,input,null,true);
+    const accepted=(await f.call('/api/queue/'+input.request_id+'/confirm',{custody_confirmed:true})).body;
+    const id='booth-'+input.request_id,stored=JSON.parse(f.db.prepare('SELECT payload FROM sharepass_ledger_requests WHERE id=?').get(id).payload);
+    const fingerprint=JSON.parse(stored.fingerprint);fingerprint[1].update_contact=contact;stored.fingerprint=JSON.stringify(fingerprint);
+    const original=JSON.stringify(stored);f.db.prepare('UPDATE sharepass_ledger_requests SET payload=? WHERE id=?').run(original,id);
+    const raw=JSON.parse(f.db.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(accepted.deposit.id).payload);
+    raw.update_contact=contact;f.db.prepare('UPDATE sharepass_ledger_deposits SET payload=? WHERE id=?').run(JSON.stringify(raw),accepted.deposit.id);
+    const replay=await f.call('/api/queue/'+input.request_id+'/confirm',{custody_confirmed:true});
+    assert.equal(replay.status,200);assert.equal(replay.body.replayed,true);assert.equal(replay.body.collection_code,accepted.collection_code);
+    assert.equal(f.db.prepare('SELECT payload FROM sharepass_ledger_requests WHERE id=?').get(id).payload,original);
+    assert.deepEqual(JSON.parse(f.db.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(accepted.deposit.id).payload).update_contact,contact);
+    assert.equal(f.db.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,1);
+  });
+}
+
 test('receipt updates use the saved contact and respect opt-out, including deposits without a queue row',async t=>{
   const f=fixture();t.after(f.close);
   const path='/api/public'+new URL((await f.call('/api/booth')).body.url).pathname,input=draft();await f.call(path,input,null,true);

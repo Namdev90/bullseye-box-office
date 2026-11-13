@@ -138,12 +138,25 @@ test('success summary distinguishes push-service acceptance from handset install
   assert.match(logs.join(''),/does not confirm handset receipt or installation/);
 });
 
-test('workflow only announces a verified published latest release in a separate nonblocking step',()=>{
+test('workflow announces after publication using a separate read-only job and supports exact-manifest retries',()=>{
   const source=readFileSync(new URL('../../.github/workflows/sharepass-android-release.yml','file://'+__filename),'utf8');
-  const publish=source.indexOf('id: publish_release'),announcement=source.indexOf('name: Announce the verified latest Android update');
+  const publish=source.indexOf('id: publish_release'),announcement=source.indexOf('  announce:');
   assert(publish>=0&&announcement>publish);
   const step=source.slice(announcement);
-  assert.match(step,/inputs\.promote_latest/);assert.match(step,/steps\.publish_release\.outcome == 'success'/);
-  assert.match(step,/continue-on-error: true/);assert.match(step,/steps\.publish_release\.outputs\.manifest_path/);
+  assert.match(step,/inputs\.promote_latest/);assert.match(step,/needs: verify-and-publish/);
+  assert.match(step,/contents: read/);assert(!step.includes('contents: write'));assert(!step.includes('continue-on-error'));
+  const retry=readFileSync(new URL('../../.github/workflows/sharepass-announce-release.yml','file://'+__filename),'utf8');
+  assert.match(retry,/contents: read/);assert(!retry.includes('contents: write'));
+  assert.match(retry,/persist-credentials: false/);assert.match(retry,/SHAREPASS_GITHUB_READ_TOKEN: \$\{\{ github.token \}\}/);
+  assert.match(retry,/gh release download/);assert.match(retry,/workflow_dispatch:/);
   assert(source.indexOf('"$(snapshot "$dir/published.json")"')<source.indexOf('manifest_path=%s'));
+});
+
+test('ephemeral verification authorization is sent only to the fixed endpoint and never returned',async()=>{
+  const {announceVerifiedRelease,releaseAnnouncementUrl}=await tool;
+  const token='synthetic_read_token';
+  const result=await announceVerifiedRelease({manifestBytes:bytes,expectedVersionCode:version,githubReadToken:token,
+    fetchImpl:async(url,options)=>{assert.equal(url,releaseAnnouncementUrl);assert.equal(options.redirect,'error');
+      assert.equal(options.headers.Authorization,'Bearer '+token);return Response.json(status(0,0));}});
+  assert.equal(result.complete,true);assert(!JSON.stringify(result).includes(token));
 });

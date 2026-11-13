@@ -85,8 +85,8 @@ android {
         applicationId = "in.sharepass.foundation"
         minSdk = 24
         targetSdk = 37
-        versionCode = 26
-        versionName = "0.9.16"
+        versionCode = 27
+        versionName = "0.9.17"
         buildConfigField("String", "SHAREPASS_ORIGIN", "\"$sharepassOrigin\"")
         manifestPlaceholders["sharepassAppLinkHost"] = parsedOrigin.host
         manifestPlaceholders["sharepassLauncherIcon"] = if (approvedArtwork == null) "@drawable/ic_foundation" else "@mipmap/sharepass_logo"

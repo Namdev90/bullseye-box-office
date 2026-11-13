@@ -35,7 +35,7 @@ function checkedStatus(value,versionCode){
 // This is deliberately not a signing tool. The preceding release step verifies
 // APK bytes, signer and manifest signature. Reuse those exact bounded bytes,
 // without rewriting JSON or allowing a caller-selected notification endpoint.
-export async function announceVerifiedRelease({manifestBytes,expectedVersionCode,fetchImpl=globalThis.fetch,
+export async function announceVerifiedRelease({manifestBytes,expectedVersionCode,githubReadToken,fetchImpl=globalThis.fetch,
   sleep=delay,now=()=>performance.now(),limits={}}){
   const bounds={...announcementLimits,...limits};
   for(const key of Object.keys(announcementLimits)){
@@ -61,7 +61,7 @@ export async function announceVerifiedRelease({manifestBytes,expectedVersionCode
     try{
       response=await fetchImpl(releaseAnnouncementUrl,{
         method:'POST',redirect:'error',credentials:'omit',
-        headers:{'Content-Type':'application/json',Accept:'application/json'},
+        headers:{'Content-Type':'application/json',Accept:'application/json',...(githubReadToken?{Authorization:'Bearer '+githubReadToken}:{})},
         body:manifestBytes,
         signal:AbortSignal.timeout(Math.max(1,Math.min(bounds.requestTimeoutMs,Math.floor(remaining()))))
       });
@@ -150,7 +150,7 @@ export async function runAnnouncementCli(args,{readFileImpl=readFile,announce=an
     let bytes;
     try{bytes=await readFileImpl(manifestPath);}catch{result={complete:false,reason:'input_unavailable',version_code:Number(versionString),calls:0};}
     if(bytes){
-      try{result=await announce({manifestBytes:bytes,expectedVersionCode:Number(versionString)});}
+      try{result=await announce({manifestBytes:bytes,expectedVersionCode:Number(versionString),githubReadToken:process.env.SHAREPASS_GITHUB_READ_TOKEN});}
       catch{result={complete:false,reason:'unexpected_failure',version_code:Number(versionString),calls:0};}
     }
   }

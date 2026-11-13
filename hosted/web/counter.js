@@ -298,9 +298,11 @@ async function recover(){
     catch(error){if(knownFailure(error)&&recovery===action)setRecovery(null);throw error;}
   }
   const result=await submit(action);
-  if(action.path==='/api/deposits'||action.path.endsWith('/confirm'))showReceipt(result,action.path.startsWith('/api/intakes/'));
+  if(action.path==='/api/deposits'||action.path.endsWith('/confirm')){
+    showReceipt(result,action.path.startsWith('/api/intakes/'));window.sharePassToast?.('Passes received. Collection code ready.');
+  }
   else if(action.path.endsWith('/release'))showHandover(result);
-  else showBalance(result);
+  else {showBalance(result);window.sharePassToast?.('Handover confirmed.');}
 }
 
 async function refreshQueue(generation,manual=false){
@@ -594,6 +596,7 @@ async function confirmQueueDraft(){
     valid_minutes:Number(fields.valid_minutes.value),...(custom?{custom_code:custom}:{})
   });
   showReceipt(result);
+  window.sharePassToast?.('Passes received. Collection code ready.');
 }
 
 async function perform(action){
@@ -707,6 +710,7 @@ function manualIntake(counts){
 async function confirmIntake(){
   const location=byId('intake-review-form').elements.location.value;
   showReceipt(await request('/api/intakes/'+intakeToken+'/confirm',{location,custody_confirmed:true}),true);
+  window.sharePassToast?.('Passes received. Collection code ready.');
 }
 
 async function saveDeposit(){
@@ -717,6 +721,7 @@ async function saveDeposit(){
     ?await request('/api/intakes/'+intakeToken+'/confirm',{...details,manual:true})
     :await request('/api/deposits',details);
   showReceipt(result,privateIntake);
+  window.sharePassToast?.('Passes received. Collection code ready.');
 }
 
 function showReceipt(result,privateIntake=false){
@@ -814,6 +819,7 @@ async function finishDirectHandover(result){
   if(register){pending=collection;return confirm();}
   const action={path:'/api/collections/'+collection.id+'/handover',body:{version:collection.version,handover_confirmed:true,request_id:crypto.randomUUID()}};
   setRecovery(action);showBalance(await submit(action));
+  window.sharePassToast?.('Handover confirmed.');
 }
 
 function showHandover(result){
@@ -824,6 +830,7 @@ function showHandover(result){
 
 async function confirm(){
   showBalance(await request('/api/collections/'+pending.id+'/handover',{version:pending.version,handover_confirmed:true}));
+  window.sharePassToast?.('Handover confirmed.');
 }
 
 function showBalance(result){
@@ -981,6 +988,7 @@ async function runRefresh(action,send,recovering=false){
     showReceipt({...((samePacket)?original:{}),...result,
       ...(samePacket&&Object.hasOwn(original,'recipients')?{recipients:original.recipients}:{})});
     byId('error').textContent='Code refreshed. Share the replacement with the collectors.';
+    window.sharePassToast?.('Collection code updated.');
   }catch(error){
     // A failed lookup/auth check cannot prove the original request did not commit.
     // Only the initial response or a confirmed terminal replay can release the journal.

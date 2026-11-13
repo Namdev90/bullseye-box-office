@@ -39,6 +39,19 @@
   observer.observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden']});
 })();
 
+let feedbackToast,feedbackTimer;
+window.sharePassToast=message=>{
+  if(document.hidden||!message)return;
+  if(!feedbackToast){
+    feedbackToast=document.createElement('div');feedbackToast.id='feedback-toast';
+    // Existing live status text and focused results supply the accessible announcement.
+    feedbackToast.setAttribute('aria-hidden','true');document.body.append(feedbackToast);
+  }
+  feedbackToast.textContent=message;feedbackToast.hidden=false;
+  clearTimeout(feedbackTimer);feedbackTimer=setTimeout(()=>{feedbackToast.hidden=true;},6500);
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&feedbackToast){feedbackToast.hidden=true;clearTimeout(feedbackTimer);}});
+
 window.sharePassCopyText=async(text,status)=>{
   try{
     if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(text);
@@ -49,9 +62,11 @@ window.sharePassCopyText=async(text,status)=>{
       if(!copied)throw new Error('Copy unavailable');
     }
     if(status)status.textContent='Copied';
+    window.sharePassToast('Copied');
     return true;
   }catch{
     if(status)status.textContent='Select the code or link to copy it.';
+    window.sharePassToast('Select the code or link to copy it.');
     return false;
   }
 };

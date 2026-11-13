@@ -8,6 +8,7 @@ on:
       - 'public-demo/.openai/hosting.json'
       - '.github/workflows/sharepass-ci.yml'
       - '.github/workflows/sharepass-android-release.yml'
+      - '.github/workflows/sharepass-announce-release.yml'
   push:
     branches: [main]
     paths:
@@ -16,6 +17,7 @@ on:
       - 'public-demo/.openai/hosting.json'
       - '.github/workflows/sharepass-ci.yml'
       - '.github/workflows/sharepass-android-release.yml'
+      - '.github/workflows/sharepass-announce-release.yml'
   workflow_dispatch:
 
 permissions:

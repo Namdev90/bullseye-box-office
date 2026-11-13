@@ -63,6 +63,7 @@ public final class HostedDeskActivity extends Activity {
     private DeskWindow viewport;
     private AppUpdates updates;
     private TextView status;
+    private android.widget.Toast feedbackToast;
     private WebView qr;
     private Runnable back;
     private String intakeToken;
@@ -211,6 +212,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
+        if(feedbackToast!=null)feedbackToast.cancel();
         if(speech!=null)speech.stop();
         if (scanner != null) scanner.pause();
         if (staffMessageDialog != null) staffMessageDialog.dismiss();
@@ -441,6 +443,13 @@ public final class HostedDeskActivity extends Activity {
     private void note(String message) {
         status.setText(message);
         status.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
+        if(feedbackToast!=null)feedbackToast.cancel();
+        android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
+        if(foreground&&!message.isEmpty()&&!message.equals("Working…")&&!message.equals("Connecting…")
+                &&(access==null||!access.isTouchExplorationEnabled())){
+            feedbackToast=android.widget.Toast.makeText(this,message,android.widget.Toast.LENGTH_LONG);
+            feedbackToast.show();
+        }
     }
     private void failed(Exception error) {
         if (error instanceof HostedRegisterClient.Rejected && ((HostedRegisterClient.Rejected) error).status == 401
@@ -1302,7 +1311,12 @@ public final class HostedDeskActivity extends Activity {
                     update.optString("address"), update.optString("message")), false);
             }
             button("Done", this::desk, true);
-        } else receipt(result);
+            if(!path.equals("/api/collections/history/handover"))note("Handover confirmed.");
+        } else {
+            receipt(result);
+            if(path.equals("/api/codes/refresh")||path.equals("/api/admin/reissue"))note("Collection code updated.");
+            else if(path.equals("/api/deposits")||path.endsWith("/confirm"))note("Passes received. Collection code ready.");
+        }
     }
     private void receipt(JSONObject result) {
         page("Passes deposited", "receipt", this::desk);
