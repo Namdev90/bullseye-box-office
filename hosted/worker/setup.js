@@ -25,14 +25,58 @@ async function boothConfiguration(db,workspace,id='B1'){
 
 async function setupState(db,workspace){
   await boothConfiguration(db,workspace);
-  const [booths,staff,devices]=await Promise.all([
+  const [booths,staff,devices,release]=await Promise.all([
     db.prepare('SELECT id,name,location FROM sharepass_configured_booths WHERE workspace=? ORDER BY name').bind(workspace).all(),
     db.prepare('SELECT id,name,booth_id FROM sharepass_configured_staff WHERE workspace=? ORDER BY name').bind(workspace).all(),
-    db.prepare(`SELECT d.id,d.label,d.staff_id,s.booth_id,d.designation,d.active,(d.digest IS NOT NULL AND d.session_expires>?) AS paired
-      FROM sharepass_configured_devices d JOIN sharepass_configured_staff s ON s.id=d.staff_id WHERE d.workspace=? ORDER BY d.label`)
-      .bind(Date.now(),workspace).all()
+    db.prepare(`SELECT d.id,d.label,d.staff_id,s.name AS staff_name,s.booth_id,d.designation,d.active,
+      (d.digest IS NOT NULL AND d.session_expires>?) AS paired,
+      h.first_connected_at,h.last_seen_at,h.app_version,h.app_version_code,h.platform,h.notifications_enabled,
+      EXISTS(SELECT 1 FROM sharepass_push_tokens p WHERE p.device_id=d.id) AS push_registered
+      FROM sharepass_configured_devices d JOIN sharepass_configured_staff s ON s.id=d.staff_id
+      LEFT JOIN sharepass_device_status h ON h.device_id=d.id WHERE d.workspace=? ORDER BY d.label,d.id`)
+      .bind(Date.now(),workspace).all(),
+    db.prepare('SELECT version_code,version_name,accepted_at FROM sharepass_android_release_state WHERE id=1').bind().first()
   ]);
-  return {booths:booths.results,staff:staff.results,devices:devices.results.map(d=>({...d,active:!!d.active,paired:!!d.paired&&!!d.active}))};
+  return {booths:booths.results,staff:staff.results,latest_android_release:release,devices:devices.results.map(d=>({...d,active:!!d.active,paired:!!d.paired&&!!d.active,
+    push_registered:!!d.push_registered,notifications_enabled:d.notifications_enabled===null?null:!!d.notifications_enabled}))};
+}
+
+// A device is identified only by its authenticated pairing. Reports cannot
+// overwrite another phone, and sign-out retains its non-secret history.
+async function recordDeviceSeen(db,staff,details=null,firstConnection=false){
+  if(!staff.device_id)return;
+  const now=Date.now();
+  if(!details){
+    await db.prepare(`INSERT INTO sharepass_device_status(device_id,first_connected_at,last_seen_at) VALUES(?,?,?)
+      ON CONFLICT(device_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,
+        first_connected_at=coalesce(first_connected_at,excluded.first_connected_at)
+      WHERE last_seen_at<? OR first_connected_at IS NULL AND excluded.first_connected_at IS NOT NULL`)
+      .bind(staff.device_id,firstConnection?now:null,now,now-60000).run();
+    return;
+  }
+  await db.prepare(`INSERT INTO sharepass_device_status
+    (device_id,first_connected_at,last_seen_at,app_version,app_version_code,platform,notifications_enabled)
+    VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET
+      last_seen_at=excluded.last_seen_at,
+      app_version=coalesce(excluded.app_version,app_version),
+      app_version_code=coalesce(excluded.app_version_code,app_version_code),
+      platform=coalesce(excluded.platform,platform),
+      notifications_enabled=coalesce(excluded.notifications_enabled,notifications_enabled)`)
+    .bind(staff.device_id,null,now,details.app_version??null,details.app_version_code??null,
+      details.platform??null,typeof details.notifications_enabled==='boolean'?Number(details.notifications_enabled):null).run();
+}
+
+async function deviceStatus(request,db,staff){
+  const details=await bodyJson(request);
+  if(!details||
+    (details.app_version!==undefined&&(typeof details.app_version!=='string'||!/^[-+.A-Za-z0-9]{1,40}$/.test(details.app_version)))||
+    (details.app_version_code!==undefined&&(!Number.isSafeInteger(details.app_version_code)||details.app_version_code<1||details.app_version_code>2147483647))||
+    (details.platform!==undefined&&!['android','web'].includes(details.platform))||
+    (details.notifications_enabled!==undefined&&typeof details.notifications_enabled!=='boolean')){
+    return error('Invalid device status.',400);
+  }
+  await recordDeviceSeen(db,staff,details);
+  return json({recorded:true});
 }
 
 const DEPOSIT_STORAGE_LIMIT=9000000000;
@@ -81,11 +125,14 @@ async function adminSetup(request,db,workspace,origin){
     await db.prepare('DELETE FROM sharepass_push_tokens WHERE device_id=?').bind(body.device_id).run();
     return json(await setupState(db,workspace));
   }
-  const name=setupText(body?.staff_name,80),label=setupText(body?.device_label,80),booth=body?.booth_id;
+  const name=setupText(body?.staff_name,80),booth=body?.booth_id;
+  const label=setupText(body?.device_label,80)||(name?(name+"'s phone").slice(0,80):'');
   const designation=body?.designation??'Counter staff';
-  if(body?.action!=='invite'||!name||!label||!['Counter staff','Deposit desk','Collection desk'].includes(designation)||
+  if(body?.action!=='invite'||!name||!label||
+     (body.device_label!==undefined&&body.device_label!==''&&!setupText(body.device_label,80))||
+     !['Counter staff','Deposit desk','Collection desk'].includes(designation)||
      !boothIdPattern.test(booth||'')||!(await boothConfiguration(db,workspace,booth))){
-    return error('Choose a booth and designation and enter the staff name and device label.',400);
+    return error('Choose a booth and designation and enter the staff name.',400);
   }
   const now=Date.now(),expires_at=now+SETUP_LIFETIME_MS;
   await db.prepare("UPDATE sharepass_configured_devices SET setup_code='' WHERE setup_code<>'' AND invite_expires<=?").bind(now).run();
@@ -133,6 +180,7 @@ async function connectDevice(request,env){
   }
   const now=Date.now(),expires=now+DEVICE_LIFETIME_MS;
   let staff=await configuredAccess(db,verifier);
+  const firstConnection=!staff;
   if(!staff){
     if(code){
       const minute=Math.floor(now/60000),address=request.headers.get('CF-Connecting-IP')||'unknown';
@@ -147,7 +195,9 @@ async function connectDevice(request,env){
     staff=await configuredAccess(db,verifier);
   }
   if(!staff)return error('This setup has expired or was already used. Ask the desktop administrator for a new code.',403);
-  const result=json({...staffContext(staff,env),token:verifier,expires_at:staff.session_expires});
+  await recordDeviceSeen(db,staff,null,firstConnection);
+  const poster=await boothPosterDetails(db,staff,new URL(request.url).origin);
+  const result=json({...staffContext(staff,env),...(poster?{booth_url:poster.url}:{}),token:verifier,expires_at:staff.session_expires});
   if(request.headers.get('Origin'))result.headers.set('Set-Cookie',staffCookieHeader(verifier,Math.ceil((staff.session_expires-now)/1000)));
   return result;
 }

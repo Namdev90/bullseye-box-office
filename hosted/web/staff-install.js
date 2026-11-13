@@ -17,4 +17,13 @@ installButton.addEventListener('click',async()=>{
   try{await prompt?.prompt();}catch{/* The browser's install menu remains available. */}
 });
 // Reuse the notification worker. Registration alone neither subscribes nor caches register data.
-navigator.serviceWorker?.register('/queue-alert-worker.js').catch(()=>{});
+let staffWorker,lastWorkerCheck=0;
+function checkStaffWorker(){
+  if(!staffWorker||document.hidden||Date.now()-lastWorkerCheck<30*60*1000)return;
+  lastWorkerCheck=Date.now();staffWorker.update().catch(()=>{});
+}
+navigator.serviceWorker?.register('/queue-alert-worker.js').then(registration=>{
+  staffWorker=registration;lastWorkerCheck=Date.now();
+}).catch(()=>{});
+document.addEventListener('visibilitychange',checkStaffWorker);
+setInterval(checkStaffWorker,30*60*1000);

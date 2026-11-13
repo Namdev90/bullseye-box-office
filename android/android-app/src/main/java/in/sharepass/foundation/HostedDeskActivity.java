@@ -69,9 +69,19 @@ public final class HostedDeskActivity extends Activity {
     private JSONArray queueDrafts = new JSONArray();
     private String queueSnapshot = "";
     private String screen;
-    private boolean collectPane, manualQueueRefresh;
+    private int deskPane;
+    private boolean manualQueueRefresh;
+    private LinearLayout historyRows;
+    private final HashSet<String> historySeenIds = new HashSet<>();
+    private String historyCursor;
+    private com.journeyapps.barcodescanner.DecoratedBarcodeView scanner;
+    private boolean scanningSetup;
+    private String scannerSession = "";
+    private static final int SETUP_PERMISSIONS = 222;
+    private static final int CAMERA_SCAN = 223;
     private String deskCode = "";
     private EditText deskInput;
+    private Button retryLookup;
     private float deskTouchX, deskTouchY;
     private boolean deskSwipeStarted;
     private final ArrayList<Recipient> recipients = new ArrayList<>();
@@ -174,6 +184,8 @@ public final class HostedDeskActivity extends Activity {
         }
         scheduleIntake(0);
         scheduleQueue(0);
+        reportDeviceStatus();
+        if (scanner != null && checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) scanner.resume();
         updates.start();
     }
     @Override protected void onNewIntent(Intent intent) {
@@ -191,6 +203,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
+        if (scanner != null) scanner.pause();
         if (staffMessageDialog != null) staffMessageDialog.dismiss();
         updates.stop();
         QueuePush.counterVisible(false);
@@ -236,15 +249,18 @@ public final class HostedDeskActivity extends Activity {
             focused.clearFocus();
         }
         releaseQr();
+        if (scanner != null) { scanner.pause(); scanner = null; }
         handler.removeCallbacks(intakePoll);
         screen = name;
         deskInput = null;
+        retryLookup = null;
         back = goBack;
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         queueButton = null;
         staffMessageButton = null;
         queueRows = null;
+        historyRows = null;
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         int sidePadding = dp(14);
@@ -282,7 +298,7 @@ public final class HostedDeskActivity extends Activity {
         toolbar.addView(spacer, new LinearLayout.LayoutParams(0, 0, 1));
         if ("desk".equals(name)) {
             Button account = new Button(this);
-            account.setText("Account");
+            account.setText("Settings");
             DeskSurface.button(account, false);
             account.setOnClickListener(view -> deskOptions());
             toolbar.addView(account, new LinearLayout.LayoutParams(-2, -2));
@@ -310,6 +326,8 @@ public final class HostedDeskActivity extends Activity {
                 toolbar.addView(label, labelIndex, new LinearLayout.LayoutParams(0, -2, 1));
             }
         });
+        BrandArtwork brand = new BrandArtwork(this, true);
+        content.addView(brand, new LinearLayout.LayoutParams(-1, dp(64)));
         content.addView(header);
         content.addView(DeskSurface.perforation(this), new LinearLayout.LayoutParams(-1, dp(15)));
         TextView heading = line(title, 30, true);
@@ -338,7 +356,7 @@ public final class HostedDeskActivity extends Activity {
             case "Code lifetime (optional)" -> "Choose between 5 minutes and 2 days. Leave it blank for the register's default.";
             case "Confirm receipt" -> "Confirm after the customer's physical passes are in your hands.";
             case "Collect passes" -> "Enter the four digits on the pickup receipt. Looking up the code does not release passes.";
-            case "Prepare pickup", "Hand over passes" -> "Check the physical packet label and pass counts before confirming the handover.";
+            case "Prepare pickup", "Hand over passes" -> "Check the physical passes and counts before confirming the handover.";
             case "Passes deposited", "WhatsApp recipient", "Share by WhatsApp" -> "Show the code or a share QR. Each message is a draft the sender can review.";
             default -> "share-qr".equals(screen)
                 ? "Ask the recipient to scan the WhatsApp QR, then review the draft."
@@ -387,7 +405,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void autoAdvance(EditText field, Predicate<String> ready, Runnable advance) {
         Runnable step = () -> {
-            if (foreground && !busy && field.isAttachedToWindow() && field.hasFocus()
+            if (foreground && !busy && field.isAttachedToWindow()
                     && ready.test(field.getText().toString())) advance.run();
         };
         field.addTextChangedListener(new TextWatcher() {
@@ -425,6 +443,7 @@ public final class HostedDeskActivity extends Activity {
             message = "The last action needs to be checked. Use Recover last action before continuing.";
         }
         note(message == null || message.isEmpty() ? "SharePass could not finish this action." : message);
+        if (retryLookup != null && deskInput != null && deskInput.length() == 4) retryLookup.setVisibility(View.VISIBLE);
     }
     private void run(Work action, Done done) {
         if (busy) return;
@@ -463,8 +482,10 @@ public final class HostedDeskActivity extends Activity {
             if (!value.matches("[0-9]{4}")) { input.setError("Enter four digits"); return; }
             run(() -> client.connectDevice("code", value), this::connected);
         }, true);
-        button("Use a setup QR link", this::pairingLink, false);
-        button("Owner sign-in", this::openAdminAccount, false);
+        button("Scan setup QR", () -> scanQr(true), false);
+        button("Paste setup link", this::pairingLink, false);
+        button("Admin login", this::openAdminAccount, false);
+        requestSetupPermissions();
     }
     private void pairingLink() {
         page("Connect with a QR link", "pair-link", this::login);
@@ -494,6 +515,8 @@ public final class HostedDeskActivity extends Activity {
             desk();
             scheduleQueue(0);
             QueuePush.sync(this, client.token());
+            requestSetupPermissions();
+            reportDeviceStatus();
             if (foreground) {
                 updates.offerSetup();
                 updates.start();
@@ -514,7 +537,7 @@ public final class HostedDeskActivity extends Activity {
         }, true);
     }
     private void desk(String code) {
-        collectPane = true;
+        deskPane = 1;
         deskCode = code;
         desk();
     }
@@ -531,53 +554,172 @@ public final class HostedDeskActivity extends Activity {
             return;
         }
         LinearLayout tabs = new LinearLayout(this);
-        Button depositTab = new Button(this);
-        Button collectTab = new Button(this);
-        depositTab.setText("Deposit");
-        collectTab.setText("Collect");
-        depositTab.setSelected(!collectPane);
-        collectTab.setSelected(collectPane);
-        DeskSurface.button(depositTab, false);
-        DeskSurface.button(collectTab, false);
-        tabs.addView(depositTab, new LinearLayout.LayoutParams(0, -2, 1));
-        tabs.addView(collectTab, new LinearLayout.LayoutParams(0, -2, 1));
-        depositTab.setOnClickListener(view -> switchDeskPane(false));
-        collectTab.setOnClickListener(view -> switchDeskPane(true));
+        for (int index = 0; index < 3; index++) {
+            final int selected = index;
+            Button tab = new Button(this);
+            tab.setText(new String[]{"Deposit", "Collect", "History"}[index]);
+            tab.setSelected(deskPane == index);
+            DeskSurface.button(tab, false);
+            tabs.addView(tab, new LinearLayout.LayoutParams(0, -2, 1));
+            tab.setOnClickListener(view -> switchDeskPane(selected));
+        }
         content.addView(tabs);
         addStaffMessageButton();
-        if (collectPane) {
+        if (deskPane == 1) {
             line("Collect passes", 23, true);
             collectionEntry(deskCode);
-        } else {
-            line("Deposit passes", 23, true);
-            line("Let the depositor scan the form. Review it when it reaches the queue.", 16, false);
-            LinearLayout depositView = content;
-            int qrPosition = depositView.getChildCount();
-            polling.execute(() -> {
-                try {
-                    String url = boothPosterUrl(client.request("/api/booth", null));
-                    runOnUiThread(() -> {
-                        if (isDestroyed() || content != depositView || collectPane || !"desk".equals(screen)) return;
-                        try {
-                            showQr(url, "QR for the customer deposit form");
-                            depositView.removeView(qr);
-                            depositView.addView(qr, qrPosition, qrBounds());
-                        } catch (Exception error) { note("Open the full-size deposit QR to retry."); }
-                    });
-                } catch (Exception ignored) { /* The full-size QR button can retry. */ }
-            });
-            button("Show deposit QR", () -> run(() -> client.request("/api/booth", null), this::boothPoster), true);
-            queueButton = button(queueLabel(), this::queue, false);
-            queueButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_ticket_layers, 0, 0, 0);
-        }
-        button("Refresh / reconnect", this::refreshQueueNow, false);
+        } else if (deskPane == 2) {
+            line("History", 23, true);
+            line("Recent deposits and handovers for this booth.", 16, false);
+            historyRows = new LinearLayout(this);
+            historyRows.setOrientation(LinearLayout.VERTICAL);
+            content.addView(historyRows);
+            historySeenIds.clear();
+            loadHistory("");
+        } else showDepositPanel();
         showStaffMessage(false);
     }
-    private void switchDeskPane(boolean collecting) {
-        if (busy || collectPane==collecting) return;
-        if (deskInput!=null) deskCode=deskInput.getText().toString();
-        collectPane=collecting;
+    private void switchDeskPane(int pane) {
+        if (busy || deskPane == pane || pane < 0 || pane > 2) return;
+        if (deskInput != null) deskCode = deskInput.getText().toString();
+        deskPane = pane;
         desk();
+    }
+    private String cachedBoothUrl() {
+        if (context == null) return "";
+        String supplied = context.optString("booth_url");
+        if (!supplied.isEmpty()) return supplied;
+        return getSharedPreferences("sharepass-booth-qr", MODE_PRIVATE)
+            .getString(context.optString("session_key"), "");
+    }
+    private void showDepositPanel() {
+        line("Deposit passes", 23, true);
+        line("Scan the form. Your submitted details appear below.", 16, false);
+        LinearLayout depositView = content;
+        int qrPosition = depositView.getChildCount();
+        String cached = cachedBoothUrl();
+        if (!cached.isEmpty()) {
+            try { showQr(boothPosterUrl(new JSONObject().put("url", cached)), "Customer deposit form QR"); }
+            catch (Exception invalid) { /* Fetch the authorized link again below. */ }
+        }
+        if (qr == null) line("Preparing this booth’s QR…", 15, false);
+        LinearLayout share = new LinearLayout(this);
+        Button copy = new Button(this), whatsapp = new Button(this);
+        copy.setText("Copy link"); whatsapp.setText("WhatsApp");
+        DeskSurface.button(copy, false); DeskSurface.button(whatsapp, false);
+        share.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        share.addView(whatsapp, new LinearLayout.LayoutParams(0, -2, 1));
+        content.addView(share);
+        copy.setOnClickListener(view -> {
+            String url = cachedBoothUrl();
+            if (url.isEmpty()) { note("The booth link is still loading."); return; }
+            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("SharePass deposit form", url));
+            note("Deposit link copied.");
+        });
+        whatsapp.setOnClickListener(view -> shareBoothLink());
+        line("Waiting deposits", 21, true);
+        queueRows = new LinearLayout(this);
+        queueRows.setOrientation(LinearLayout.VERTICAL);
+        content.addView(queueRows);
+        queueSnapshot = "";
+        renderQueueRows();
+        String session = client.token();
+        polling.execute(() -> {
+            try {
+                String url = boothPosterUrl(client.request("/api/booth", null));
+                runOnUiThread(() -> {
+                    if (isDestroyed() || context == null || !session.equals(client.token())) return;
+                    getSharedPreferences("sharepass-booth-qr", MODE_PRIVATE).edit()
+                        .putString(context.optString("session_key"), url).apply();
+                    try { context.put("booth_url", url); } catch (Exception ignored) { }
+                    if (content != depositView || deskPane != 0 || !"desk".equals(screen) || qr != null && url.equals(cached)) return;
+                    try {
+                        releaseQr();
+                        View placeholder = depositView.getChildAt(qrPosition);
+                        if (placeholder instanceof TextView && !(placeholder instanceof Button)) depositView.removeView(placeholder);
+                        showQr(url, "Customer deposit form QR");
+                        depositView.removeView(qr);
+                        depositView.addView(qr, qrPosition, qrBounds());
+                    } catch (Exception invalid) { note("The deposit QR could not display. Use Copy link."); }
+                });
+            } catch (Exception unavailable) {
+                runOnUiThread(() -> {
+                    if (content == depositView && cached.isEmpty()) note("Connect to load this booth’s QR once. It is then available immediately.");
+                });
+            }
+        });
+        scheduleQueue(0);
+    }
+    private void shareBoothLink() {
+        String url = cachedBoothUrl();
+        if (url.isEmpty()) { note("The booth link is still loading."); return; }
+        Intent draft = new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage("com.whatsapp")
+            .putExtra(Intent.EXTRA_TEXT, "Leave your passes with SharePass · " + boothLabel() + "\n" + url);
+        try { startActivity(draft); }
+        catch (android.content.ActivityNotFoundException unavailable) {
+            draft.setPackage(null);
+            startActivity(Intent.createChooser(draft, "Share deposit form"));
+        }
+    }
+    private void loadHistory(String cursor) {
+        LinearLayout rows = historyRows;
+        if (rows == null) return;
+        String session = client.token();
+        TextView loading = new TextView(this);
+        loading.setText("Loading history…"); loading.setTextColor(DeskSurface.MUTED);
+        rows.addView(loading);
+        polling.execute(() -> {
+            try {
+                JSONObject result = client.request("/api/history?limit=20" + (cursor.isEmpty() ? "" : "&cursor=" + Uri.encode(cursor)), null);
+                runOnUiThread(() -> {
+                    if (isDestroyed() || rows != historyRows || !session.equals(client.token())) return;
+                    rows.removeView(loading);
+                    JSONArray deposits = result.optJSONArray("deposits");
+                    if ((deposits == null || deposits.length() == 0) && cursor.isEmpty()) {
+                        loading.setText("No deposits yet for this booth."); rows.addView(loading);
+                    }
+                    JSONArray pendingHandovers = result.optJSONArray("pending_handovers");
+                    if (cursor.isEmpty() && pendingHandovers != null && pendingHandovers.length() > 0) {
+                        TextView heading = new TextView(this); heading.setText("Pending handovers"); heading.setTextColor(DeskSurface.BRASS); heading.setTextSize(20); rows.addView(heading);
+                        for (int i = 0; i < pendingHandovers.length(); i++) {
+                            JSONObject pending = pendingHandovers.optJSONObject(i);
+                            if (pending == null) continue;
+                            addHistoryCard(rows, pending);
+                        }
+                    }
+                    for (int i = 0; deposits != null && i < deposits.length(); i++) {
+                        JSONObject deposit = deposits.optJSONObject(i);
+                        if (deposit == null) continue;
+                        addHistoryCard(rows, deposit);
+                    }
+                    historyCursor = result.isNull("next_cursor") ? "" : result.optString("next_cursor");
+                    if (!historyCursor.isEmpty()) {
+                        String next = historyCursor;
+                        Button more = new Button(this); more.setText("Load more"); DeskSurface.button(more, false); rows.addView(more);
+                        more.setOnClickListener(view -> { rows.removeView(more); loadHistory(next); });
+                    }
+                });
+            } catch (Exception failure) {
+                runOnUiThread(() -> { if (rows == historyRows) loading.setText("History is unavailable. Reconnect in Settings and try again."); });
+            }
+        });
+    }
+    private void addHistoryCard(LinearLayout rows, JSONObject deposit) {
+        String id = deposit.optString("id");
+        if (id.isEmpty() || !historySeenIds.add(id)) return;
+        LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(DeskSurface.panel(this)); card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2); bounds.topMargin = dp(10);
+        rows.addView(card, bounds);
+        TextView detail = new TextView(this); detail.setTextColor(DeskSurface.INK); detail.setTextSize(17);
+        detail.setText(deposit.optString("depositor_label", "Deposit") + " · " + deposit.optString("packet_id")
+            + "\nRemaining · " + balance(deposit.optJSONObject("remaining")));
+        card.addView(detail);
+        JSONObject pending = deposit.optJSONObject("pending_collection");
+        if (pending != null) {
+            Button resume = new Button(this); resume.setText("Resume handover"); DeskSurface.button(resume, true); card.addView(resume);
+            resume.setOnClickListener(view -> run(() -> { client.resumeHandover(deposit, pending); return client.handover(); }, this::handover));
+        }
     }
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         if (updates != null && event.getActionMasked() == MotionEvent.ACTION_DOWN) updates.cancelDownload();
@@ -590,12 +732,12 @@ public final class HostedDeskActivity extends Activity {
             } else if (event.getActionMasked()==MotionEvent.ACTION_UP && deskSwipeStarted) {
                 deskSwipeStarted=false;
                 float dx=event.getX()-deskTouchX,dy=event.getY()-deskTouchY;
-                if (Math.abs(dx)>dp(64) && Math.abs(dx)>1.6f*Math.abs(dy) && (dx<0)!=collectPane) {
+                if (Math.abs(dx)>dp(64) && Math.abs(dx)>1.6f*Math.abs(dy) && (deskPane + (dx < 0 ? 1 : -1)) >= 0 && (deskPane + (dx < 0 ? 1 : -1)) <= 2) {
                     MotionEvent cancel=MotionEvent.obtain(event);
                     cancel.setAction(MotionEvent.ACTION_CANCEL);
                     super.dispatchTouchEvent(cancel);
                     cancel.recycle();
-                    switchDeskPane(dx<0);
+                    switchDeskPane(deskPane + (dx < 0 ? 1 : -1));
                     return true;
                 }
             }
@@ -606,28 +748,20 @@ public final class HostedDeskActivity extends Activity {
         page("Account and settings", "desk-options", this::desk);
         line("Staff · " + context.optString("staff_label", "Counter"), 18, true);
         if (!context.isNull("designation")) line(context.optString("designation"), 16, false);
-        button("Administrator sign-in", this::openAdminAccount, false);
         if (updates.isEnabled()) button("App updates", updates::options, false);
-        JSONObject outstanding = client.intake();
-        if (outstanding != null && outstanding.optLong("expires_at") > System.currentTimeMillis()) {
-            button("Resume deposit", () -> {
-                try { intake(outstanding); } catch (Exception error) { failed(error); }
-            }, false);
-        } else button("One-time deposit QR", () -> run(client::startIntake, this::intake), false);
-        if (client.receipt() != null) button("Last deposit", () -> receipt(client.receipt()), false);
-        button("Check pending handovers", () -> run(() -> client.request("/api/state", null), this::pendingList), false);
+        button("Refresh / reconnect", this::refreshQueueNow, false);
         button(notificationsAllowed() ? "Alert and sound settings" : "Enable booth alerts",
             notificationsAllowed() ? this::openAlertSettings : this::askNotificationPermission, false);
         button("Sign out", () -> new AlertDialog.Builder(this).setMessage("Sign out of SharePass on this phone?")
             .setNegativeButton("Stay", null).setPositiveButton("Sign out", (dialog, which) ->
-                run(() -> { client.logout(); return null; }, result -> { clearQueue(); login(); })).show(), false);
+                run(() -> { client.logout(); return null; }, result -> { clearQueue(); startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)); finish(); })).show(), false);
     }
     private boolean updateIdle() {
         if (!foreground || busy || context == null || client == null || client.hasPending() || client.handover() != null
                 || !("desk".equals(screen) || "desk-options".equals(screen))) return false;
         JSONObject intake = client.intake();
         if (intake != null && intake.optLong("expires_at") > System.currentTimeMillis()) return false;
-        return !collectPane || (deskInput != null ? deskInput.length() == 0 : deskCode.isEmpty());
+        return deskPane != 1 || (deskInput != null ? deskInput.length() == 0 : deskCode.isEmpty());
     }
     private void openAdminAccount() {
         try {
@@ -640,7 +774,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void clearQueue() {
         context = null;
-        collectPane = false;
+        deskPane = 0;
         manualQueueRefresh = false;
         deskCode = "";
         requestedQueue = false;
@@ -658,7 +792,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleQueue(0);
     }
     private void scheduleQueue(long delay) {
-        if (delay>=2000 && context!=null && context.optBoolean("push_first")) return;
+        if (delay >= 2000 && context != null && context.optBoolean("push_first")) delay = Math.max(delay, 15_000);
         handler.removeCallbacks(queuePoll);
         if (foreground && context != null && !context.optString("staff_label").isEmpty()) {
             handler.postDelayed(queuePoll, delay);
@@ -670,7 +804,7 @@ public final class HostedDeskActivity extends Activity {
         if (requestedQueue && ("desk".equals(screen) || "queue".equals(screen))
                 && !client.hasPending() && client.handover() == null) {
             requestedQueue = false;
-            if (!"queue".equals(screen)) queue();
+            if (!"desk".equals(screen) || deskPane != 0) { deskPane = 0; desk(); }
         }
         checkingQueue = true;
         String session = client.token();
@@ -703,7 +837,7 @@ public final class HostedDeskActivity extends Activity {
                     if (queueRows != null && !busy) renderQueueRows();
                     if (manualQueueRefresh) {
                         manualQueueRefresh=false;
-                        if ("desk".equals(screen) || "queue".equals(screen)) note("Connected. " + waiting.size() + " waiting.");
+                        if ("desk".equals(screen) || "queue".equals(screen) || "desk-options".equals(screen)) note("Connected. " + waiting.size() + " waiting.");
                     } else if (queueRows != null && !busy) note("");
                     scheduleQueue(3500);
                 });
@@ -713,7 +847,7 @@ public final class HostedDeskActivity extends Activity {
                     if (isDestroyed() || !foreground || context == null || !session.equals(client.token())) return;
                     if (error instanceof HostedRegisterClient.Rejected && ((HostedRegisterClient.Rejected) error).status == 401) {
                         if (!busy) failed(error);
-                    } else if (queueRows != null || manualQueueRefresh) note("Could not reconnect. Try Refresh / reconnect again.");
+                    } else if (queueRows != null || manualQueueRefresh) note("Connection lost. Reconnecting automatically…");
                     manualQueueRefresh=false;
                     scheduleQueue(7000);
                 });
@@ -824,13 +958,79 @@ public final class HostedDeskActivity extends Activity {
             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, QueueNotifications.NOTICE_ID);
         } else openAlertSettings();
     }
+    private void requestSetupPermissions() {
+        android.content.SharedPreferences preferences = getSharedPreferences("sharepass-permissions", MODE_PRIVATE);
+        if (preferences.getBoolean("requested", false)) return;
+        ArrayList<String> permissions = new ArrayList<>();
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
+            permissions.add(android.Manifest.permission.CAMERA);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS);
+        preferences.edit().putBoolean("requested", true).apply();
+        QueueNotifications.ensureChannel(this);
+        UpdateNotifications.ensureChannel(this);
+        if (!permissions.isEmpty()) requestPermissions(permissions.toArray(new String[0]), SETUP_PERMISSIONS);
+    }
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
-        if (request == QueueNotifications.NOTICE_ID && "desk".equals(screen)) {
-            QueuePush.sync(this, client.token());
-            if (notificationsAllowed()) { deskOptions(); note("Booth alerts are on while SharePass is open."); }
-            else note("Booth alerts are off. The queue still updates here.");
+        if (request == CAMERA_SCAN) {
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) scanQr(scanningSetup);
+            else note("Camera access is off. You can enter the code or paste the setup link.");
         }
+        if (request == QueueNotifications.NOTICE_ID || request == SETUP_PERMISSIONS) {
+            if (client != null && context != null && !client.token().isEmpty()) {
+                QueuePush.sync(this, client.token());
+                scheduleQueue(0);
+                reportDeviceStatus();
+            }
+            if (request == QueueNotifications.NOTICE_ID) note(notificationsAllowed() ? "Booth alerts are on." : "Booth alerts are off. The queue still updates here.");
+        }
+    }
+    private void reportDeviceStatus() {
+        if (client == null || context == null || client.token().isEmpty()) return;
+        String session = client.token();
+        boolean notifications = notificationsAllowed();
+        polling.execute(() -> {
+            try {
+                if (!session.equals(client.token())) return;
+                client.deviceStatus(session, notifications);
+            } catch (Exception unavailable) { /* The next foreground entry retries; custody remains independent. */ }
+        });
+    }
+    private void scanQr(boolean setup) {
+        if (busy || client == null || client.hasPending() || client.handover() != null) return;
+        scanningSetup = setup;
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.CAMERA}, CAMERA_SCAN);
+            return;
+        }
+        scannerSession = client.token();
+        page(setup ? "Scan setup QR" : "Scan pickup QR", "scanner", setup ? this::login : this::desk);
+        line(setup ? "Point the camera at your supervisor’s setup QR." : "Scan the SharePass pickup code or its WhatsApp QR.", 16, false);
+        scanner = new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
+        scanner.getBarcodeView().setDecoderFactory(new com.journeyapps.barcodescanner.DefaultDecoderFactory(
+            Collections.singletonList(com.google.zxing.BarcodeFormat.QR_CODE)));
+        scanner.setStatusText("Keep the QR inside the frame");
+        content.addView(scanner, new LinearLayout.LayoutParams(-1, dp(320)));
+        scanner.decodeSingle(new com.journeyapps.barcodescanner.BarcodeCallback() {
+            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> points) { }
+            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result) {
+                if (!foreground || !"scanner".equals(screen) || !scannerSession.equals(client.token()) || busy) return;
+                String value = result.getText();
+                if (setup) {
+                    String invite = HostedRegisterClient.setupInvite(value);
+                    if (invite.isEmpty()) { login(); note("This is not a valid SharePass setup QR."); return; }
+                    pairingInvite(invite);
+                } else {
+                    try {
+                        PickupScan.Details pickup = PickupScan.parse(value);
+                        desk(pickup.code());
+                        verifyPickup(pickup.code(), pickup.reference());
+                    } catch (IllegalArgumentException invalid) { desk(); note("Scan a SharePass pickup QR or enter its four-digit code."); }
+                }
+            }
+        });
+        scanner.resume();
     }
     private String boothPosterUrl(JSONObject result) throws Exception {
         String url = result.getString("url");
@@ -852,17 +1052,8 @@ public final class HostedDeskActivity extends Activity {
     }
     private void queue() {
         QueueNotifications.cancel(this);
-        page("Booth queue", "queue", this::desk);
-        button("Customer form QR", () -> run(() -> client.request("/api/booth", null), this::boothPoster), false);
-        line("Match the customer and count their passes.", 16, false);
-        if (context.optBoolean("push_first")) button("Refresh / reconnect", this::refreshQueueNow, false);
-        addStaffMessageButton();
-        queueRows = new LinearLayout(this);
-        queueRows.setOrientation(LinearLayout.VERTICAL);
-        content.addView(queueRows);
-        queueSnapshot = "";
-        renderQueueRows();
-        scheduleQueue(0);
+        deskPane = 0;
+        desk();
     }
     private void renderQueueRows() {
         String snapshot = queueDrafts.toString();
@@ -882,7 +1073,7 @@ public final class HostedDeskActivity extends Activity {
             if (draft == null || !validQueueToken(draft.optString("token"))) continue;
             String token = draft.optString("token");
             Button item = new Button(this);
-            item.setText(draft.optString("name", "Customer") + " · " + draft.optString("queue_ref")
+            item.setText("Review deposit · " + draft.optString("name", "Customer") + " · " + draft.optString("queue_ref")
                 + "\n" + balance(draft.optJSONObject("quantities")));
             DeskSurface.button(item, false);
             item.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
@@ -906,7 +1097,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void queueReview(String token, JSONObject draft, String suggested) throws Exception {
         JSONObject quantities = draft.getJSONObject("quantities");
-        page("Match the customer and passes", "queue-review", this::queue);
+        page("Match the customer and passes", "queue-review", this::desk);
         line(draft.optString("name") + " · " + draft.optString("queue_ref"), 22, true);
         line(balance(quantities), 24, true);
         String phone = draft.optString("phone");
@@ -986,7 +1177,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleIntake(1000);
     }
     private void showQr(String value, String label) throws Exception {
-        qr = QrPreview.create(this, value, label, viewport::paneHeight);
+        qr = QrPreview.create(this, value, label, () -> "desk".equals(screen) ? Math.min(viewport.paneHeight(), dp(310)) : viewport.paneHeight());
         content.addView(qr, qrBounds());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
@@ -1077,8 +1268,19 @@ public final class HostedDeskActivity extends Activity {
         code.setTextColor(DeskSurface.BRASS);
         code.setBackground(DeskSurface.panel(this));
         code.setPadding(dp(14), dp(9), dp(14), dp(9));
+        if (context.optBoolean("ticket_receipts")) {
+            content.removeView(code);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.addView(code, new LinearLayout.LayoutParams(0, -2, 1));
+            Button rotate = new Button(this); rotate.setText("↻"); rotate.setContentDescription("Replace this collection code");
+            DeskSurface.roundButton(rotate);
+            row.addView(rotate, new LinearLayout.LayoutParams(dp(52), dp(52)));
+            rotate.setOnClickListener(view -> { if (!busy) refreshCode(result); });
+            content.addView(row);
+        }
         JSONObject deposit = result.optJSONObject("deposit");
-        line("Packet label · " + deposit.optString("packet_id"), 17, false);
+        line("Receipt reference · " + deposit.optString("packet_id"), 17, false);
         if (deposit.optLong("code_expires_at") > 0) {
             String time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
                 .format(new java.util.Date(deposit.optLong("code_expires_at")));
@@ -1088,25 +1290,28 @@ public final class HostedDeskActivity extends Activity {
         button("Share code", () -> sharing(result), true);
         if (proof != null) button("Send receipt to depositor", () -> compose(proof.optString("address"), proof.optString("message")), false);
         button("Pickup updates", () -> pickupPreferences(result), false);
-        if (context.optBoolean("ticket_receipts")) button("Refresh code", () -> refreshCode(result), false);
+
         button("Done", this::desk, false);
     }
     private void refreshCode(JSONObject result) {
-        page("Refresh collection code", "refresh-code", () -> receipt(result));
-        line("Match the physical packet. The previous code will stop working. Share the replacement.", 17, false);
-        EditText packet = field("Physical packet label", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 12);
-        button("Confirm refresh", () -> {
-            String value = packet.getText().toString().trim().toUpperCase(Locale.ROOT);
-            if (!value.matches("PKT-[A-F0-9]{8}")) { packet.setError("Enter the physical packet label"); return; }
-            run(() -> client.stockChange("/api/codes/refresh", new JSONObject().put("packet_id", value)
-                .put("collection_code", result.getString("collection_code"))), this::stockResult);
-        }, true);
+        new AlertDialog.Builder(this).setTitle("Replace collection code?")
+            .setMessage("The old code will stop working. Share the replacement with the depositor and recipients.")
+            .setNegativeButton("Keep code", null)
+            .setPositiveButton("Replace code", (dialog, which) -> run(() -> client.stockChange("/api/codes/refresh",
+                new JSONObject().put("packet_id", result.getJSONObject("deposit").getString("packet_id"))
+                    .put("collection_code", result.getString("collection_code"))), this::stockResult)).show();
+    }
+    private static String firstNonEmpty(String... values) {
+        for (String value : values) if (value != null && !value.trim().isEmpty()) return value.trim();
+        return "";
     }
     private void pickupPreferences(JSONObject receipt) {
         page("WhatsApp pickup updates", "pickup-updates", () -> receipt(receipt));
         if ("whatsapp".equals(receipt.optString("update_channel"))) line("WhatsApp updates are on.", 16, false);
         EditText input = field("Depositor WhatsApp number", InputType.TYPE_CLASS_PHONE, 40);
         input.setHint("10-digit mobile or international + code");
+        JSONObject depositorProof = receipt.optJSONObject("depositor_receipt");
+        input.setText(firstNonEmpty(receipt.optString("update_address"), receipt.optString("depositor_phone"), depositorProof == null ? "" : depositorProof.optString("address")));
         button("Save WhatsApp updates", () -> {
             try { savePickupPreference(receipt, "whatsapp", "+" + WhatsAppDraft.phone(input.getText().toString())); }
             catch (IllegalArgumentException error) { input.setError(error.getMessage()); }
@@ -1123,7 +1328,7 @@ public final class HostedDeskActivity extends Activity {
                 .put("name",deposit.optString("depositor_label"));
             if(!channel.equals("none"))body.put("phone",address);
             JSONObject result=client.request("/api/deposits/"+deposit.getString("id")+"/updates",body);
-            client.rememberUpdateChannel(result.optString("update_channel"));
+            client.rememberUpdateChannel(result.optString("update_channel"), address);
             return result;
         }, result -> receipt(client.receipt()));
     }
@@ -1142,7 +1347,9 @@ public final class HostedDeskActivity extends Activity {
         };
         autoAdvance(input, value -> value.matches("[0-9]{4}"), find);
         drawKeypad(input);
-        button("Find passes", find, true);
+        button("Scan pickup QR", () -> scanQr(false), false);
+        retryLookup = button("Retry lookup", find, false);
+        retryLookup.setVisibility(View.GONE);
     }
     private void verifyPickup(String code, String reference) {
         run(() -> {
@@ -1224,23 +1431,20 @@ public final class HostedDeskActivity extends Activity {
         if (result.isNull("claim_token")) { note("This packet cannot be collected at this counter."); return; }
         JSONObject available = deposit.getJSONObject("remaining");
         String packetId = deposit.getString("packet_id");
-        String[] packet = {""};
+
         int[] selected = new int[KEYS.length];
         Wizard wizard = new Wizard(() -> desk(code), () -> {});
         String location = deposit.getString("location");
         if (!location.startsWith("Packet ")) wizard.review("Find the packet", "Storage reference · " + location, "Next");
-        wizard.text("Match the packet label", "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 40, "", (value, validate) -> {
-            packet[0] = value;
-            return validate && !value.equalsIgnoreCase(packetId) ? "The packet label does not match" : null;
-        }, Collections.emptyMap(), value -> value.trim().equalsIgnoreCase(packetId));
         quantitySteps(wizard, selected, available);
         wizard.steps.add((previous, next) -> {
             page("Prepare pickup", "prepare", previous);
             try {
                 JSONObject amounts = readQuantities(selected);
                 line(balance(amounts), 21, true);
+                line("Check these passes in your hands, then prepare the handover.", 16, false);
                 button("Prepare handover", () -> run(() -> client.stockChange("/api/deposits/" + deposit.getString("id") + "/release",
-                    new JSONObject().put("packet_id", packet[0]).put("claim_token", result.getString("claim_token"))
+                    new JSONObject().put("packet_id", packetId).put("claim_token", result.getString("claim_token"))
                         .put("version", deposit.getInt("version")).put("quantities", amounts)), this::stockResult), true);
             } catch (Exception error) { note(error.getMessage()); }
         });

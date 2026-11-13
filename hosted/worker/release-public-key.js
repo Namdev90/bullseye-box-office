@@ -1,0 +1,4 @@
+// Public RSA key extracted from the verified SharePass 0.9.13 APK certificate.
+// Certificate SHA-256: 0a8b400966fd754c6db2b33b94f78c9898803aff37718fa34c34aef77b642c12.
+// This is a public verification key, never a signing credential.
+const ANDROID_RELEASE_SPKI='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjnVvT5J3p7TLYUq1+1Qb7QGl5HzW/yOaAEgyhaj3ar1+RBzcvDgCUHQuYiPZScCkYZXBtbcH0Onx90BRLbuKkqIFf5NuLJrUoKYAe2A9Zw/Vo0BKdcPFyNSWyvqKOsJ5vqUrlyEYT82m/7tQPoFtwNI1PClIWbehbrv/iPTQCdBS1kxZ1bK5PKYGdh1OCXMTPwhyx+9zhMIMBhds8rfzv3pYRFVyg4cNBi/GzhaKekVA7LAJDA99gsZ6Or5TSOMW8qo3rg9YAsGZnUNTfMFf+MAItPuaNRv/C+K7EKLIMzJDS4ipvlVbroaB3keZt3gKHeHG8MSaAh0fAPkyJEv6IQIDAQAB';

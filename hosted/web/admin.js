@@ -49,7 +49,13 @@ function renderSetup(data){
   boothList.replaceChildren(...data.booths.map(booth=>item(booth.name,booth.location||'Pickup location not set')));
   deviceList.replaceChildren(...data.devices.map(device=>{
     const status=device.active?(device.paired?'Connected':'Waiting for setup'):'Revoked';
-    const row=item(device.label,[staffNames.get(device.staff_id),boothNames.get(device.booth_id),device.designation,status].filter(Boolean).join(' · '));
+    const lastSeen=device.last_seen_at?new Date(device.last_seen_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'';
+    const app=device.platform==='web'?'Browser':device.app_version?'App '+device.app_version:'';
+    const latest=data.latest_android_release;
+    const needsUpdate=device.platform!=='web'&&Number.isSafeInteger(device.app_version_code)&&latest?.accepted_at>0&&device.app_version_code<latest.version_code;
+    const release=needsUpdate?'Update available · '+latest.version_name:'';
+    const notifications=device.notifications_enabled===true?'Notifications on':device.notifications_enabled===false?'Notifications off':'';
+    const row=item(device.staff_name||staffNames.get(device.staff_id)||device.label,[boothNames.get(device.booth_id),device.designation,status,app,release,notifications,lastSeen?'Last seen '+lastSeen:''].filter(Boolean).join(' · '));
     if(device.active){
       const revoke=document.createElement('button');
       revoke.type='button';
@@ -208,15 +214,18 @@ function showInvitation(data){
   inviteCode.textContent=data.code;
   const expires=new Date(data.expires_at);
   byId('invite-expiry').textContent=Number.isNaN(expires.getTime())?'Use this invitation once.':'Use this invitation once before '+expires.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'.';
-  inviteCode.hidden=true;
+  inviteCode.hidden=false;
   inviteQr.hidden=false;
-  toggleInvite.textContent='Use setup code instead';
+  toggleInvite.textContent='Copy setup code';
+  byId('invite-copy-status').textContent='';
   inviteForm.hidden=true;
   invite.hidden=false;
   byId('invite-heading').focus();
+  invite.scrollIntoView?.({block:'start',behavior:'auto'});
 }
 
 const inviteStep=wizard(inviteForm,async fields=>{
+  fields.device_label=(fields.staff_name+' · '+fields.designation).slice(0,80);
   const data=await updateSetup({action:'invite',...fields});
   if(!data)return;
   try{showInvitation(data);inviteForm.reset();}
@@ -225,11 +234,7 @@ const inviteStep=wizard(inviteForm,async fields=>{
 
 openInvite.onclick=()=>{clearInvitation();showInviteForm(true);inviteStep(0);};
 refreshDevices.onclick=()=>updateSetup(null,'Devices refreshed.');
-toggleInvite.onclick=()=>{
-  inviteCode.hidden=!inviteCode.hidden;
-  inviteQr.hidden=!inviteCode.hidden;
-  toggleInvite.textContent=inviteCode.hidden?'Use setup code instead':'Show setup QR instead';
-};
+toggleInvite.onclick=()=>window.sharePassCopyText(inviteCode.textContent,byId('invite-copy-status'));
 byId('close-invite').onclick=()=>{clearInvitation();showInviteForm(false);updateSetup();};
 
 wizard(reissueForm,async(fields,show)=>{
@@ -355,3 +360,8 @@ for(const button of accountTabs)button.onclick=()=>{location.hash=button.dataset
 addEventListener('hashchange',()=>accountPanel(true));
 byId('refresh-report').onclick=loadReport;
 accountPanel();
+
+// Refresh device health while its registry is visible; do not interrupt setup.
+setInterval(()=>{
+  if(!document.hidden&&!byId('staff').hidden&&!byId('account-administration').hidden&&inviteForm.hidden&&invite.hidden)updateSetup();
+},30000);

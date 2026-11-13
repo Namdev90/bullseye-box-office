@@ -24,15 +24,25 @@ function updatePreference(channel,contact){
   return {channel,address,name:contact.name};
 }
 
-async function boothPoster(db,staff,origin){
+function separateCollectorPhones(contact,recipients){
+  const depositor=sharePassPhone(contact?.phone);
+  return !depositor||!recipients.some(person=>person?.phone&&sharePassPhone(person.phone)===depositor);
+}
+
+async function boothPosterDetails(db,staff,origin){
   const workspace=staff.workspace,booth=staff.booth_id||'B1';
   if(booth!=='B1'){
     const row=await boothConfiguration(db,workspace,booth);
-    return row?json({url:origin+'/booth/'+row.poster_token,booth:row.name}):boothMissing();
+    return row?{url:origin+'/booth/'+row.poster_token,booth:row.name}:null;
   }
   await db.prepare('INSERT OR IGNORE INTO sharepass_booth_posters(workspace,token) VALUES(?,?)').bind(workspace,crypto.randomUUID()).run();
   const row=await db.prepare('SELECT token FROM sharepass_booth_posters WHERE workspace=?').bind(workspace).first();
-  return json({url:origin+'/booth/'+row.token,booth:BOOTH_LABEL});
+  return {url:origin+'/booth/'+row.token,booth:BOOTH_LABEL};
+}
+
+async function boothPoster(db,staff,origin){
+  const details=await boothPosterDetails(db,staff,origin);
+  return details?json(details):boothMissing();
 }
 
 async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
@@ -59,6 +69,7 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   const current=input.intake_version===2;
   let recipients=input.recipients.map(contactFields);
   if(recipients.some(item=>!item||!(item.name||item.phone||item.email)))return error('Review the recipient names and contact details.',400);
+  if(!separateCollectorPhones(contact,recipients))return error('The collector must have a different WhatsApp number from the depositor.',400);
   if(current){
     recipients=recipients.map((person,i)=>({...person,quantities:passQuantities(input.recipients[i].quantities)}));
     if(!sharePassPhone(contact.phone)||!recipients.length||recipients.some(person=>!person.name||!sharePassPhone(person.phone)||
@@ -157,5 +168,24 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
   const counts=Object.entries(fields.quantities).filter(([,count])=>count).map(([key,count])=>count+' '+key.toUpperCase()).join(' + ');
   const proof=depositorPhone?{address:depositorPhone,message:'Hi '+fields.name+'! SharePass staff received '+counts+
     ' passes at your booth. Receipt reference '+fields.queue_ref+'. Keep this confirmation as proof of deposit.'}:null;
-  return json({...await result.json(),recipients,update_channel:preference?.channel||'',depositor_receipt:proof});
+  return json({...await result.json(),recipients,update_channel:preference?.channel||'',
+    depositor_phone:depositorPhone||'',depositor_name:fields.name,depositor_receipt:proof});
+}
+
+async function refreshedReceiptContacts(db,staff,response){
+  if(!response.ok)return response;
+  const result=await response.json();
+  const row=await db.prepare(`SELECT q.payload,d.payload->'$.update_contact' AS update_contact FROM sharepass_booth_queue q
+    JOIN sharepass_ledger_requests r ON r.owner=q.workspace AND r.id='booth-'||q.token
+    JOIN sharepass_ledger_deposits d ON d.owner=r.owner AND d.id=r.deposit_id
+    WHERE q.workspace=? AND q.booth_id=? AND r.deposit_id=? AND q.confirmed=1 LIMIT 1`)
+    .bind(staff.workspace,staff.booth_id||'B1',result.deposit.id).first();
+  if(!row)return json(result);
+  const fields=JSON.parse(row.payload),phone=sharePassPhone(fields.phone),preference=row.update_contact?JSON.parse(row.update_contact):null;
+  const counts=Object.entries(result.deposit.remaining).filter(([,count])=>count).map(([key,count])=>count+' '+key.toUpperCase()).join(' + ');
+  return json({...result,depositor_phone:phone||'',depositor_name:fields.name,
+    recipients:fields.recipients,update_channel:preference?.channel||'',
+    update_address:preference?.channel==='whatsapp'?preference.address:'',
+    depositor_receipt:phone?{address:phone,message:'Hi '+fields.name+'! Your SharePass pickup code has changed to '+result.collection_code+
+      '. The previous code no longer works. Available passes: '+counts+'. Share the new code only with your collectors.'}:null});
 }

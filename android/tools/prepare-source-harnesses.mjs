@@ -45,6 +45,7 @@ export function sourceHarnesses() {
     ['DeskWindowInsetsTest', 'DeskWindow', [
       'boolean contains(float x, float y)', 'private DeskGeometry.Area insets(int height)',
     ]],
+    ['NativeLookupTest', 'HostedDeskActivity', ['private void autoAdvance(EditText field, Predicate<String> ready, Runnable advance)', 'private static String firstNonEmpty(String... values)']],
     ['StaffMessageInboxTest', 'HostedDeskActivity', [
       'private boolean staffMessagesAllowed()', 'private JSONObject pendingStaffMessage(String id)',
       'private void presentStaffDialog(AlertDialog next)', 'private void showStaffMessage(boolean manual)',

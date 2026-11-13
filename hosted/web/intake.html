@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>Leave passes · SharePass</title>
 <link rel="stylesheet" href="/counter.css">
+<meta name="theme-color" content="#08090b">
+<link rel="stylesheet" href="/brand.css">
+<script defer src="/brand.js"></script>
 </head>
 <body class="customer-page"><main class="shell">
   <article class="intake-ticket">
@@ -25,25 +28,24 @@
           <label class="field">Your WhatsApp number
             <input name="phone" type="tel" inputmode="tel" autocomplete="section-depositor tel-national" aria-describedby="customer-phone-hint" placeholder="9876543210" maxlength="40" disabled>
           </label>
-          <small id="customer-phone-hint">Enter your number last to continue. We add +91 to Indian mobiles.</small>
+          <small id="customer-phone-hint">We add +91 to Indian mobiles. Your collector must use a different number.</small>
         </div>
       </fieldset>
       <fieldset id="customer-pass-step" hidden>
         <legend>Who will collect?</legend>
         <div id="recipient-list" class="stack"></div>
-        <details id="more-recipients">
-          <summary>More options</summary>
-          <button id="add-recipient" class="outline-action" type="button">Add recipient</button>
-        </details>
+        <button id="add-recipient" class="outline-action" type="button">＋ Add recipient</button>
         <p id="allocation-balance" role="status" hidden></p>
         <p id="customer-ready" class="customer-ready" role="status" hidden>✓ Ready to send</p>
       </fieldset>
-      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send</button></div>
+      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to staff</button></div>
+      <p class="intake-hint">Confirmation appears here automatically. Allow notifications when asked to receive a receipt alert.</p>
     </form>
     <section id="customer-receipt" class="stack" hidden aria-label="Deposit receipt">
       <p id="receipt-state" role="status"></p>
       <div id="receipt-share" class="stack"></div>
-      <button id="check-receipt" type="button">Check confirmation</button>
+      <p class="quiet-status" id="receipt-sync-status" role="status">Checking for staff confirmation automatically…</p>
+      <button id="check-receipt" type="button">Refresh receipt</button>
       <button id="receipt-alerts" type="button" hidden>Enable receipt alerts</button>
       <p id="receipt-alert-status" role="status" hidden></p>
       <a id="finish-receipt" class="menu-link" href="/">Done</a>

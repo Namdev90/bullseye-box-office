@@ -57,7 +57,7 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
       const normal=()=>f.send(path,body,options);
       return intercept?intercept(path,body,normal):normal();
     }};
-  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,recover,request,runRefresh,ready,state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
+  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
   const api=sandbox.testCounter;
   async function settle(){for(let i=0;i<100;i++){await Promise.resolve();if(!api.state().busy&&api.state().view!=='loading'){await Promise.resolve();return;}}throw Error('Counter did not settle');}
   await settle();
@@ -68,7 +68,26 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
 const journal=p=>JSON.parse([...p.storage.values()][0]||'null');
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 async function receipt(f,options){const made=await f.call('/api/deposits',initial,options);assert.equal(made.status,200);return made.body;}
-async function start(p,data){p.api.showReceipt(data);await p.click('refresh-saved-code');p.node('refresh-code-form').elements.packet.value=data.deposit.packet_id;}
+// Recovery tests deliberately enter the retained interrupted-request form. The
+// normal receipt icon now rotates immediately and is exercised separately below.
+async function start(p,data){p.api.showReceipt(data);p.api.openRefresh();p.node('refresh-code-form').elements.packet.value=data.deposit.packet_id;}
+
+test('receipt refresh icon rotates once without asking for a packet label',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),p=await page(f);p.api.showReceipt(data);
+    await p.click('refresh-saved-code');
+    assert.equal(p.api.state().view,'saved');
+    assert.notEqual(p.api.state().receipt.collection_code,data.collection_code);
+    assert.equal(p.storage.size,0);
+    const writes=p.calls.filter(call=>call.path===refreshPath);
+    assert.equal(writes.length,1);
+    assert.equal(writes[0].body.packet_id,data.deposit.packet_id);
+    assert.equal(writes[0].body.collection_code,data.collection_code);
+    assert.match(html,/<input name="packet" type="hidden">/);
+    const old=await f.call('/api/verify',{collection_code:data.collection_code});
+    assert.notEqual(old.status,200,'The superseded code must not authorize another pickup');
+  }finally{f.close();}
+});
 
 for(const reopen of [false,true])test('lost committed refresh recovers identically '+(reopen?'after Cancel/reopen':'on immediate retry'),async()=>{
   const f=fixture();let lose=true,committed;
@@ -124,7 +143,7 @@ test('definitive initial failure clears only its journal and a later refresh get
     const data=await receipt(f),p=await page(f,{intercept:(path,body,normal)=>path===refreshPath&&reject?Response.json({error:'Check packet',notExecuted:true},{status:400}):normal()});
     await start(p,data);await p.submit();assert.equal(p.storage.size,0);assert.equal(p.node('error').textContent,'Check packet');reject=false;
     await p.submit();const posts=p.calls.filter(c=>c.path===refreshPath);assert.notEqual(posts[0].body.request_id,posts[1].body.request_id);assert.equal(p.storage.size,0);
-    await p.click('refresh-saved-code');p.node('refresh-code-form').elements.packet.value=data.deposit.packet_id;await p.submit();assert.equal(new Set(p.calls.filter(c=>c.path===refreshPath).map(c=>c.body.request_id)).size,3);
+    p.api.openRefresh();p.node('refresh-code-form').elements.packet.value=data.deposit.packet_id;await p.submit();assert.equal(new Set(p.calls.filter(c=>c.path===refreshPath).map(c=>c.body.request_id)).size,3);
   }finally{f.close();}
 });
 

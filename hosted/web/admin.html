@@ -6,6 +6,9 @@
 <title>Account · SharePass</title>
 <link rel="stylesheet" href="/counter.css">
 <link rel="stylesheet" href="/admin.css">
+<meta name="theme-color" content="#08090b">
+<link rel="stylesheet" href="/brand.css">
+<script defer src="/brand.js"></script>
 </head>
 <body>
   <div class="shell admin-shell">
@@ -67,20 +70,21 @@
           <fieldset data-step><legend>Staff device details</legend>
             <div class="field"><label for="invite-booth">Booth</label><select id="invite-booth" name="booth_id" required></select></div>
             <label class="field">Staff name <input name="staff_name" maxlength="80" autocomplete="off" required></label>
-            <label class="field">Device label <input name="device_label" maxlength="80" placeholder="e.g. Front counter phone" autocomplete="off" required></label>
             <label class="field">Designation
               <select name="designation" aria-describedby="designation-help"><option>Counter staff</option><option>Deposit desk</option><option>Collection desk</option></select>
             </label>
-            <small id="designation-help">A staff label for this device. Access is assigned by booth.</small>
+            <small id="designation-help">The device is named automatically using the staff name. Access is assigned by booth.</small>
           </fieldset>
           <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create setup QR</button></div>
         </form>
         <div id="setup-invite" class="admin-wizard" hidden>
           <h3 id="invite-heading" tabindex="-1">Connect the staff device</h3>
           <p id="invite-expiry"></p>
+          <p id="invite-copy-status" role="status"></p>
           <div id="invite-qr" class="intake-qr"></div>
-          <output id="invite-code" class="code" aria-label="Four-digit setup code" hidden></output>
-          <div class="wizard-actions"><button type="button" id="toggle-invite">Use setup code instead</button><button type="button" id="close-invite">Done</button></div>
+          <p class="setup-code-label">Or enter this setup code</p>
+          <output id="invite-code" class="code" tabindex="0" aria-label="Four-digit setup code"></output>
+          <div class="wizard-actions"><button type="button" id="toggle-invite">Copy setup code</button><button type="button" id="close-invite">Done</button></div>
         </div>
       </section>
       <section class="admin-card" id="reissue" aria-labelledby="reissue-heading" hidden>

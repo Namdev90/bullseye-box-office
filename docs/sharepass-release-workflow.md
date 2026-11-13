@@ -34,4 +34,14 @@ Before deploying the four-digit pickup policy, complete or reconcile any outstan
 
 6. The **Publish verified SharePass Android APK** workflow checks GitHub's recorded asset digests and the downloaded bytes, the APK identity and signer, and the signature over the update manifest. It publishes the verified draft if all checks pass. Wait for verification before staging another version. If dispatch needs to be retried, run the workflow from main with the approved tag, version code, APK hash and latest setting. Keep the keystore, signing passwords, production exports and runtime credentials outside GitHub.
 
+7. After verified publication, a separate notification step runs only when `promote_latest` is true. It posts the exact verified manifest bytes to the canonical SharePass release-announcement endpoint; it uses no additional secret. Each request handles at most 12 eligible devices. The tool drains progressing batches, waits 60 seconds for stalled delivery leases, and stops after 40 requests or six minutes. Missing sender configuration, rejected or malformed responses, exhausted delivery attempts, and an unfinished backlog produce explicit GitHub warnings and a step summary. Notification failure does not undo or fail the published APK release. Reported delivery counts mean acceptance by the push service, not confirmed handset receipt or installation.
+
+   After resolving a notification warning, retry only the announcement with the same exact already-published, verified manifest and approved version code:
+
+   ```text
+   node android/tools/announce-sharepass-release.mjs <verified-published-manifest> <approved-version-code>
+   ```
+
+   The endpoint resumes pending work without resending previously acknowledged deliveries. Do not rerun the draft-publication step for an APK that is already published.
+
 The direct-download channel uses the existing development signing identity. A Google Play rollout requires a separate approved signing and upload plan. A Play app signed with a different identity cannot replace the installed direct-download APK in place. [Android app signing](https://developer.android.com/studio/publish/app-signing)

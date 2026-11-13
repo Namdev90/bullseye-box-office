@@ -1,0 +1,71 @@
+package in.sharepass.foundation;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
+
+/** Executes the actual field debounce callbacks with deterministic input/lifecycle changes. */
+public final class NativeLookupTest {
+    static final class Editable { }
+    interface TextWatcher {
+        void beforeTextChanged(CharSequence value, int start, int count, int after);
+        void onTextChanged(CharSequence value, int start, int before, int count);
+        void afterTextChanged(Editable value);
+    }
+    static final class EditText {
+        String value = "";
+        boolean attached = true;
+        TextWatcher watcher;
+        BiConsumer<EditText, Boolean> focus;
+        boolean isAttachedToWindow() { return attached; }
+        String getText() { return value; }
+        void addTextChangedListener(TextWatcher watcher) { this.watcher = watcher; }
+        void setOnFocusChangeListener(BiConsumer<EditText, Boolean> listener) { focus = listener; }
+        void input(String text) { value = text; watcher.onTextChanged(text, 0, 0, text.length()); }
+    }
+    static final class Queue {
+        final List<Runnable> work = new ArrayList<>();
+        void removeCallbacks(Runnable callback) { work.removeIf(r -> r == callback); }
+        void postDelayed(Runnable callback, long delay) {
+            if (delay < 250) throw new AssertionError("A typed code must debounce before lookup");
+            work.add(callback);
+        }
+        void drain() { for (Runnable item : new ArrayList<>(work)) { work.remove(item); item.run(); } }
+    }
+    final Queue handler = new Queue();
+    boolean foreground = true, busy;
+
+    /* PRODUCTION_METHODS */
+
+    private static void require(boolean value, String note) { if (!value) throw new AssertionError(note); }
+    public static void main(String[] args) {
+        var activity = new NativeLookupTest();
+        var field = new EditText();
+        int[] lookups = {0};
+        activity.autoAdvance(field, value -> value.matches("[0-9]{4}"), () -> lookups[0]++);
+        for (String incomplete : new String[]{"", "0", "00", "006", "00690", "a069"}) {
+            field.input(incomplete); activity.handler.drain();
+        }
+        require(lookups[0] == 0, "Only an exact four-digit code may trigger lookup");
+        field.input("0069"); field.input("006"); field.input("0420");
+        require(activity.handler.work.size() == 1, "Editing coalesces to one current lookup");
+        activity.handler.drain();
+        require(lookups[0] == 1, "Completed input looks up without a Find button or focus assumption");
+        for (int blocked = 0; blocked < 3; blocked++) {
+            field.input("4200");
+            activity.foreground = blocked != 0; activity.busy = blocked == 1; field.attached = blocked != 2;
+            activity.handler.drain();
+            require(lookups[0] == 1, "No lookup after background/busy/detached transition " + blocked);
+        }
+        activity.foreground = true; activity.busy = false; field.attached = true;
+        field.input("4200"); field.focus.accept(field, false); activity.handler.drain();
+        require(lookups[0] == 1, "Leaving a field cancels delayed lookup");
+        field.input("4200"); activity.handler.drain();
+        require(lookups[0] == 2, "New intentional input retries after lifecycle blockers clear");
+        require(firstNonEmpty("", " 919876543210 ", "918765432109").equals("919876543210"), "Cleared preference falls back to the known depositor phone");
+        require(firstNonEmpty("919999999999", "919876543210").equals("919999999999"), "An explicit saved address remains preferred");
+        require(firstNonEmpty(" ", null, "").isEmpty(), "Missing contacts stay empty");
+        System.out.println("PASS exact-source native lookup debounce/input/lifecycle guards (not camera or device acceptance)");
+    }
+}

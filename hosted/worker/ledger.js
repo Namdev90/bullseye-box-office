@@ -36,6 +36,7 @@ function ledgerModel(){
 let ledgerCodePolicy;
 const reusableCode=alias=>`EXISTS(SELECT 1 FROM sharepass_ledger_deposits d
   WHERE d.owner=${alias}.owner AND d.id=${alias}.deposit_id
+  AND (d.payload->>'active_collection_code' IS NULL OR d.payload->>'active_collection_code'=${alias}.code)
   AND json_type(d.payload,'$.remaining')='object'
   AND EXISTS(SELECT 1 FROM json_each(d.payload,'$.remaining'))
   AND NOT EXISTS(SELECT 1 FROM json_each(d.payload,'$.remaining') WHERE type<>'integer' OR value<>0)
@@ -52,25 +53,69 @@ async function ledgerCode(db,owner,theme,exclude='',preferred='',allowReuse=fals
   }
   const {weights,total,eligible}=ledgerCodePolicy;
   const allowed=code=>/^[0-9]{4}$/.test(code)&&(!CODE_CATALOGUE.has(code)||eligible.has(code));
-  const candidates=new Set(preferred&&allowed(preferred)?[preferred]:[]);
-  for(let i=0;i<20&&total;i++){
-    let pick=model.randomBelow(total);
-    for(const [code,weight] of weights)if((pick-=weight)<0){candidates.add(code);break;}
-  }
-  for(let i=0;i<20;i++){
-    const code=model.code();
-    if(allowed(code))candidates.add(code);
-  }
-  candidates.delete(exclude);
+  // Put the requested jokes first, then the complete curated catalogue. A
+  // random ordinary number is used only once that catalogue is exhausted.
+  // Shuffle each tier by weight without replacement, so unlucky sampling can
+  // never skip an available memorable code.
+  const ordered=entries=>{
+    const remaining=entries.filter(([code])=>code!==exclude),result=[];
+    while(remaining.length){
+      let pick=model.randomBelow(remaining.reduce((sum,[,weight])=>sum+weight,0));
+      const index=remaining.findIndex(([,weight])=>(pick-=weight)<0);
+      result.push(remaining.splice(index,1)[0][0]);
+    }
+    return result;
+  };
+  const favorites=new Set(NUMERIC_FIRST_CHOICES);
+  const candidates=new Set([
+    ...(preferred&&preferred!==exclude&&allowed(preferred)?[preferred]:[]),
+    ...ordered(weights.filter(([code])=>favorites.has(code))),
+    ...ordered(weights.filter(([code])=>!favorites.has(code)))
+  ]);
   const firstAvailable=async codes=>(await ledgerStatement(db,"SELECT value AS code FROM json_each(?) j WHERE NOT EXISTS("+
     'SELECT 1 FROM sharepass_ledger_codes held WHERE owner=? AND event=? AND code=j.value'+
-    (allowReuse?' AND NOT '+reusableCode('held'):'')+') ORDER BY j.key LIMIT 1',
+    ') ORDER BY j.key LIMIT 1',
     ledgerJson(codes),owner,EVENT).first())?.code;
   const sampled=await firstAvailable([...candidates]);
   if(sampled)return sampled;
   const start=model.randomBelow(10000);
   return firstAvailable(Array.from({length:10000},(_,index)=>String((start+index)%10000).padStart(4,'0'))
     .filter(code=>code!==exclude&&allowed(code)));
+}
+
+async function ledgerHistory(db,staff,params){
+  const rawLimit=params.get('limit');
+  const limit=rawLimit===null?50:Number(rawLimit);
+  if(!Number.isSafeInteger(limit)||limit<1||limit>100)return error('Choose a history page size from 1 to 100.',400);
+  let cursor=null;
+  const encoded=params.get('cursor');
+  if(encoded){
+    try{
+      if(encoded.length>200)throw new Error();
+      cursor=JSON.parse(atob(encoded));
+      if(!Array.isArray(cursor)||cursor.length!==2||!/^\d{4}-\d\d-\d\dT[0-9:.]+Z$/.test(cursor[0])||!intakeTokenPattern.test(cursor[1]))throw new Error();
+    }catch{return error('This history page has expired. Open History again.',400);}
+  }
+  await ensureLedger(db,staff.workspace);
+  const booth=staff.booth_id||'B1';
+  const after=cursor?" AND ((d.payload->>'created_at')<? OR ((d.payload->>'created_at')=? AND d.id<?))":'';
+  const [records,pending]=await db.batch([
+    ledgerStatement(db,`SELECT d.id,d.payload FROM sharepass_ledger_deposits d
+      WHERE d.owner=? AND d.event=? AND d.booth=?${after}
+      ORDER BY (d.payload->>'created_at') DESC,d.id DESC LIMIT ?`,
+      staff.workspace,EVENT,booth,...(cursor?[cursor[0],cursor[0],cursor[1]]:[]),limit+1),
+    ledgerStatement(db,`SELECT d.payload AS deposit,c.payload AS collection FROM sharepass_ledger_collections c
+      JOIN sharepass_ledger_deposits d ON d.owner=c.owner AND d.id=c.deposit_id
+      WHERE c.owner=? AND d.event=? AND c.booth=? AND d.booth=c.booth AND c.pending=1
+        AND (? OR c.payload->>'created_by'=?) ORDER BY c.payload->>'created_at' DESC,c.id DESC`,
+      staff.workspace,EVENT,booth,Number(staff.admin),staff.operator)
+  ]);
+  const model=ledgerModel();
+  model.collections=pending.results.map(row=>JSON.parse(row.collection));
+  const deposits=records.results.slice(0,limit).map(row=>model.publicDeposit(JSON.parse(row.payload)));
+  const last=deposits.at(-1);
+  return json({deposits,pending_handovers:pending.results.map(row=>model.publicDeposit(JSON.parse(row.deposit))),
+    next_cursor:records.results.length>limit?btoa(ledgerJson([last.created_at,last.id])):null});
 }
 
 async function ledgerDepositByCode(db,owner,code){
@@ -120,6 +165,9 @@ async function ledgerVerify(db,owner,body,legacy,model){
 }
 
 async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false){
+  // Rotation retires its old code permanently for this event. Even legacy
+  // reuse configuration must not turn an old receipt into a different pickup.
+  if(path==='/api/codes/refresh'||path==='/api/admin/reissue')allowReuse=false;
   await ensureLedger(db,owner);
   const model=ledgerModel();
   if(!model.booths.some(booth=>booth.id===body.booth_id)){

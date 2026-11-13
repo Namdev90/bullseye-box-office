@@ -44,11 +44,11 @@ final class HostedRegisterClient {
     String token() { return saved.optString("token"); }
     boolean hasPending() { return saved.has("pending"); }
     JSONObject receipt() { return saved.optJSONObject("receipt"); }
-    void rememberUpdateChannel(String channel) throws Exception {
+    void rememberUpdateChannel(String channel, String address) throws Exception {
         JSONObject updated=copy();
         JSONObject receipt=updated.optJSONObject("receipt");
         if(receipt==null)return;
-        receipt.put("update_channel",channel);
+        receipt.put("update_channel",channel).put("update_address", address);
         write(updated);
     }
     void rememberRecipients(String code, org.json.JSONArray people) throws Exception {
@@ -150,6 +150,12 @@ final class HostedRegisterClient {
         return request(path, body, token());
     }
 
+    JSONObject deviceStatus(String session, boolean notifications) throws Exception {
+        return request("/api/device/status", new JSONObject().put("platform", "android")
+            .put("app_version", BuildConfig.VERSION_NAME).put("app_version_code", BuildConfig.VERSION_CODE)
+            .put("notifications_enabled", notifications), session);
+    }
+
     static JSONObject pushRegistration(String path, String session, String registration) throws Exception {
         return request(path, new JSONObject().put("token", registration), session);
     }
@@ -211,8 +217,8 @@ final class HostedRegisterClient {
             JSONObject previous = updated.optJSONObject("receipt");
             if (previous != null && previous.getJSONObject("deposit").getString("id")
                     .equals(response.getJSONObject("deposit").getString("id"))) {
-                for (String key : new String[]{"recipients", "depositor_receipt", "update_channel"}) {
-                    if (previous.has(key)) response.put(key, previous.get(key));
+                for (String key : new String[]{"recipients", "depositor_phone", "depositor_name", "update_channel", "update_address"}) {
+                    if (!response.has(key) && previous.has(key)) response.put(key, previous.get(key));
                 }
             }
             updated.put("receipt", response);

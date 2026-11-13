@@ -1,6 +1,6 @@
 # SharePass hosted register
 
-The Worker serves the guest intake, staff desk and owner administration pages and stores custody state in Cloudflare D1. The private Sites project binds its database as `DB`. Site-verified identity or a paired staff device is required for staff access. Register releases preserve the physical packet check, idempotent custody operations and partial handovers.
+The Worker serves the guest intake, staff desk and owner administration pages and stores custody state in Cloudflare D1. The private Sites project binds its database as `DB`. Site-verified identity or a paired staff device is required for staff access. Register releases preserve verified packet binding, idempotent custody operations and explicit partial handovers. Collection derives the packet identifier from the verified claim instead of requiring staff to type a packet label.
 
 ## Build and test
 
@@ -20,6 +20,7 @@ The public clone builds with a synthetic code catalogue, neutral artwork and a S
 
 - `SHAREPASS_HOSTING_CONFIG_PATH` points to the authorized Sites configuration file. The build copies it into the output only. A private Sites build also requires the two inputs below.
 - `SHAREPASS_CODE_MASTER_PATH` points to the approved private catalogue JSON. Set it for build and test so both use the same catalogue.
+- `SHAREPASS_ICON_192_PATH` and `SHAREPASS_ICON_512_PATH` optionally provide PNG launcher icons derived from the approved artwork. Public builds retain neutral fixture icons.
 - `SHAREPASS_ARTWORK_PATH` points to the approved JPEG for the opening and staff screens.
 - Configure owner identity, password-login handle and pepper, and optional notification credentials in private Site runtime settings. Variable names are `SHAREPASS_OWNER_EMAIL`, `SHAREPASS_OWNER_HANDLE`, `SHAREPASS_OWNER_PASSWORD_PEPPER`, `SHAREPASS_FCM_SERVICE_ACCOUNT`, `SHAREPASS_WEB_PUSH_PUBLIC_KEY` and `SHAREPASS_WEB_PUSH_PRIVATE_JWK`.
 - Code reuse is enabled unless `SHAREPASS_ALLOW_CODE_REUSE` is exactly `0`. Before deployment, verify the intended value in protected operational configuration and confirm every staff client supports receipt-bound verification. Set it to `0` during a staged rollout when needed. This source default is not evidence of the live configuration.
