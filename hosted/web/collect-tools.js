@@ -31,7 +31,7 @@
       if(!active){stream.getTracks().forEach(track=>track.stop());return;}
       video.srcObject=stream;await video.play();const loaded=await read;if(loaded.error)throw loaded.error;const decode=loaded.decode;
       if(!active)return;
-      status.textContent='Point at the QR on the current pickup receipt.';
+      status.textContent='Point at the current pickup receipt or its WhatsApp QR.';
       const canvas=document.createElement('canvas'),context=canvas.getContext('2d',{willReadFrequently:true});
       const tick=at=>{
         if(!active)return;
@@ -41,7 +41,7 @@
           const image=context.getImageData(0,0,canvas.width,canvas.height),result=decode(image.data,image.width,image.height);
           if(result){
             let receipt;
-            try{receipt=SharePassDrafts.receiptDetails(result.data);}
+            try{receipt=SharePassDrafts.scanReceipt(result.data);}
             catch{status.textContent='This is not a current SharePass pickup receipt. Scan the receipt QR or cancel and enter the code.';}
             if(receipt){close();window.sharePassFeedback?.('scan');perform(async()=>{openLookup(receipt.code);lookupForm.elements.reference.value=receipt.reference;byId('lookup-reference').hidden=false;await findPasses();});return;}
           }
@@ -64,14 +64,15 @@
       const button=document.createElement('button');button.type='button';button.textContent=digit;button.setAttribute('aria-label',digit==='⌫'?'Delete last digit':digit);
       button.onclick=()=>{
         if(busy)return;
+        button.focus({preventScroll:true});
         input.value=digit==='⌫'?input.value.slice(0,-1):(input.value+digit).slice(0,4);
-        if(digit!=='⌫'&&'speechSynthesis' in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(digit));}
+        if(digit!=='⌫'&&window.sharePassSoundEnabled?.()!==false&&'speechSynthesis' in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(digit));}
         input.dispatchEvent(new Event('input',{bubbles:true}));
       };keys.append(button);
     }
     form.insertBefore(actions,form.querySelector('button.primary'));form.insertBefore(keys,form.querySelector('button.primary'));
     let advance;
-    input.addEventListener('input',()=>{clearTimeout(advance);if(/^\d{4}$/.test(input.value))advance=setTimeout(()=>{if(!busy&&!form.closest('[hidden]')&&/^\d{4}$/.test(input.value))form.requestSubmit();},350);});
+    input.addEventListener('input',event=>{clearTimeout(advance);if(!event.isComposing&&/^\d{4}$/.test(input.value))advance=setTimeout(()=>{if(!busy&&!form.closest('[hidden]')&&form.contains(document.activeElement)&&/^\d{4}$/.test(input.value))form.requestSubmit();},350);});
     form.addEventListener('submit',()=>clearTimeout(advance));
   }
 })();

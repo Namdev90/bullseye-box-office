@@ -23,4 +23,5 @@
  if(help){const sound=document.createElement('button');sound.type='button';sound.textContent=enabled?'Sound: On':'Sound: Muted';sound.setAttribute('aria-pressed',String(enabled));sound.addEventListener('click',()=>{preference(!enabled);sound.textContent=enabled?'Sound: On':'Sound: Muted';sound.setAttribute('aria-pressed',String(enabled));});help.append(sound);}
  document.addEventListener('click',event=>{const button=event.target.closest('button,a');if(!button||button.disabled||button.id==='audio-enabled')return;if(!started){started=true;cue('open');}else cue(button.classList.contains('close-dialog')?'close':'tap');});
  window.sharePassFeedback=cue;
+ window.sharePassSoundEnabled=()=>enabled;
 })();

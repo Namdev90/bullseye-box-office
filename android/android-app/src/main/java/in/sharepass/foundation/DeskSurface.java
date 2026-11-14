@@ -90,7 +90,7 @@ final class DeskSurface {
         button.setMinHeight(dp(context, primary ? 54 : 48));
         button.setMinWidth(0);button.setMinimumWidth(0);
         button.setPadding(dp(context, 12), dp(context, primary ? 10 : 8), dp(context, 12), dp(context, primary ? 13 : 8));
-        if(button.getText().toString().contains("WhatsApp"))whatsapp(button);
+        if(button.getText().toString().contains("WhatsApp")||button.getText().toString().startsWith("Message — "))whatsapp(button);
     }
 
     static void whatsapp(Button button){

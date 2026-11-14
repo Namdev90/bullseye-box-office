@@ -25,6 +25,14 @@ test('WhatsApp actions display a safe named message label and consistent green s
  assert.equal(drafts.composeLink({address:'+12025550123',message:'Synthetic'}).textContent,'Message on WhatsApp');
 });
 
+test('scanner accepts one exact current receipt inside a WhatsApp QR and rejects unrelated or ambiguous destinations',()=>{
+ const origin='https://sharepass.example.test';const {drafts}=draftTools({location:{origin},URL});
+ const receipt=origin+'/pickup#0007.PKT-A1B2C3D4';
+ const url='https://wa.me/12025550123?text='+encodeURIComponent('Hi Taylor!\nReceipt: '+receipt+'\nKeep this private.');
+ assert.equal(drafts.scanReceipt(url).code,'0007');assert.equal(drafts.scanReceipt(url).reference,'PKT-A1B2C3D4');
+ for(const value of [url.replace('wa.me','evil.example'),url+'&text=other',url.replace('https:','http:'),'https://wa.me/12025550123?text='+encodeURIComponent('Receipt: '+receipt+'\nReceipt: '+receipt),'https://wa.me/12025550123?text='+encodeURIComponent('Receipt: https://other.example/pickup#0007.PKT-A1B2C3D4')])assert.throws(()=>drafts.scanReceipt(value));
+});
+
 // Minimal synthetic DOM for the real renderDeposit handlers, not browser
 // rendering, native focus/keyboard behavior, camera permissions or QR scanning.
 function draftPage(){

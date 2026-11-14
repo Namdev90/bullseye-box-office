@@ -219,12 +219,8 @@ byId('suggest-code').onclick=()=>perform(async()=>{
 });
 const inlineLookup=byId('desk-code-form');
 inlineLookup.onsubmit=event=>{event.preventDefault();perform(()=>findPasses(inlineLookup.elements.code.value));};
-sharePassAutoAdvance(inlineLookup.elements.code,value=>view==='desk'&&/^[0-9]{4}$/.test(value),
-  ()=>inlineLookup.requestSubmit());
 const pickupForm=byId('collect-form');
 const lookupForm=byId('lookup-form');
-sharePassAutoAdvance(lookupForm.elements.code,value=>!byId('lookup').hidden&&byId('lookup-reference').hidden&&/^[0-9]{4}$/.test(value),
-  ()=>lookupForm.requestSubmit());
 byId('select-all-passes').onclick=()=>{
   for(const field of byId('collect-counts').querySelectorAll('input'))field.value=field.max;
 };

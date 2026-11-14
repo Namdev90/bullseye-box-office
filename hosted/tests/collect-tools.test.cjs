@@ -13,7 +13,7 @@ test('vendored scanner decodes the existing receipt QR including leading zeroes'
   assert.equal(decode(pixels,size,size).data,link);
 });
 
-function page({getUserMedia=async stream=>stream,decode=()=>null}={}){
+function page({getUserMedia=async stream=>stream,decode=()=>null,muted=false}={}){
   const timers=new Map(),frames=new Map(),events={},nodes=[];let next=0,stops=0,requests=0,camera=0;
   const stream={getTracks:()=>[{stop(){stops++;}}]};
   class Node{
@@ -26,20 +26,22 @@ function page({getUserMedia=async stream=>stream,decode=()=>null}={}){
     querySelector(){return {};}
     closest(){return this.hidden?{}:null;}
     requestSubmit(){requests++;this.listeners.submit?.();}
-    focus(){}showModal(){this.open=true;}remove(){this.removed=true;}
+    focus(){document.activeElement=this;}showModal(){this.open=true;}remove(){this.removed=true;}
+    contains(target){return target===this||Object.values(this.elements||{}).includes(target)||this.children.some(child=>child.contains?.(target));}
     play(){return Promise.resolve();}
     getContext(){return {drawImage(){},getImageData(){return {data:new Uint8ClampedArray(4),width:1,height:1};}};}
   }
   const forms=[new Node('form'),new Node('form')];for(const form of forms)form.elements={code:new Node('input'),reference:new Node('input')};
   const document={currentScript:{src:'https://sharepass.example.test/collect-tools.js?v=37'},hidden:false,
     createElement:tag=>{const node=new Node(tag);nodes.push(node);return node;},head:new Node('head'),body:new Node('body'),querySelectorAll:()=>forms,addEventListener:(type,action)=>events[type]=action};
-  const window={jsQR:decode,addEventListener:(type,action)=>events[type]=action};
+  let spoken=0;
+  const window={jsQR:decode,sharePassSoundEnabled:()=>!muted,speechSynthesis:{cancel(){},speak(){spoken++;}},addEventListener:(type,action)=>events[type]=action};
   const byId=()=>new Node('div');
   runInNewContext(readFileSync('web/collect-tools.js','utf8'),{window,document,URL,navigator:{mediaDevices:{getUserMedia:()=>{camera++;return getUserMedia===undefined?Promise.resolve(stream):getUserMedia(stream);}}},
-    SharePassDrafts:{receiptDetails:value=>{if(value!=='valid')throw Error('Invalid receipt');return {code:'0007',reference:'PKT-A1B2C3D4'};}},
-    Event:class{constructor(type){this.type=type;}},performance:{now:()=>1000},busy:false,perform:async action=>action(),openLookup:code=>{forms[1].elements.code.value=code;},lookupForm:forms[1],byId,
+    SharePassDrafts:{scanReceipt:value=>{if(value!=='valid')throw Error('Invalid receipt');return {code:'0007',reference:'PKT-A1B2C3D4'};}},
+    Event:class{constructor(type){this.type=type;}},SpeechSynthesisUtterance:class{},speechSynthesis:window.speechSynthesis,performance:{now:()=>1000},busy:false,perform:async action=>action(),openLookup:code=>{forms[1].elements.code.value=code;},lookupForm:forms[1],byId,
     findPasses:async()=>{requests++;},setTimeout:action=>{timers.set(++next,action);return next;},clearTimeout:id=>timers.delete(id),requestAnimationFrame:action=>{frames.set(++next,action);return next;},cancelAnimationFrame:id=>frames.delete(id)});
-  return {forms,nodes,events,timers,frames,document,get camera(){return camera;},get stops(){return stops;},get requests(){return requests;},scan:()=>forms[0].children[0].children[0].onclick()};
+  return {forms,nodes,events,timers,frames,document,get spoken(){return spoken;},get camera(){return camera;},get stops(){return stops;},get requests(){return requests;},scan:()=>forms[0].children[0].children[0].onclick()};
 }
 
 test('keypad retains zeroes, automatically verifies four digits once and ignores hidden views',()=>{
@@ -49,6 +51,15 @@ test('keypad retains zeroes, automatically verifies four digits once and ignores
   [...p.timers.values()][0]();assert.equal(p.requests,1);
   keys.find(key=>key.textContent==='⌫').onclick();assert.equal(p.forms[0].elements.code.value,'000');assert.equal(p.timers.size,0);
   keys.find(key=>key.textContent==='7').onclick();p.forms[0].hidden=true;[...p.timers.values()][0]();assert.equal(p.requests,1);assert.equal(p.camera,0);
+});
+
+test('one lookup timer owns both code fields; muted keypad never speaks',()=>{
+  const wiring=readFileSync('web/counter.js','utf8').split("const inlineLookup=byId('desk-code-form');")[1].split("byId('select-all-passes')")[0];
+  assert(!wiring.includes('sharePassAutoAdvance'),'An additional debounce consumes the failed-code allowance twice');
+  const p=page({muted:true}),keys=p.forms[0].children[1].children;
+  for(const digit of '9999')keys.find(key=>key.textContent===digit).onclick();
+  assert.equal(p.spoken,0);for(const action of [...p.timers.values()])action();assert.equal(p.requests,1);assert.equal(p.timers.size,0);
+  const audible=page();audible.forms[0].children[1].children[0].onclick();assert.equal(audible.spoken,1);
 });
 
 test('camera is explicit, stops after decode/background/cancel, and only verifies a valid receipt',async()=>{

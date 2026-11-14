@@ -425,8 +425,7 @@ public final class HostedDeskActivity extends Activity {
         return button;
     }
     private Button messageButton(String name,Runnable action){
-        Button message=button(name==null||name.trim().isEmpty()?"Message on WhatsApp":"Message — "+name.trim(),action,false);
-        DeskSurface.whatsapp(message);return message;
+        return button(name==null||name.trim().isEmpty()?"Message on WhatsApp":"Message — "+name.trim(),action,false);
     }
     private EditText field(String label, int input, int limit) {
         TextView caption = line(label, 15, true);
@@ -1598,7 +1597,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void speakDigits(String value){
         android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
-        if(!speechReady||!value.matches("[0-9]{1,4}")||access!=null&&access.isTouchExplorationEnabled())return;
+        if(!DeskSounds.enabled(this)||!speechReady||!value.matches("[0-9]{1,4}")||access!=null&&access.isTouchExplorationEnabled())return;
         speech.speak(value.replaceAll("(?<=.)(?=.)"," "),TextToSpeech.QUEUE_FLUSH,null,"sharepass-code");
     }
     private void logout(){

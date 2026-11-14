@@ -1,6 +1,7 @@
 'use strict';
 // One approved brand source, reused without changing the artwork file.
 (()=>{
+  window.sharePassSoundEnabled=()=>{try{return localStorage.getItem('sharepass-sound')!=='off';}catch{return true;}};
   const sound=document.createElement('script');sound.src='/interaction-audio.js'+new URL(document.currentScript.src).search;document.head.append(sound);
   const rail=document.createElement('div');
   rail.className='brand-rail';
@@ -78,7 +79,7 @@ window.sharePassCopyText=async(text,status)=>{
 
 document.addEventListener('click',event=>{
   const code=event.target.closest('#saved-code,#pickup-code');
-  if(!code||!/^\d{4}$/.test(code.textContent.trim())||!('speechSynthesis' in window))return;
+  if(!code||window.sharePassSoundEnabled?.()===false||!/^\d{4}$/.test(code.textContent.trim())||!('speechSynthesis' in window))return;
   speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(code.textContent.trim().split('').join(' ')));
 });
 document.addEventListener('keydown',event=>{
