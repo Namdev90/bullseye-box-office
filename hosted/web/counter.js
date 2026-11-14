@@ -888,10 +888,10 @@ function showBalance(result){
   byId('balance').textContent = balance(result.deposit.remaining);
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();
-  if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){
-    compose.append(draft.composeLink(result.depositor_update,Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
-  }
   show('done');
+  if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){try{
+    compose.append(draft.composeLink(result.depositor_update,Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
+  }catch{byId('error').textContent='The confirmed result is saved. This WhatsApp draft could not be prepared; ask staff for help sharing the update.';}}
 }
 
 const updatesForm=byId('pickup-updates-form');

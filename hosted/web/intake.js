@@ -184,7 +184,7 @@ async function customerRequest(body,statusId){
   }:{})});
   if(!response.headers.get('Content-Type')?.startsWith('application/json'))throw new Error('Could not open the form. Reopen its QR or ask staff for a fresh one.');
   const result=await response.json();
-  if(!response.ok)throw Object.assign(new Error(result.error||'Ask staff for a fresh form QR.'),{status:response.status});
+  if(!response.ok)throw Object.assign(new Error(result.error||'Ask staff for a fresh form QR.'),{status:response.status,notExecuted:result.notExecuted===true});
   return result;
 }
 function showReceipt(result){
@@ -528,7 +528,14 @@ form.onsubmit=async event=>{
       await prepareReceiptAlerts(requestId);
       if(!alertsEnabled&&alertScope&&!alertButton.disabled)await alertButton.onclick();
     }).catch(()=>{});
-  }catch(error){errorLine.textContent=error.message;}
+  }catch(error){
+    if(booth&&error.status===400&&error.notExecuted){
+      // Validation rejected this payload before a queue entry could be created.
+      submission=null;requestId=undefined;
+      try{sessionStorage.removeItem('sharepass-receipt:'+token);}catch{}
+    }
+    errorLine.textContent=error.message;
+  }
   finally{submit.disabled=false;}
 };
 

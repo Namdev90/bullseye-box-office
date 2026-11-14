@@ -56,3 +56,11 @@ test('confirmed handover shows both roles and names the depositor message button
   runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> 'No passes remaining',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
   assert.match(nodes.get('handover-people').textContent,/Last collector: Omar/);
 });
+
+test('optional WhatsApp URL failure cannot hide a confirmed handover or leave its transfer screen active',()=>{
+ const source=readFileSync('web/counter.js','utf8'),render=source.slice(source.indexOf('function showBalance('),source.indexOf('\nconst updatesForm='));
+ const nodes=new Map();const byId=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){},append(){}});return nodes.get(id);};let view='handover';
+ const result={deposit:{depositor_label:'Taylor',remaining:{normal:0}},collection:{collector_label:'Riya'},depositor_update:{channel:'whatsapp',address:'12025550101',message:'界'.repeat(200)}};
+ runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> 'No passes remaining',show:id=>view=id,sharePassPhone:()=>true,draft:{composeLink(){throw Error('URL too long');}}});
+ assert.equal(view,'done');assert.match(byId('error').textContent,/confirmed result is saved/);assert.match(byId('handover-people').textContent,/Collector: Riya/);
+});

@@ -9,11 +9,21 @@ function page(storage=new Map()){
  const document={getElementById(id){if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);}};
  const context={document,booth:true,token:'synthetic-booth',requestId:undefined,submission:undefined,alertKey:'',navigator:{},window:{},crypto,
   form:{elements:{name:{value:'Taylor'},phone:{value:'+12025550101'}}},guestPhone:{value:'+12025550101'},quantities:{normal:2,vip:0,vvip:0,mip:1},
-  people:()=>[],sharePassPhone:()=> '12025550101',errorLine:{},sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},
+  people:()=>[],sharePassPhone:()=> '12025550101',errorLine:{},sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
   showReceipt:value=>seen.push(value),setTimeout:()=>0,location:{hash:'',pathname:'/booth/synthetic-booth',search:''}};
  return {context,storage,seen};
 }
 function submitHandler(context){runInNewContext(source.slice(source.indexOf('form.onsubmit=async event=>{'),source.indexOf('(async()=>{',source.indexOf('form.onsubmit=async event=>{'))),context);return ()=>context.form.onsubmit({preventDefault(){}});}
+
+test('definite validation rejection permits correction; conflict, permission and uncertain errors keep the original intent',async()=>{
+ for(const status of [400,401,403,409,500,undefined]){
+  const p=page(),bodies=[];let reject=true;
+  p.context.customerRequest=async body=>{bodies.push(JSON.parse(JSON.stringify(body)));if(reject)throw Object.assign(Error('Synthetic rejection'),{status,notExecuted:status!==500});return {status:'submitted'};};
+  const submit=submitHandler(p.context);await submit();p.context.form.elements.name.value='Corrected';reject=false;await submit();
+  assert.equal(bodies[1].name,status===400?'Corrected':'Taylor');
+  assert.equal(bodies[0].request_id===bodies[1].request_id,status!==400);
+ }
+});
 
 test('public intake saves immutable intent before sending and retries a lost reply with the same ID and details',async()=>{
  const p=page(),sent=[];let lose=true;
