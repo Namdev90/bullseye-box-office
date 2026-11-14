@@ -1,0 +1,33 @@
+package in.sharepass.foundation;
+import java.util.*;
+
+public final class QueueNotificationPolicyTest {
+    static final String CHANNEL="booth_queue";
+    static class Build{static class VERSION{static int SDK_INT=33;}}
+    static class android{static class Manifest{static class permission{static final String POST_NOTIFICATIONS="notifications";}}}
+    static class PackageManager{static final int PERMISSION_GRANTED=0;}
+    static class NotificationChannel{int importance=3;int getImportance(){return importance;}}
+    static class NotificationManager{
+        static final int IMPORTANCE_NONE=0;
+        boolean enabled=true;Map<String,NotificationChannel> channels=new HashMap<>();
+        boolean areNotificationsEnabled(){return enabled;}
+        NotificationChannel getNotificationChannel(String key){return channels.get(key);}
+    }
+    static class Context{
+        NotificationManager manager=new NotificationManager();int permission=0;
+        int checkSelfPermission(String key){return permission;}
+        NotificationManager getSystemService(Class<?> kind){return manager;}
+    }
+    static void ensureChannel(Context context){context.manager.channels.computeIfAbsent(CHANNEL,key->new NotificationChannel());}
+    /* PRODUCTION_METHODS */
+    public static void main(String[] args){
+        Context context=new Context();if(!allowed(context))throw new AssertionError();
+        context.manager.channels.put("app_updates",new NotificationChannel());
+        context.manager.channels.get(CHANNEL).importance=0;
+        if(allowed(context)||!allowed(context,"app_updates"))throw new AssertionError("Channels must remain separate");
+        context.manager.enabled=false;if(allowed(context,"app_updates"))throw new AssertionError();
+        context.manager.enabled=true;context.permission=1;if(allowed(context,"app_updates"))throw new AssertionError();
+        context.permission=0;Build.VERSION.SDK_INT=25;context.manager.channels.clear();if(!allowed(context,"app_updates"))throw new AssertionError();
+        System.out.println("PASS native booth readiness respects channel and permission while update readiness stays separate");
+    }
+}

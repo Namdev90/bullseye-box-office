@@ -156,7 +156,9 @@ test('native stock workflows preserve physical verification before confirmation'
  assert(prepare.includes('.put("claim_token",result.getString("claim_token"))'));
  assert(prepare.includes('.put("version",deposit.getInt("version"))'));
  assert(prepare.includes('.put("collector_label",who)'));
- assert(prepare.includes('"/release",body,true)'));
+ assert(prepare.includes('"/release",body)'));
+ assert(!prepare.includes('"/release",body,true)'));
+ assert(prepare.includes('Reserve them before giving out any passes.'));
  assert(prepare.includes('.put("handover_confirmed", true)'));
  assert(desk.includes('button("Select all available"'));
  assert(desk.includes('name.setAutofillHints(View.AUTOFILL_HINT_NAME)'));

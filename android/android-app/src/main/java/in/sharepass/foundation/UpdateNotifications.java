@@ -23,8 +23,8 @@ final class UpdateNotifications {
     static void show(Context context, String versionCode) {
         try { if (Integer.parseInt(versionCode) <= BuildConfig.VERSION_CODE) return; }
         catch (Exception invalid) { return; }
-        if (!QueueNotifications.allowed(context)) return;
         ensureChannel(context);
+        if (!QueueNotifications.allowed(context,CHANNEL)) return;
         Intent intent = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra("checkSharePassUpdate", true);
         PendingIntent open = PendingIntent.getActivity(context, NOTICE_ID, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);

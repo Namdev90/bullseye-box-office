@@ -49,6 +49,11 @@ jobs:
           node scripts/build.mjs
           node --check dist/server/index.js
           node --test tests/*.test.mjs tests/*.test.cjs
+      - name: Run real Worker release and D1 concurrency regressions
+        run: |
+          npm install --prefix "$RUNNER_TEMP/sharepass-workerd" --no-save --ignore-scripts miniflare@4.20260730.0
+          export SHAREPASS_MINIFLARE_MODULE="$RUNNER_TEMP/sharepass-workerd/node_modules/miniflare"
+          node --test tests/release-workerd.test.mjs tests/identity-workerd.test.mjs
 
   android:
     name: Android build, lint and tests

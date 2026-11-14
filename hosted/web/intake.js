@@ -18,15 +18,11 @@ const remainingLabel=document.getElementById('allocation-balance');
 const ready=document.getElementById('customer-ready');
 const guestPhone=form.elements.phone;
 const sendButton=document.getElementById('send-customer');
-let phoneAdvancing=false;
 function canContinue(){
   return Boolean(form.elements.name.value.trim())&&Object.values(quantities).some(Boolean)&&Boolean(sharePassPhone(guestPhone.value));
 }
-function syncContinue(){
-  sendButton.hidden=booth&&passStep.hidden&&(!canContinue()||phoneAdvancing);
-}
 const phoneError='Enter a valid WhatsApp number. Include the country code for international numbers.';
-let requestId;
+let requestId,submission;
 let lastReceipt,lastCode;
 let receiptPollTimer,receiptChecking=false,receiptFailures=0;
 const alertButton=document.getElementById('receipt-alerts');
@@ -54,46 +50,46 @@ counters.onclick=event=>{
   row.querySelector('[data-delta="-1"]').disabled=count===0;
   row.querySelector('[data-delta="1"]').disabled=count===100;
   syncRecipients();
-  syncContinue();
 };
 
 if(booth){
   document.getElementById('customer-name-label').textContent='Your name';
   document.getElementById('customer-contact').hidden=false;
   guestPhone.disabled=false;
-  passStep.dataset.wizardPage='';
+  passStep.hidden=false;
 }
 
 function people(){
-  const multiple=recipientList.children.length>1;
-  return [...recipientList.children].map(row=>({
+  return [...recipientList.children].map(row=>{
+    const plan=Object.fromEntries([...row.querySelectorAll('[data-allocation]')].map(input=>[input.dataset.allocation,input.valueAsNumber]));
+    return {
     name:row.querySelector('[name=recipient_name]').value.trim(),
     phone:sharePassPhone(row.querySelector('[name=recipient_phone]').value),
-    quantities:multiple?Object.fromEntries([...row.querySelectorAll('[data-allocation]')].map(input=>[input.dataset.allocation,input.valueAsNumber])):{...quantities}
-  }));
+    ...(Object.values(plan).some(value=>value!==0)?{quantities:plan}:{})
+  };});
 }
 function unassigned(recipients){
-  return Object.fromEntries(passTypes.map(([key])=>[key,quantities[key]-recipients.reduce((sum,person)=>sum+(person.quantities[key]||0),0)]));
+  return Object.fromEntries(passTypes.map(([key])=>[key,quantities[key]-recipients.reduce((sum,person)=>sum+(person.quantities?.[key]||0),0)]));
 }
 function allocationComplete(recipients){
-  return recipients.every(person=>Object.values(person.quantities).every(value=>Number.isInteger(value)&&value>=0)&&
-    Object.values(person.quantities).some(Boolean))&&Object.values(unassigned(recipients)).every(value=>value===0);
+  return recipients.every(person=>!person.quantities||Object.values(person.quantities).every(value=>Number.isInteger(value)&&value>=0))&&
+    Object.values(unassigned(recipients)).every(value=>value>=0);
 }
 function syncRecipients(){
   const rows=[...recipientList.children],multiple=rows.length>1,recipients=people(),left=unassigned(recipients);
   for(const [i,row] of rows.entries()){
     row.querySelector('h3').textContent=multiple?'Collector '+(i+1):'Collector';
-    row.querySelector('.allocation-fields').hidden=!multiple;
-    row.querySelector('.remove-recipient').hidden=!multiple;
+    row.querySelector('.allocation-fields').hidden=false;
+    row.querySelector('.remove-recipient').hidden=false;
     for(const input of row.querySelectorAll('[data-allocation]')){
       const key=input.dataset.allocation;
       input.max=Math.max(0,left[key]+(input.valueAsNumber||0));
-      input.disabled=!multiple||(quantities[key]===0&&!input.valueAsNumber);
+      input.disabled=quantities[key]===0&&!input.valueAsNumber;
     }
   }
-  remainingLabel.hidden=!multiple;
+  remainingLabel.hidden=!rows.length;
   const difference=passTypes.filter(([key])=>left[key]!==0).map(([key,label])=>label+' '+Math.abs(left[key])+(left[key]<0?' over':' left'));
-  remainingLabel.textContent=difference.length?difference.join(' · '):'All passes allocated';
+  remainingLabel.textContent=difference.length?'Unplanned passes may be collected later. '+difference.join(' · '):'All passes planned';
   const depositor=sharePassPhone(guestPhone.value);
   for(const row of rows){
     const phone=row.querySelector('[name=recipient_phone]');
@@ -109,9 +105,9 @@ function addCollector(){
   const numbers=row.querySelector('.allocation-fields');
   for(const [key,label] of passTypes){
     const field=document.createElement('label'),input=document.createElement('input');
-    field.className='field';field.textContent=label+' passes';
+    field.className='field';field.textContent=label+' plan (optional)';
     input.type='number';input.inputMode='numeric';input.min=0;input.step=1;
-    input.value=recipientList.children.length?0:quantities[key];input.dataset.allocation=key;
+    input.value=0;input.dataset.allocation=key;
     field.append(input);numbers.append(field);
   }
   row.querySelector('.remove-recipient').onclick=()=>{row.remove();syncRecipients();addRecipient.focus();};
@@ -133,7 +129,7 @@ function addCollector(){
   return name;
 }
 
-sharePassSteps(form,{onShow:syncContinue,validate(page){
+sharePassSteps(form,{validate(page){
   errorLine.textContent='';
   if(page.id==='customer-details'){
     if(booth&&!form.elements.name.value.trim()){
@@ -145,7 +141,6 @@ sharePassSteps(form,{onShow:syncContinue,validate(page){
     if(booth&&!sharePassPhone(guestPhone.value)){
       errorLine.textContent=phoneError;guestPhone.focus();return false;
     }
-    return true;
   }
   const recipients=people();
   if(recipients.some(person=>!person.name||!person.phone)){
@@ -156,49 +151,29 @@ sharePassSteps(form,{onShow:syncContinue,validate(page){
     errorLine.textContent='A collector must use a different WhatsApp number from the depositor.';return false;
   }
   if(!allocationComplete(recipients)){
-    errorLine.textContent='Give each collector at least one pass and match the deposit totals for every pass type.';return false;
+    errorLine.textContent='Optional plans must fit within the deposit totals for every pass type.';return false;
   }
   return true;
 }});
 if(booth){
-  addCollector();
-  addRecipient.onclick=()=>{
-    if(recipientList.children.length===1){
-      for(const input of recipientList.querySelectorAll('[data-allocation]'))input.value=quantities[input.dataset.allocation];
-    }
-    addCollector()?.focus();
-  };
-  form.addEventListener('input',syncContinue);
+  addRecipient.onclick=()=>addCollector()?.focus();
   guestPhone.addEventListener('input',syncRecipients);
   guestPhone.addEventListener('change',syncRecipients);
   sharePassContactAdvance(form.elements.name,()=>{
-    if(canContinue()&&passStep.hidden){form.requestSubmit();recipientList.querySelector('[name=recipient_name]').focus();}
-    else if(Object.values(quantities).some(Boolean))guestPhone.focus();
+    if(Object.values(quantities).some(Boolean))guestPhone.focus();
     else counters.querySelector('[data-delta="1"]').focus();
   });
-  form.addEventListener('change',syncContinue);
-  form.addEventListener('focusin',syncContinue);
-  const mayAdvance=value=>passStep.hidden&&canContinue()&&sharePassPhoneComplete(value);
-  const pendingAdvance=()=>{
-    phoneAdvancing=mayAdvance(guestPhone.value);
-    syncContinue();
-  };
-  guestPhone.addEventListener('input',event=>{if(!event.isComposing)pendingAdvance();});
-  guestPhone.addEventListener('compositionend',pendingAdvance);
+  const mayAdvance=value=>canContinue()&&sharePassPhoneComplete(value);
   guestPhone.addEventListener('blur',()=>{
-    phoneAdvancing=false;
-    if(passStep.hidden&&guestPhone.value.trim()&&!sharePassPhone(guestPhone.value))errorLine.textContent=phoneError;
-    syncContinue();
+    if(guestPhone.value.trim()&&!sharePassPhone(guestPhone.value))errorLine.textContent=phoneError;
   });
   guestPhone.addEventListener('keydown',event=>{
-    if(event.key==='Enter'&&!event.isComposing&&canContinue()&&passStep.hidden){
-      event.preventDefault();form.requestSubmit();
+    if(event.key==='Enter'&&!event.isComposing&&canContinue()){
+      event.preventDefault();sendButton.focus();
     }
   });
   sharePassAutoAdvance(guestPhone,mayAdvance,()=>{
-    phoneAdvancing=false;
-    form.requestSubmit();
-    if(!passStep.hidden)recipientList.querySelector('[name=recipient_name]').focus();
+    sendButton.focus();
   });
 }
 
@@ -209,7 +184,7 @@ async function customerRequest(body,statusId){
   }:{})});
   if(!response.headers.get('Content-Type')?.startsWith('application/json'))throw new Error('Could not open the form. Reopen its QR or ask staff for a fresh one.');
   const result=await response.json();
-  if(!response.ok)throw new Error(result.error||'Ask staff for a fresh form QR.');
+  if(!response.ok)throw Object.assign(new Error(result.error||'Ask staff for a fresh form QR.'),{status:response.status});
   return result;
 }
 function showReceipt(result){
@@ -222,14 +197,28 @@ function showReceipt(result){
   reference.hidden=!result.collection_code&&!result.name;
   reference.textContent=result.collection_code?(result.name?result.name+' · ':'')+'Code '+result.collection_code:result.name||'';
   receiptShare.replaceChildren();
+  let draftFailures=0;
   if(result.status==='confirmed'&&result.collection_code){
     statusLine.textContent='✓ Passes received';
     receiptState.textContent='Your passes are confirmed. Open WhatsApp to share the collection code.';
-    for(const person of result.recipients){
+    for(const person of result.recipients||[]){
+      try{
       const draft=SharePassDrafts.depositDraft({phone:person.phone,name:Array.from(person.name).slice(0,40).join(''),code:result.collection_code,
-        reference:result.collection_reference,booth:result.booth,quantities:person.quantities,expiresAt:result.code_expires_at});
+        reference:result.collection_reference,booth:result.booth,quantities:person.quantities||result.remaining,
+        scope:person.quantities?'planned':'group',expiresAt:result.code_expires_at});
       const link=SharePassDrafts.composeLink({address:draft.recipient,message:draft.message,name:person.name},'Send code to '+person.name);
+      link.addEventListener('click',event=>{
+        event.preventDefault();
+        const ticket=requestId;
+        customerRequest(null,ticket).then(current=>{
+          if(ticket!==requestId||current.status!=='confirmed'||current.collection_code!==result.collection_code||current.collection_reference!==result.collection_reference)throw new Error('The receipt changed. Wait for its current status before sharing.');
+          const fresh=SharePassDrafts.depositDraft({phone:person.phone,name:Array.from(person.name).slice(0,40).join(''),code:current.collection_code,reference:current.collection_reference,
+            booth:current.booth,quantities:person.quantities||current.remaining,scope:person.quantities?'planned':'group',expiresAt:current.code_expires_at});
+          location.assign(fresh.url);
+        }).catch(error=>{errorLine.textContent=error.message;});
+      });
       link.classList.add('whatsapp-action');receiptShare.append(link);
+      }catch{draftFailures++;}
     }
   }else if(result.status==='submitted'){
     statusLine.textContent='✓ Sent to booth';
@@ -243,6 +232,10 @@ function showReceipt(result){
     receiptState.textContent='Ask the booth team if you need help.';
   }
   lastReceipt=result.status;lastCode=result.collection_code;
+  if(draftFailures){
+    const warning=document.createElement('p');warning.textContent='Your deposit is confirmed. Some WhatsApp drafts could not be prepared; show this code or ask staff for help.';
+    receiptShare.append(warning);
+  }
   document.getElementById('check-receipt').hidden=true;
   document.getElementById('receipt-sync-status').textContent=result.status==='submitted'?'Waiting for staff confirmation. This page updates automatically.':result.status==='closed'?'Deposit closed.':'Receipt updated automatically.';
   scheduleReceiptPoll();
@@ -481,9 +474,15 @@ async function checkReceipt(){
   receiptChecking=true;
   const ticket=requestId,check=++receiptCheck;
   try{
-    const result=await customerRequest(null,ticket);
+    let result;
+    try{result=await customerRequest(null,ticket);}
+    catch(error){
+      if(error.status!==404||!submission||Date.now()-submission.created_at>2*60*60*1000)throw error;
+      result=await customerRequest(submission.body);
+    }
     if(check!==receiptCheck||ticket!==requestId)return;
     receiptFailures=0;errorLine.textContent='';
+    if(submission){submission=null;try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}}
     if(result.status!==lastReceipt||result.collection_code!==lastCode)showReceipt(result);
   }catch{
     receiptFailures++;
@@ -511,11 +510,18 @@ form.onsubmit=async event=>{
       Notification.requestPermission().catch(()=>Notification.permission):Promise.resolve(Notification.permission);
   }
   try{
-    const body={name:form.elements.name.value.trim(),quantities};
+    let body={name:form.elements.name.value.trim(),quantities};
     if(booth)Object.assign(body,{request_id:requestId||=crypto.randomUUID(),phone:'+'+sharePassPhone(guestPhone.value),
       recipients:people().map(person=>({...person,phone:'+'+person.phone})),intake_version:2});
+    if(booth){
+      if(submission&&Date.now()-submission.created_at>2*60*60*1000)throw new Error('The original submission needs staff review. Ask the booth before submitting again.');
+      if(!submission)submission={ticket:requestId,body:JSON.parse(JSON.stringify(body)),created_at:Date.now()};
+      body=submission.body;
+      // Save the immutable intent before the first request; storage failure sends nothing.
+      sessionStorage.setItem('sharepass-receipt:'+token,JSON.stringify(submission));
+    }
     const result=await customerRequest(body);
-    if(booth)try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}
+    if(booth){submission=null;try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}}
     showReceipt(result);
     if(notificationPermission)notificationPermission.then(async permission=>{
       if(permission!=='granted'||!requestId||lastReceipt==='closed')return;
@@ -533,14 +539,22 @@ form.onsubmit=async event=>{
     const result=await customerRequest();
     alertKey=result.alerts_key;
     if(result.booth)document.getElementById('customer-booth').textContent=result.booth;
-    if(booth)try{requestId=sessionStorage.getItem('sharepass-receipt:'+token)||undefined;}catch{}
-    if(reopened)requestId=reopened;
+    if(booth)try{
+      const saved=sessionStorage.getItem('sharepass-receipt:'+token);
+      if(saved?.startsWith('{')){submission=JSON.parse(saved);requestId=submission.ticket;}
+      else requestId=saved||undefined;
+    }catch{}
+    if(reopened){if(requestId!==reopened)submission=undefined;requestId=reopened;}
     if(requestId){
       try{
         showReceipt(await customerRequest(null,requestId));
         if(reopened)try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}
         return;
-      }catch{requestId=undefined;}
+      }catch{
+        showReceipt({status:'submitted'});
+        document.getElementById('receipt-sync-status').textContent='Recovering your original submission. Please wait or ask staff; do not submit again.';
+        return;
+      }
     }
     if(result.status&&result.status!=='waiting')return showReceipt(result);
     if(result.archived)throw new Error('This booth is archived and is not accepting new deposits.');

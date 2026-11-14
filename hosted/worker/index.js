@@ -312,9 +312,10 @@ export default {async fetch(request,env,ctx){
            !intakeTokenPattern.test(input.request_id||''))return error('Enter the expired reference, shelf, and packet label.',400);
         const booth=input.booth_id||'B1';
         if(!boothIdPattern.test(booth))return error('Choose the packet’s booth.',400);
-        return await guestReceiptResult(await mutate(env.DB,staff.workspace,path,{
+        const refreshed=await mutate(env.DB,staff.workspace,path,{
           event_id:EVENT,booth_id:booth,operator:staff.operator,request_id:input.request_id,collection_code:code,packet_id:packet,location,...options
-        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse),env,ctx,staff);
+        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,{...staff,booth_id:booth},refreshed,url.origin),env,ctx,staff);
       }
       if(request.method==='POST'&&path==='/api/profile'){
         if(configured)return error('Ask the desktop administrator to update your profile.',403);
@@ -379,7 +380,7 @@ export default {async fetch(request,env,ctx){
         const refreshed=await mutate(env.DB,staff.workspace,path,{event_id:EVENT,booth_id:staff.booth_id||'B1',operator:staff.operator,
           request_id:input.request_id,collection_code:code,packet_id:packet,location:deposit.location,valid_minutes:1440},
           staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
-        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed),env,ctx,staff);
+        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed,url.origin),env,ctx,staff);
       }
       if(path==='/api/intakes'&&request.method==='POST')return await startIntake(env.DB,staff,url.origin);
       if(path.startsWith('/api/intakes/')){

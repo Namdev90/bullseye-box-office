@@ -25,6 +25,28 @@ test('WhatsApp actions display a safe named message label and consistent green s
  assert.equal(drafts.composeLink({address:'+12025550123',message:'Synthetic'}).textContent,'Message on WhatsApp');
 });
 
+test('production messages preserve receipt identity, explicit timezone and optional plans; all encoded links are bounded',()=>{
+ const {drafts}=draftTools({URL,location:{origin:'https://sharepass.example.test'}});
+ const options={phone:'+12025550123',name:'Riya',code:'0007',reference:'PKT-A1B2C3D4',booth:'Box office',scope:'group',quantities:{normal:1,vip:1,vvip:1,mip:1},expiresAt:Date.now()+86400000};
+ const result=drafts.depositDraft(options);
+ assert.match(result.message,/Group balance on this receipt: 1 Normal \+ 1 VIP \+ 1 VVIP \+ 1 MIP/);
+ assert.match(result.message,/IST \(UTC\+05:30\)/);assert.match(result.message,/Collection code: 0007/);
+ assert.equal(drafts.scanReceipt(result.url).code,'0007');assert(result.url.length<=1200);
+ const planned=drafts.depositDraft({...options,allocation:{normal:3,vip:0,vvip:0,mip:0}});
+ assert.match(planned.message,/Original plan for you: 3 Normal/);assert.match(planned.message,/Plans are not reservations/);
+ assert.throws(()=>drafts.depositDraft({...options,expiresAt:Date.now()-1}),/expired/);
+ assert.throws(()=>drafts.composeLink({address:options.phone,message:'界'.repeat(200)}),/Shorten/);
+});
+
+test('fresh collection guidance rejects expired, replaced, completed and pending receipts',()=>{
+ const {drafts}=draftTools({URL,location:{origin:'https://sharepass.example.test'}});
+ const expected={id:'deposit-one',code:'0007',reference:'PKT-A1B2C3D4'};
+ const current={collection_code:'0007',deposit:{id:expected.id,packet_id:expected.reference,remaining:{normal:2},code_expires_at:Date.now()+60000}};
+ assert.equal(drafts.eligibleReceipt(current,expected).quantities.normal,2);
+ for(const change of [{code_expires_at:Date.now()-1},{remaining:{normal:0}},{handover_pending:true},{pending_collection:{id:'pending'}},{packet_id:'PKT-AAAAAAAA'},{id:'different'}])assert.throws(()=>drafts.eligibleReceipt({...current,deposit:{...current.deposit,...change}},expected));
+ assert.throws(()=>drafts.eligibleReceipt({...current,collection_code:'0069'},expected),/changed/);
+});
+
 test('scanner accepts one exact current receipt inside a WhatsApp QR and rejects unrelated or ambiguous destinations',()=>{
  const origin='https://sharepass.example.test';const {drafts}=draftTools({location:{origin},URL});
  const receipt=origin+'/pickup#0007.PKT-A1B2C3D4';

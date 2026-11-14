@@ -42,12 +42,24 @@ final class WhatsAppDraft {
         return message(code,event,booth,location,counts,name,reference,allocation,"");
     }
     static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation,String origin){
+        return message(code,event,booth,location,counts,name,reference,allocation,origin,0);
+    }
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation,String origin,long expiresAt){
         // Validate pickup/contact details through the same rules for either message kind.
         validateDetails(code,event,booth,location,name,reference);
         String quantities=passCounts(counts);
         if(quantities.isEmpty())throw new IllegalArgumentException("Pass counts required");
         String planned=allocation==null?"":passCounts(allocation);
         if(allocation!=null&&planned.isEmpty())throw new IllegalArgumentException("Review the recipient’s planned share");
+        if(!origin.isEmpty()){
+            if(expiresAt>0&&expiresAt<=System.currentTimeMillis())throw new IllegalArgumentException("This collection code has expired");
+            return "Hi"+(name.trim().isEmpty()?"":" "+name.trim())+"!\nSharePass by Bullseye Entertainment\n\n"+
+                (event.trim().isEmpty()?"":"Event: "+event.trim()+"\n")+
+                (allocation==null?"":"Original plan for you: "+planned+"\n")+"Group balance on this receipt: "+quantities+
+                "\nCollection code: "+code+"\nCollect at: "+booth.trim()+(location.trim().isEmpty()?"":", "+location.trim())+"\n"+
+                (expiresAt>0?"Code expires: "+expiry(expiresAt)+"\n":"")+"Receipt: "+pickupLink(origin,code,reference)+"\n\n"+
+                "Show the current receipt to staff. Shared group code. "+(allocation==null?"Staff confirm availability. ":"Plans are not reservations; staff confirm availability. ")+"Pickups are not tracked by person.";
+        }
         return "Hi"+(name.trim().isEmpty()?"":" "+name.trim())+"! "+
             (allocation==null?"The receipt lists "+quantities+" passes for our group.":
                 "Your planned share: "+planned+" passes.\nGroup balance on this receipt: "+quantities+" passes.")+
@@ -57,6 +69,11 @@ final class WhatsAppDraft {
             (location.trim().isEmpty()?"":", "+location.trim())+".\n\n"+
             (reference.isEmpty()||origin.isEmpty()?"":"Receipt: "+pickupLink(origin,code,reference)+"\n\n")+
             "Shared group code. Staff must confirm availability; pickups are not tracked per person.";
+    }
+    static String expiry(long value){
+        java.text.SimpleDateFormat format=new java.text.SimpleDateFormat("d MMM yyyy, h:mm a",java.util.Locale.US);
+        format.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Kolkata"));
+        return format.format(new java.util.Date(value)).replace("AM","am").replace("PM","pm")+" IST (UTC+05:30)";
     }
     static String pickupLink(String origin,String code,String reference){
         if(!origin.matches("https://[a-z0-9]+(?:[.-][a-z0-9]+)*")||!code.matches("[0-9]{4}")||!reference.matches("PKT-[A-F0-9]{8}"))throw new IllegalArgumentException("Invalid pickup receipt");

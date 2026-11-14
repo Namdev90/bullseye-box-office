@@ -148,16 +148,17 @@ async function currentDepositReceipt(db,staff,id){
   const updatePhone=update?.channel==='whatsapp'?sharePassPhone(update.address):'';
   const phone=sharePassPhone(contact.phone)||'',remaining=model.passTypes.filter(type=>deposit.remaining[type.id]>0)
     .map(type=>deposit.remaining[type.id]+' '+type.label).join(' + ');
+  const updateName=update?.name||(updatePhone&&updatePhone===phone?(contact.name||deposit.depositor_label||''):'');
   return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
     recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
     ...(lastCollection?{last_collection:{collector_label:lastCollection.collector_label||'',quantities:lastCollection.quantities,handed_over_at:lastCollection.handed_over_at}}:{}),
-    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:update.name||contact.name||deposit.depositor_label||'',message:'Hi'+((update.name||contact.name||deposit.depositor_label)?' '+(update.name||contact.name||deposit.depositor_label):'')+'! SharePass deposit update. '+
-      (remaining?'Still available: '+remaining+'.':'All passes in this deposit have been collected.')}}:{})});
+    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:updateName,message:messageGreeting(updateName)+'Deposit update\n'+
+      (remaining?'Group passes remaining: '+remaining:'All passes in this deposit have been collected.')}}:{})});
 }
 
 async function ledgerVerify(db,owner,body,legacy,model){
   const now=Date.now();
-  const failure=()=>error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
+  const failure=()=>json({error:'Too many unsuccessful checks in this workspace. Wait one minute before trying again.',notExecuted:true,retry_after:60},429);
   const count=await ledgerStatement(db,'SELECT count(*) AS n FROM sharepass_ledger_failures WHERE owner=? AND failed_at>?',owner,now-60000).first();
   if(count.n>=5)return failure();
   const row=await ledgerDepositByCode(db,owner,body.collection_code);

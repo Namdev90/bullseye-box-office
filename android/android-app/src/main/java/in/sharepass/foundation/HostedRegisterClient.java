@@ -35,6 +35,9 @@ final class HostedRegisterClient {
             this.pickupReferenceRequired = response.optBoolean("pickup_reference_required", false);
         }
     }
+    static final class ReconciliationRequired extends IOException {
+        ReconciliationRequired(){super("A previous physical handover could not be recorded. Ask the supervisor to reconcile it; do not hand out passes again.");}
+    }
 
     HostedRegisterClient(Context context) throws Exception {
         journal = new FieldJournal(context, "hosted-register");
@@ -171,6 +174,8 @@ final class HostedRegisterClient {
 
     JSONObject stockChange(String path, JSONObject body, boolean finalize) throws Exception {
         if (hasPending()) throw new IOException("Recover the previous action before changing stock.");
+        JSONObject reserved=saved.optJSONObject("handover");
+        if(reserved!=null&&!path.equals("/api/collections/"+reserved.getJSONObject("collection").getString("id")+"/handover"))throw new IOException("Finish the reserved handover before changing other stock.");
         body.put("request_id", UUID.randomUUID().toString());
         JSONObject action = new JSONObject().put("path", path).put("body", body);
         if (finalize) action.put("finalize",true);
@@ -180,6 +185,7 @@ final class HostedRegisterClient {
 
     JSONObject recover() throws Exception {
         JSONObject action = saved.getJSONObject("pending");
+        if(action.optBoolean("reconciliation_required"))throw new ReconciliationRequired();
         String path = action.getString("path");
         JSONObject body = action.getJSONObject("body");
         JSONObject response=retryPickup(path, () -> finishStockChange(path, body));
@@ -199,7 +205,7 @@ final class HostedRegisterClient {
             return action.call();
         } catch (IOException failure) {
             boolean pickup = path.endsWith("/release") || path.endsWith("/handover");
-            if (!pickup || failure instanceof SSLHandshakeException || failure instanceof SSLPeerUnverifiedException
+            if (!pickup || failure instanceof ReconciliationRequired || failure instanceof SSLHandshakeException || failure instanceof SSLPeerUnverifiedException
                     || (failure instanceof Rejected response && (response.notExecuted || response.status < 500))) {
                 throw failure;
             }
@@ -222,6 +228,10 @@ final class HostedRegisterClient {
         } catch (Rejected error) {
             if (error.notExecuted && error.status != 401 && (error.status != 403 || path.equals("/api/codes/refresh"))) {
                 JSONObject updated = copy();
+                JSONObject pending=updated.optJSONObject("pending");
+                if(path.endsWith("/release")&&pending!=null&&pending.optBoolean("finalize")){
+                    pending.put("reconciliation_required",true);write(updated);throw new ReconciliationRequired();
+                }
                 updated.remove("pending");
                 write(updated);
             }

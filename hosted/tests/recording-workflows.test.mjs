@@ -52,7 +52,7 @@ test('submission never allocates a code; approval creates one and the private re
   assert.equal((await f.call(path+'?ticket='+first.request_id,undefined,null,true)).body.collection_code,undefined);
   const [one,two]=await Promise.all([first,second].map(input=>f.call('/api/queue/'+input.request_id+'/confirm',{custody_confirmed:true})));
   assert.equal(one.status,200);assert.equal(two.status,200);assert.match(one.body.collection_code,/^[0-9]{4}$/);
-  assert.notEqual(one.body.collection_code,two.body.collection_code);assert.match(one.body.depositor_receipt.message,/Owner received/);
+  assert.notEqual(one.body.collection_code,two.body.collection_code);assert.match(one.body.depositor_receipt.message,/Deposit confirmed by Owner/);
   const receipt=await f.call(path+'?ticket='+first.request_id,undefined,null,true);
   assert.equal(receipt.body.status,'confirmed');assert.equal(receipt.body.collection_code,one.body.collection_code);
   assert.equal(receipt.body.recipients[0].name,'Synthetic collector');

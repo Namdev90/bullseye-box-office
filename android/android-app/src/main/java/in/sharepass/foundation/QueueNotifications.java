@@ -17,8 +17,15 @@ final class QueueNotifications {
     private QueueNotifications() {}
 
     static boolean allowed(Context context) {
+        ensureChannel(context);
+        return allowed(context,CHANNEL);
+    }
+
+    static boolean allowed(Context context,String channel) {
+        NotificationManager manager=context.getSystemService(NotificationManager.class);
         return (Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
-            && context.getSystemService(NotificationManager.class).areNotificationsEnabled();
+            && manager.areNotificationsEnabled()
+            && (Build.VERSION.SDK_INT < 26 || manager.getNotificationChannel(channel)!=null&&manager.getNotificationChannel(channel).getImportance()!=NotificationManager.IMPORTANCE_NONE);
     }
 
     static void ensureChannel(Context context) {

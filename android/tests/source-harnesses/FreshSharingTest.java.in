@@ -1,0 +1,32 @@
+package in.sharepass.foundation;
+import java.util.*;
+
+public final class FreshSharingTest {
+    static class JSONObject extends HashMap<String,Object> {
+        public JSONObject put(String key,Object value){super.put(key,value);return this;}
+        JSONObject getJSONObject(String key){return (JSONObject)get(key);}
+        String getString(String key){return (String)get(key);}
+        boolean optBoolean(String key){return Boolean.TRUE.equals(get(key));}
+        long optLong(String key){return ((Number)getOrDefault(key,0L)).longValue();}
+        int optInt(String key){return ((Number)getOrDefault(key,0)).intValue();}
+        boolean has(String key){return containsKey(key);}
+    }
+    static final String[] KEYS={"normal","vip","vvip","mip"};
+    JSONObject response;
+    int fetches;
+    final FreshSharingTest client=this;
+    JSONObject openReceipt(String id){if(!id.equals("deposit-one"))throw new AssertionError();fetches++;return response;}
+    /* PRODUCTION_METHODS */
+    static JSONObject receipt(){return new JSONObject().put("collection_code","0007").put("deposit",new JSONObject().put("id","deposit-one").put("packet_id","PKT-A1B2C3D4").put("remaining",new JSONObject().put("normal",2)).put("code_expires_at",System.currentTimeMillis()+60000));}
+    public static void main(String[] args)throws Exception{
+        FreshSharingTest test=new FreshSharingTest();JSONObject held=receipt();test.response=receipt();
+        if(test.freshSharingReceipt(held)!=test.response||test.fetches!=1)throw new AssertionError();
+        for(String key:new String[]{"code","id","packet","expiry","empty","pending"}){
+            test.response=receipt();JSONObject deposit=test.response.getJSONObject("deposit");
+            switch(key){case "code"->test.response.put("collection_code","0069");case "id"->deposit.put("id","other");case "packet"->deposit.put("packet_id","PKT-AAAAAAAA");case "expiry"->deposit.put("code_expires_at",1L);case "empty"->deposit.put("remaining",new JSONObject().put("normal",0));case "pending"->deposit.put("handover_pending",true);}
+            try{test.freshSharingReceipt(held);throw new AssertionError(key);}catch(IllegalArgumentException expected){}
+        }
+        if(test.fetches!=7)throw new AssertionError("Each preparation must fetch the current receipt");
+        System.out.println("PASS native fresh receipt guidance rejects stale identity, expiry, empty stock and pending custody");
+    }
+}
