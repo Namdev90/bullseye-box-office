@@ -35,6 +35,7 @@ public final class StaffMessageInboxTest {
             final AlertDialog dialog = new AlertDialog();
             Builder(StaffMessageInboxTest owner) {}
             Builder setTitle(String title) { dialog.title = title; return this; }
+            Builder setCustomTitle(Object title) { dialog.title = String.valueOf(title); return this; }
             Builder setItems(String[] labels, Click callback) { dialog.items = labels; dialog.click = callback; return this; }
             Builder setNegativeButton(String label, Click callback) { dialog.negative = label; return this; }
             AlertDialog create() { return dialog; }
@@ -64,6 +65,7 @@ public final class StaffMessageInboxTest {
     String lastNote;
     boolean hasWindowFocus() { return focus; }
     void note(String text) { lastNote = text; }
+    Object staffMessageTitle(String message) { return "Message from admin\n\n"+message; }
     void scheduleQueue(long delay) { require(delay == 0, "Refresh immediately"); refreshes++; }
     boolean delayCompletion;
     Runnable completion;

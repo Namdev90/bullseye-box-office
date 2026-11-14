@@ -38,6 +38,7 @@ export function extractJavaMethod(source, signature) {
 
 export function sourceHarnesses() {
   return [
+    ['QrEncoderCacheTest','QrPreview',['private static String encoderSource(Context context) throws Exception']],
     ['DirectHandoverTest', 'HostedRegisterClient', [
       'JSONObject stockChange(String path, JSONObject body) throws Exception',
       'JSONObject stockChange(String path, JSONObject body, boolean finalize) throws Exception',

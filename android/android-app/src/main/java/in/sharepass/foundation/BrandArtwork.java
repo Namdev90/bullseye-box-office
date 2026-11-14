@@ -8,6 +8,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -45,13 +46,17 @@ class BrandArtwork extends View {
         super.onDraw(canvas);
         if (artwork == null) return;
         if (header) {
-            int bottom = Math.round(artwork.getHeight() * .195f);
-            float width = Math.min(getWidth() * .60f, getHeight() * artwork.getWidth() / (float) bottom);
-            float left = 0;
-            canvas.drawBitmap(artwork, new Rect(0, 0, artwork.getWidth(), bottom),
-                new RectF(left, 0, left + width, getHeight()), paint);
-            canvas.drawBitmap(artwork,new Rect(0,Math.round(artwork.getHeight()*.73f),artwork.getWidth(),Math.round(artwork.getHeight()*.96f)),
-                new RectF(getWidth()*.64f,getHeight()*.18f,getWidth(),getHeight()*.82f),paint);
+            float density=getResources().getDisplayMetrics().density;
+            float width=Math.min(154*density,getWidth()*.46f),height=width*42/154;
+            // Use the same approved-art crop and wordmark treatment as the web brand rail.
+            canvas.drawBitmap(artwork,new Rect(Math.round(artwork.getWidth()*86/326f),Math.round(artwork.getHeight()*4/326f),
+                Math.round(artwork.getWidth()*240/326f),Math.round(artwork.getHeight()*46/326f)),
+                new RectF(16*density,(getHeight()-height)/2,16*density+width,(getHeight()+height)/2),paint);
+            paint.setTypeface(Typeface.create("sans-serif-black",Typeface.BOLD_ITALIC));paint.setTextSize(22*density);
+            float x=getWidth()-16*density-paint.measureText("SharePass");
+            float y=(getHeight()-paint.ascent()-paint.descent())/2;
+            paint.setColor(0xffe0e2e8);canvas.drawText("Share",x,y,paint);
+            x+=paint.measureText("Share");paint.setColor(0xfff01840);canvas.drawText("Pass",x,y,paint);
             return;
         }
         float side = Math.min(getWidth(), getHeight());

@@ -1,0 +1,29 @@
+package in.sharepass.foundation;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+public final class QrEncoderCacheTest {
+    private static String cachedEncoder;
+    static final class Context {
+        int opens; boolean fail=true;
+        Context getAssets(){return this;}
+        InputStream open(String path)throws IOException{
+            if(!path.equals("vendor/sharepass-qr.js"))throw new AssertionError("Unexpected asset");
+            opens++;if(fail){fail=false;throw new IOException("Synthetic read failure");}
+            return new ByteArrayInputStream("synthetic immutable encoder".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+    /* PRODUCTION_METHODS */
+    public static void main(String[] args)throws Exception{
+        Context context=new Context();
+        try{encoderSource(context);throw new AssertionError("Read failure was swallowed");}catch(IOException expected){}
+        if(cachedEncoder!=null)throw new AssertionError("Failed load poisoned cache");
+        String first=encoderSource(context);
+        if(!first.equals("synthetic immutable encoder")||first!=encoderSource(context)||first!=encoderSource(context)||context.opens!=2)
+            throw new AssertionError("QR pages must reuse the exact successfully loaded asset");
+        System.out.println("PASS exact-source immutable QR encoder cache retries failed loads and reads once after success");
+    }
+}

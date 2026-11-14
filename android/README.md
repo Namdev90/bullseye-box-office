@@ -12,7 +12,7 @@ npm test
 ```
 
 `npm test` stays portable and does not require Java. CI's Java stage also
-generates four fixtures from the exact production updater/inset/staff-inbox methods and runs
+generates exact-source cache, recovery, updater, inset, lookup and staff-inbox fixtures and runs
 them with deterministic fake Android values and queues. To run those fixtures
 locally with a JDK, from this directory:
 
@@ -24,6 +24,7 @@ java -cp "$fixtures/classes" in.sharepass.foundation.AppUpdatesFocusTest
 java -cp "$fixtures/classes" in.sharepass.foundation.DeskWindowInsetsTest
 java -cp "$fixtures/classes" in.sharepass.foundation.NativeLookupTest
 java -cp "$fixtures/classes" in.sharepass.foundation.StaffMessageInboxTest
+java -cp "$fixtures/classes" in.sharepass.foundation.QrEncoderCacheTest
 python3 -m unittest discover -s tests -p 'test_apk_assets.py'
 ```
 
@@ -67,8 +68,10 @@ The Staff messages button lists the pending messages returned by the server, inc
 
 ### Staff workflow and scanning
 
-Deposit opens the reusable booth QR from authenticated context, with a scoped local fallback cache, and shows the queue below it. Collect debounces a complete four-digit code; a camera scan can supply the same code and an existing receipt reference. The scanner decodes on device. Setup requests camera and notification permissions through Android and remains usable with typed codes when permission is declined. History reads booth-scoped recent deposits and independent pending handovers.
+Deposit opens the reusable booth QR from authenticated context, with a scoped local fallback cache, and shows the queue below it. Collect debounces a complete four-digit code; a camera scan can supply the same code and an existing receipt reference. The scanner decodes on device. Camera permission is requested when Scan is explicitly activated; notification permission follows successful device setup. Typed setup codes and current receipt links remain available when permission is declined. History reads booth-scoped recent deposits and independent pending handovers.
 
-Physical handover is still explicit: staff review counts, reserve the verified deposit using its server-issued claim and version, then confirm the real handover. No physical packet-label text entry is required. A historically reused code may still require its current receipt reference; scanning a compatible SharePass WhatsApp QR supplies that reference.
+Physical handover is still explicit: staff review counts, reserve the verified deposit using its server-issued claim and version, then confirm the real handover. No physical packet-label text entry is required. A historically reused code requires its current validated receipt link or QR; the technical reference stays inside that payload. The server still decides whether it identifies the current deposit.
+
+The native layouts use the existing web palette, paired branding and card hierarchy. Selected tabs and disabled actions have distinct states. Pinned navigation reflows to whole labels when text grows; quantity labels move above controls when their measured widths require it. Administrator messages use a readable scrolling body above their existing reply choices. The packaged QR encoder is cached once per process; app updates restart the process and invalidate that immutable asset cache. Customer data, credentials and custody responses are not added to this cache.
 
 Update checks and verified downloads run while the app is open and idle. The FCM variant can also receive a generic release notice on the `app_updates` channel. Notice data never determines an APK URL or installation authority: opening it checks the signed update feed, and Android still confirms installation. A push delivery, camera permission prompt, branded rendering, and real device upgrade require device acceptance; source fixtures do not establish those outcomes.

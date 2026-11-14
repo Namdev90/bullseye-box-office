@@ -153,10 +153,11 @@ public final class MainActivity extends Activity {
         int gap = DeskSurface.dp(this, 8);
         LinearLayout stage = new LinearLayout(this);
         stage.setOrientation(LinearLayout.VERTICAL);
+        stage.setPadding(DeskSurface.dp(this,16),0,DeskSurface.dp(this,16),DeskSurface.dp(this,16));
         BrandArtwork artwork = new BrandArtwork(this, false) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 int available = viewport == null ? getResources().getDisplayMetrics().heightPixels : viewport.paneHeight();
-                int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), available, DeskSurface.dp(MainActivity.this, 220), DeskSurface.dp(MainActivity.this, 240));
+                int height = DeskGeometry.openingArtHeight(MeasureSpec.getSize(widthSpec), available-DeskSurface.dp(MainActivity.this,64), DeskSurface.dp(MainActivity.this, 180), DeskSurface.dp(MainActivity.this, 240));
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
             }
         };
@@ -165,12 +166,11 @@ public final class MainActivity extends Activity {
         LinearLayout pass = new LinearLayout(this);
         pass.setOrientation(LinearLayout.VERTICAL);
         pass.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        pass.setBackgroundColor(android.graphics.Color.BLACK);
-        pass.setPadding(DeskSurface.dp(this, 14), DeskSurface.dp(this, 10), DeskSurface.dp(this, 14), DeskSurface.dp(this, 14));
+        pass.setPadding(0,DeskSurface.dp(this,10),0,DeskSurface.dp(this,14));
         TextView caption = new TextView(this);
-        caption.setText("Staff pass desk");
-        caption.setTextColor(DeskSurface.INK);
-        caption.setTextSize(19);
+        caption.setText("Physical passes. One connected desk.");
+        caption.setTextColor(DeskSurface.MUTED);
+        caption.setTextSize(14);
         caption.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         caption.setGravity(android.view.Gravity.CENTER);
 
@@ -178,7 +178,7 @@ public final class MainActivity extends Activity {
         pass.addView(caption);
 
         Button open = new Button(this);
-        open.setText("Staff registration / Open register");
+        open.setText("Open register");
         open.setMinHeight(DeskSurface.dp(this,56));
         DeskSurface.button(open, true);
         open.setOnClickListener(view -> startActivity(new android.content.Intent(this, HostedDeskActivity.class)));
@@ -194,6 +194,7 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams adminAction = new LinearLayout.LayoutParams(-1, -2);
         adminAction.topMargin = gap;
+        adminAction.leftMargin=gap;adminAction.rightMargin=gap;
         pass.addView(admin, adminAction);
         updates = new AppUpdates(this, () -> true);
         UpdateNotifications.ensureChannel(this);
@@ -204,7 +205,9 @@ public final class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(stage);
-        showSurface(scroll, 560);
+        LinearLayout opening=new LinearLayout(this);opening.setOrientation(LinearLayout.VERTICAL);
+        opening.addView(new BrandArtwork(this,true),new LinearLayout.LayoutParams(-1,DeskSurface.dp(this,64)));
+        opening.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));showSurface(opening,560);
         if (Build.VERSION.SDK_INT >= 26 && android.animation.ValueAnimator.areAnimatorsEnabled()) {
             artwork.animateOpening();
             pass.setTranslationY(DeskSurface.dp(this, 10));

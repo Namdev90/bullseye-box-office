@@ -13,18 +13,22 @@ import java.io.InputStream;
 import java.util.function.IntSupplier;
 
 final class QrPreview {
+    // Packaged bytes stay immutable until an app update restarts the process.
+    private static String cachedEncoder;
+    private static String encoderSource(Context context) throws Exception {
+        if(cachedEncoder!=null)return cachedEncoder;
+        try(InputStream in=context.getAssets().open("vendor/sharepass-qr.js")){
+            ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[4096];
+            for(int n;(n=in.read(buffer))!=-1;)out.write(buffer,0,n);
+            cachedEncoder=out.toString("UTF-8");return cachedEncoder;
+        }
+    }
     static WebView create(Context context, String value, String label) throws Exception {
         return create(context, value, label, null);
     }
 
     static WebView create(Context context, String value, String label, IntSupplier viewportHeight) throws Exception {
-        String encoder;
-        try (InputStream in = context.getAssets().open("vendor/sharepass-qr.js")) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[4096];
-            for (int n; (n = in.read(buffer)) != -1; ) out.write(buffer, 0, n);
-            encoder = out.toString("UTF-8");
-        }
+        String encoder=encoderSource(context);
         WebView qr = viewportHeight == null ? new WebView(context) : new WebView(context) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 int maxSize = DeskSurface.dp(context, 350);
@@ -36,6 +40,7 @@ final class QrPreview {
         };
         qr.setContentDescription(label);
         qr.setBackgroundColor(Color.WHITE);
+        android.graphics.drawable.GradientDrawable frame=new android.graphics.drawable.GradientDrawable();frame.setColor(Color.WHITE);frame.setCornerRadius(DeskSurface.dp(context,14));qr.setBackground(frame);qr.setClipToOutline(true);
         qr.getSettings().setJavaScriptEnabled(true);
         qr.getSettings().setAllowFileAccess(false);
         qr.getSettings().setAllowContentAccess(false);

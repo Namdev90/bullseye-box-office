@@ -23,6 +23,11 @@ public final class PickupScanTest {
         String origin="https://sharepass.example.test",link=WhatsAppDraft.pickupLink(origin,"0069","PKT-1234ABCD");
         var receipt=PickupScan.parse(link,origin);
         if(!receipt.code().equals("0069")||!receipt.reference().equals("PKT-1234ABCD"))throw new AssertionError("Receipt identity missing");
+        if(!PickupScan.receiptForCode(link,"0069",origin).equals(receipt))throw new AssertionError("Current receipt differs");
+        for(String bad:new String[]{null,"0069","PKT-1234ABCD",link.replace(origin,"https://foreign.example"),link.replace("0069","4200"),link+".other"}){
+            try{PickupScan.receiptForCode(bad,"0069",origin);throw new AssertionError("Accepted an unbound receipt input");}
+            catch(IllegalArgumentException expected){}
+        }
         var shared=PickupScan.parse("SharePass use code 0069.\nReceipt: "+link,origin);
         if(!shared.equals(receipt))throw new AssertionError("Shared receipt differs");
         for(String bad:new String[]{link.replace(origin,"https://evil.example"),link+".other",link.replace("0069","4200")}){

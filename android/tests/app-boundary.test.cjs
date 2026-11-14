@@ -26,7 +26,7 @@ test('Android launcher opens a native desk with internet and optional notificati
  assert(desk.includes('client.connectDevice("code", value)'));
  assert(host.includes('HostedRegisterClient.setupInvite(incoming.toString())'));
  assert(host.includes('"/app-setup".equals(incoming.getEncodedPath())'));
- assert(desk.includes('page("Pass desk"'));
+ assert.match(desk,/page\([^;]*"Pass desk",\s*"desk"/);
  assert(desk.includes('I received the passes'));
  assert(desk.includes('"/api/intakes/" + token + "/confirm"'));
  assert(read('android-app/build.gradle.kts').includes('in.sharepass.foundation'));

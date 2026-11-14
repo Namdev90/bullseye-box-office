@@ -19,6 +19,12 @@ final class PickupScan {
     static Details parse(String value) {
         return parse(value,"");
     }
+    static Details receiptForCode(String value,String code,String origin){
+        if(value==null||value.length()>6000||code==null||!code.matches("[0-9]{4}"))throw new IllegalArgumentException("Invalid pickup receipt");
+        Details receipt=receipt(value.trim(),origin);
+        if(!receipt.code().equals(code))throw new IllegalArgumentException("Receipt has a different collection code");
+        return receipt;
+    }
     private static Details receipt(String value,String origin){
         URI url=URI.create(value);
         if(origin.isEmpty()||!value.startsWith(origin+"/pickup#")||!"/pickup".equals(url.getRawPath())||url.getRawQuery()!=null||url.getUserInfo()!=null)throw new IllegalArgumentException("Invalid pickup receipt");
