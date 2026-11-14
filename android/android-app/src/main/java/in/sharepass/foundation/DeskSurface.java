@@ -65,6 +65,7 @@ final class DeskSurface {
     }
 
     static void button(Button button, boolean primary) {
+        DeskSounds.attach(button);
         Context context = button.getContext();
         int edge = primary ? 0xff8a0921 : 0xff8d929c;
         StateListDrawable states = new StateListDrawable();
@@ -89,9 +90,22 @@ final class DeskSurface {
         button.setMinHeight(dp(context, primary ? 54 : 48));
         button.setMinWidth(0);button.setMinimumWidth(0);
         button.setPadding(dp(context, 12), dp(context, primary ? 10 : 8), dp(context, 12), dp(context, primary ? 13 : 8));
+        if(button.getText().toString().contains("WhatsApp")||button.getText().toString().startsWith("Message — "))whatsapp(button);
+    }
+
+    static void whatsapp(Button button){
+        Context context=button.getContext();
+        StateListDrawable states=new StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled},plate(context,new int[]{0xff30333d,0xff292b31},12,0xff555555));
+        states.addState(new int[]{android.R.attr.state_pressed},plate(context,new int[]{0xff075e54,0xff064b39},12,PAPER));
+        states.addState(new int[]{android.R.attr.state_focused},plate(context,new int[]{0xff087c41,0xff075e54},12,PAPER));
+        states.addState(new int[0],plate(context,new int[]{0xff087c41,0xff075e54},12,0xff075e54));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff),states,null));button.setTextColor(PAPER);
+        button.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_whatsapp,0,0,0);button.setCompoundDrawablePadding(dp(context,10));
     }
 
     static void roundButton(Button button) {
+        DeskSounds.attach(button);
         Context context = button.getContext();
         StateListDrawable states = new StateListDrawable();
         int[] face = {0xfff1f2f5, 0xffc5c7cf};

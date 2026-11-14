@@ -11,7 +11,9 @@
   return 'https://wa.me/'+normalizePhone(address)+'?text='+encodeURIComponent(message);
  }
  function composeLink(details,label='Open WhatsApp draft'){
-  const link=node('a',label,'menu-link');
+  const name=String(details.name||'').trim();
+  const link=node('a',name?'Message — '+name:label==='Open WhatsApp draft'?'Message on WhatsApp':label,'menu-link whatsapp-action');
+  link.title=label;link.setAttribute('aria-label',label+' · '+link.textContent);
   link.href=composeUrl(details.address,details.message);
   link.target='_blank';link.rel='noopener noreferrer';
   return link;
@@ -66,6 +68,15 @@
   const url=new URL(value);const match=/^#([0-9]{4})\.(PKT-[A-F0-9]{8})$/.exec(url.hash);
   if(url.origin!==origin||url.pathname!=='/pickup'||url.search||url.username||url.password||!match)throw new Error('Paste the current SharePass receipt link.');
   return {code:match[1],reference:match[2]};
+ }
+ function scanReceipt(value,origin=globalThis.location?.origin){
+  try{return receiptDetails(value,origin);}catch{}
+  const url=new URL(value);
+  if(url.protocol!=='https:'||url.hostname!=='wa.me'||url.port||url.username||url.password||url.hash||!/^\/[1-9][0-9]{7,14}$/.test(url.pathname)
+    ||[...url.searchParams.keys()].length!==1||url.searchParams.getAll('text').length!==1)throw new Error('Scan the current SharePass pickup receipt or its WhatsApp QR.');
+  const receipts=[...url.searchParams.get('text').matchAll(/(?:^|\n)Receipt: (https:\/\/[^\s]+)/g)];
+  if(receipts.length!==1)throw new Error('This WhatsApp QR needs one current pickup receipt link.');
+  return receiptDetails(receipts[0][1],origin);
  }
  function node(tag,text,className){
   const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(className)e.className=className;return e;
@@ -167,7 +178,7 @@
      const tile=button('Show WhatsApp QR',()=>{
       selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();scan.showModal();
      },'scan-tile');
-     const link=composeLink({address:entry.draft.recipient,message:entry.draft.message});
+     const link=composeLink({address:entry.draft.recipient,message:entry.draft.message,name:entry.draft.name});
      const preview=node('details'),message=node('textarea');
      message.readOnly=true;message.rows=5;message.value=entry.draft.message;
      message.setAttribute('aria-label','Prepared WhatsApp message');
@@ -198,5 +209,5 @@
   const parent=container.closest('dialog');parent?.addEventListener('close',()=>{if(!parent.open)clear();},{signal});
   window.addEventListener('pagehide',clear,{signal});
  }
- window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,normalizePhone,qrImage,receiptUrl,receiptDetails,clear});
+ window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,normalizePhone,qrImage,receiptUrl,receiptDetails,scanReceipt,clear});
 })();

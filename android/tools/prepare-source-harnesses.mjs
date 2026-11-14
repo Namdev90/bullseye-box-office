@@ -38,6 +38,8 @@ export function extractJavaMethod(source, signature) {
 
 export function sourceHarnesses() {
   return [
+    ['QueuePushServiceTest','QueuePushService',['private void showQueueAlert()'],'fcm'],
+    ['QueueSummaryTest','QueueSummary',['static String body(JSONArray drafts,JSONArray messages)']],
     ['QrEncoderCacheTest','QrPreview',['private static String encoderSource(Context context) throws Exception']],
     ['DirectHandoverTest', 'HostedRegisterClient', [
       'JSONObject stockChange(String path, JSONObject body) throws Exception',
@@ -58,8 +60,8 @@ export function sourceHarnesses() {
       'private void presentStaffDialog(AlertDialog next)', 'private void showStaffMessage(boolean manual)',
       'private void openStaffMessage(String id, String session)', 'private static boolean validQueueToken(String token)',
     ]],
-  ].map(([name, production, signatures]) => {
-    const source = readFileSync(join(root, 'android-app/src/main/java/in/sharepass/foundation', `${production}.java`), 'utf8');
+  ].map(([name, production, signatures, sourceSet='main']) => {
+    const source = readFileSync(join(root, `android-app/src/${sourceSet}/java/in/sharepass/foundation`, `${production}.java`), 'utf8');
     const template = readFileSync(join(root, 'tests/source-harnesses', `${name}.java.in`), 'utf8');
     if (template.split('/* PRODUCTION_METHODS */').length !== 2) throw new Error(`Invalid fixture marker: ${name}`);
     return {name, source: template.replace('/* PRODUCTION_METHODS */', signatures.map(signature => extractJavaMethod(source, signature)).join('\n\n    '))};

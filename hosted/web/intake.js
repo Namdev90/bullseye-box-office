@@ -228,7 +228,7 @@ function showReceipt(result){
     for(const person of result.recipients){
       const draft=SharePassDrafts.depositDraft({phone:person.phone,name:Array.from(person.name).slice(0,40).join(''),code:result.collection_code,
         reference:result.collection_reference,booth:result.booth,quantities:person.quantities,expiresAt:result.code_expires_at});
-      const link=SharePassDrafts.composeLink({address:draft.recipient,message:draft.message},'Send code to '+person.name);
+      const link=SharePassDrafts.composeLink({address:draft.recipient,message:draft.message,name:person.name},'Send code to '+person.name);
       link.classList.add('whatsapp-action');receiptShare.append(link);
     }
   }else if(result.status==='submitted'){

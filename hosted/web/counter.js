@@ -219,12 +219,8 @@ byId('suggest-code').onclick=()=>perform(async()=>{
 });
 const inlineLookup=byId('desk-code-form');
 inlineLookup.onsubmit=event=>{event.preventDefault();perform(()=>findPasses(inlineLookup.elements.code.value));};
-sharePassAutoAdvance(inlineLookup.elements.code,value=>view==='desk'&&/^[0-9]{4}$/.test(value),
-  ()=>inlineLookup.requestSubmit());
 const pickupForm=byId('collect-form');
 const lookupForm=byId('lookup-form');
-sharePassAutoAdvance(lookupForm.elements.code,value=>!byId('lookup').hidden&&byId('lookup-reference').hidden&&/^[0-9]{4}$/.test(value),
-  ()=>lookupForm.requestSubmit());
 byId('select-all-passes').onclick=()=>{
   for(const field of byId('collect-counts').querySelectorAll('input'))field.value=field.max;
 };
@@ -342,7 +338,8 @@ async function refreshQueue(generation,manual=false){
         }));
       }
       const tokens=new Set(drafts.map(item=>item.token));
-      if(previousQueueTokens&&drafts.some(item=>!previousQueueTokens.has(item.token)))announceQueueArrival(drafts.length);
+      const arrivals=previousQueueTokens?drafts.filter(item=>!previousQueueTokens.has(item.token)):[];
+      if(arrivals.length)announceQueueArrival(arrivals);
       previousQueueTokens=tokens;
       byId('queue-count').textContent=String(drafts.length)+' waiting';
       const waiting=drafts.length?drafts.length+(drafts.length===1?' customer waiting':' customers waiting'):'No customer forms waiting.';
@@ -502,10 +499,12 @@ function scheduleQueuePoll(){
     scheduleQueuePoll();
   },60000);
 }
-function announceQueueArrival(count){
+function announceQueueArrival(arrivals){
+  const summary=arrivals.slice(0,3).map(item=>(item.name||'Depositor')+' · '+balance(item.quantities)).join('; ')+(arrivals.length>3?' · +'+(arrivals.length-3)+' more':'');
+  window.sharePassToast?.(summary+' · Waiting for booth review.');
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   navigator.serviceWorker?.getRegistration('/').then(registration=>registration?.showNotification('New SharePass deposit',{
-    body:count+' customer '+(count===1?'form is':'forms are')+' waiting at your booth.',tag:'sharepass-queue',icon:'/assets/sharepass-approved-logo.jpg',data:{url:'/staff'}
+    body:summary+' · Waiting for booth review.',tag:'sharepass-queue',icon:'/assets/sharepass-approved-logo.jpg',data:{url:'/staff'}
   })).catch(()=>{});
 }
 let deskQrLoading=false;
@@ -737,7 +736,7 @@ function showReceipt(result,privateIntake=false){
   byId('refresh-saved-code').hidden=Boolean(register);
   byId('depositor-receipt').replaceChildren();
   if(receipt.depositor_receipt){
-    const link=draft.composeLink(receipt.depositor_receipt,'Send receipt to depositor');
+    const link=draft.composeLink({...receipt.depositor_receipt,name:receipt.depositor_name},'Send receipt to depositor');
     link.classList.add('whatsapp-action');
     byId('depositor-receipt').append(link);
   }
@@ -838,7 +837,7 @@ function showBalance(result){
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();
   if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){
-    compose.append(draft.composeLink(result.depositor_update,Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
+    compose.append(draft.composeLink({...result.depositor_update,name:result.deposit.depositor_label||result.depositor_update.name},Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
   }
   show('done');
 }
@@ -848,7 +847,7 @@ byId('back-from-update').onclick=()=>show('saved');
 byId('pickup-updates-open').onclick=()=>perform(async()=>{
   const current=await fetchJson('/api/deposits/'+receipt.deposit.id+'/receipt');
   const target=byId('prepared-depositor-update');target.replaceChildren();
-  if(current.depositor_update)target.append(draft.composeLink(current.depositor_update,'Open depositor WhatsApp draft'));
+  if(current.depositor_update)target.append(draft.composeLink({...current.depositor_update,name:current.depositor_name||current.deposit?.depositor_label},'Open depositor WhatsApp draft'));
   else target.textContent='No depositor WhatsApp contact was provided.';
   show('pickup-updates');
 });

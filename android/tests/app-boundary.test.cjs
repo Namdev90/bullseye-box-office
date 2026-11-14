@@ -3,6 +3,16 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+
+test('WhatsApp vector arc flags use Android-compatible separate arguments',()=>{
+ const icon=read('android-app/src/main/res/drawable/ic_whatsapp.xml');
+ const data=/android:pathData="([^"]+)"/.exec(icon)[1];let arcs=0;
+ for(const match of data.matchAll(/[aA]([^a-zA-Z]*)/g)){
+  const values=match[1].match(/[-+]?(?:[0-9]*\.)?[0-9]+/g)||[];
+  assert.equal(values.length%7,0,'Packed SVG arc flags cannot be inflated by Android');arcs++;
+ }
+ assert(arcs>0);assert.match(icon,/android:width="24dp"/);
+});
 test('Android launcher opens a native desk with internet and optional notifications',()=>{
  const manifest=read('android-app/src/main/AndroidManifest.xml');
  assert.deepEqual([...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map(match=>match[1]),['android.permission.INTERNET','android.permission.CAMERA','android.permission.POST_NOTIFICATIONS','android.permission.REQUEST_INSTALL_PACKAGES']);

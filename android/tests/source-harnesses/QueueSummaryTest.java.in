@@ -1,0 +1,29 @@
+package in.sharepass.foundation;
+import java.util.*;
+public final class QueueSummaryTest {
+    static class JSONObject{
+        final Map<String,Object> values=new HashMap<>();
+        JSONObject put(String key,Object value){values.put(key,value);return this;}
+        String optString(String key,String fallback){return values.get(key) instanceof String?(String)values.get(key):fallback;}
+        JSONObject optJSONObject(String key){return values.get(key) instanceof JSONObject?(JSONObject)values.get(key):null;}
+        int optInt(String key){return values.get(key) instanceof Number?((Number)values.get(key)).intValue():0;}
+    }
+    static class JSONArray{
+        final List<JSONObject> values=new ArrayList<>();
+        JSONArray put(JSONObject value){values.add(value);return this;}
+        int length(){return values.size();}
+        JSONObject optJSONObject(int index){return index<values.size()?values.get(index):null;}
+    }
+    /* PRODUCTION_METHODS */
+    public static void main(String[] args){
+        JSONArray drafts=new JSONArray().put(new JSONObject().put("name","Taylor Example").put("phone","private-phone").put("quantities",new JSONObject().put("normal",4).put("vip",2).put("vvip",1).put("mip",2)));
+        String summary=body(drafts,null);
+        if(!summary.equals("Taylor Example · 4 Normal · 2 VIP · 1 VVIP · 2 MIP")||summary.contains("private-phone"))throw new AssertionError(summary);
+        JSONArray messages=new JSONArray().put(new JSONObject().put("message","Meet at booth two"));
+        if(!body(new JSONArray(),messages).equals("Admin: Meet at booth two"))throw new AssertionError();
+        if(!body(new JSONArray(),new JSONArray()).isEmpty())throw new AssertionError();
+        for(int i=0;i<4;i++)drafts.put(new JSONObject().put("name","Other"));
+        if(!body(drafts,null).endsWith("+2 more"))throw new AssertionError();
+        System.out.println("PASS authenticated queue summaries include names/counts and exclude contact details");
+    }
+}

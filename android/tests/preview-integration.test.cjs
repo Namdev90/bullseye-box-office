@@ -24,7 +24,7 @@ test('Java method extraction preserves lambdas, comments, braces and quoted char
 test('JVM fixture generation uses current production methods and needs no Java installation', async () => {
   const {sourceHarnesses, extractJavaMethod} = await harness;
   const fixtures = sourceHarnesses();
-  assert.deepEqual(fixtures.map(f => f.name), ['QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
+  assert.deepEqual(fixtures.map(f => f.name), ['QueuePushServiceTest', 'QueueSummaryTest', 'QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
   for (const fixture of fixtures) assert(!fixture.source.includes('/* PRODUCTION_METHODS */'));
   const desk = read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
   assert(fixtures.find(f=>f.name==='StaffMessageInboxTest').source.includes(extractJavaMethod(desk, 'private void showStaffMessage(boolean manual)')));

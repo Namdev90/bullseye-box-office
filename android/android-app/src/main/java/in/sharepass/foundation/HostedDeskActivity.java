@@ -212,6 +212,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleQueue(0);
     }
     @Override protected void onPause() {
+        DeskSounds.stop();
         foreground = false;
         if(feedbackToast!=null)feedbackToast.cancel();
         if(speech!=null)speech.stop();
@@ -334,7 +335,8 @@ public final class HostedDeskActivity extends Activity {
             DeskSurface.roundButton(help);
             help.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(title)
                 .setMessage(helpText(title, name)).setPositiveButton("Got it", null)
-                .setNeutralButton("Notifications",(dialog,which)->openAlertSettings()).show());
+                .setNeutralButton("Notifications",(dialog,which)->openAlertSettings())
+                .setNegativeButton(DeskSounds.enabled(this)?"Mute sounds":"Enable sounds",(dialog,which)->{DeskSounds.toggle(this);note(DeskSounds.enabled(this)?"Sounds on.":"Sounds muted.");}).show());
             toolbar.addView(help,toolbarBounds());
         }
         header.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
@@ -416,10 +418,14 @@ public final class HostedDeskActivity extends Activity {
         button.setText(label);
         DeskSurface.button(button, primary);
         LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2);
-        size.topMargin = dp(9);
+        size.topMargin = dp(12);
+        size.bottomMargin = dp(3);
         content.addView(button, size);
         button.setOnClickListener(view -> { if (!busy) action.run(); });
         return button;
+    }
+    private Button messageButton(String name,Runnable action){
+        return button(name==null||name.trim().isEmpty()?"Message on WhatsApp":"Message — "+name.trim(),action,false);
     }
     private EditText field(String label, int input, int limit) {
         TextView caption = line(label, 15, true);
@@ -467,6 +473,7 @@ public final class HostedDeskActivity extends Activity {
                 &&(access==null||!access.isTouchExplorationEnabled())){
             feedbackToast=android.widget.Toast.makeText(this,message,android.widget.Toast.LENGTH_LONG);
             feedbackToast.show();
+            DeskSounds.play(this,message.equals("Handover confirmed.")||message.equals("Passes received. Collection code ready.")?"confirm":"alert");
         }
     }
     private void failed(Exception error) {
@@ -907,16 +914,21 @@ public final class HostedDeskActivity extends Activity {
                     checkingQueue = false;
                     if (isDestroyed() || !foreground || context == null || !session.equals(client.token())) return;
                     HashSet<String> waiting = new HashSet<>();
+                    JSONArray arrivals=new JSONArray();
                     for (int i = 0; i < drafts.length(); i++) {
                         JSONObject draft = drafts.optJSONObject(i);
                         String token = draft == null ? "" : draft.optString("token");
-                        if (validQueueToken(token)) waiting.add(token);
+                        if (validQueueToken(token)) {waiting.add(token);if(!seenQueue.contains(token))arrivals.put(draft);}
                     }
                     int newCount = 0;
                     for (String token : waiting) if (!seenQueue.contains(token)) newCount++;
                     seenQueue.clear();
                     seenQueue.addAll(waiting);
-                    if (queueBaseline && newCount > 0) QueueNotifications.show(this, newCount);
+                    if (queueBaseline && newCount > 0) {
+                        String summary=QueueSummary.body(arrivals,null);
+                        QueueNotifications.show(this,newCount,summary);
+                        note(summary+" · Waiting for booth review.");
+                    }
                     if (waiting.isEmpty()) QueueNotifications.cancel(this);
                     queueBaseline = true;
                     queueDrafts = drafts;
@@ -928,7 +940,7 @@ public final class HostedDeskActivity extends Activity {
                     if (manualQueueRefresh) {
                         manualQueueRefresh=false;
                         if ("desk".equals(screen) || "queue".equals(screen) || "desk-options".equals(screen)) note("Connected. " + waiting.size() + " waiting.");
-                    } else if (queueRows != null && !busy) note("");
+                    } else if (queueRows != null && !busy && newCount==0) note("");
                     scheduleQueue(60000);
                 });
             } catch (Exception error) {
@@ -1358,8 +1370,9 @@ public final class HostedDeskActivity extends Activity {
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
-                button(hasAvailable(result.getJSONObject("deposit").getJSONObject("remaining"))?"Depositor update":"Final depositor update", () -> compose(
-                    update.optString("address"), update.optString("message")), false);
+                line(hasAvailable(result.getJSONObject("deposit").getJSONObject("remaining"))?"Depositor update":"Final depositor update",16,true);
+                messageButton(result.getJSONObject("deposit").optString("depositor_label"), () -> compose(
+                    update.optString("address"), update.optString("message")));
             }
             button("Done", this::desk, true);
             if(!path.equals("/api/collections/history/handover"))note("Handover confirmed.");
@@ -1399,8 +1412,11 @@ public final class HostedDeskActivity extends Activity {
         }
         JSONObject proof = result.optJSONObject("depositor_receipt");
         button("Share code", () -> sharing(result), true);
-        if (proof != null) button("Send receipt to depositor", () -> compose(proof.optString("address"), proof.optString("message")), false);
-        button("Depositor update",()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}),false);
+        if (proof != null) messageButton(result.optString("depositor_name",deposit.optString("depositor_label")), () -> compose(proof.optString("address"), proof.optString("message")));
+        if(!result.optString("depositor_phone").isEmpty()||deposit.optJSONObject("update_contact")!=null){
+            line("Depositor update",16,true);
+            messageButton(result.optString("depositor_name",deposit.optString("depositor_label")),()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}));
+        }
 
         button("Done", this::desk, false);
     }
@@ -1581,7 +1597,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void speakDigits(String value){
         android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
-        if(!speechReady||!value.matches("[0-9]{1,4}")||access!=null&&access.isTouchExplorationEnabled())return;
+        if(!DeskSounds.enabled(this)||!speechReady||!value.matches("[0-9]{1,4}")||access!=null&&access.isTouchExplorationEnabled())return;
         speech.speak(value.replaceAll("(?<=.)(?=.)"," "),TextToSpeech.QUEUE_FLUSH,null,"sharepass-code");
     }
     private void logout(){
@@ -1734,10 +1750,10 @@ public final class HostedDeskActivity extends Activity {
         if (!recipient.phone.isEmpty()) {
             line(recipient.phone, 17, false);
             button("Show WhatsApp QR", () -> sharingQr(receipt, index), true);
-            button("Open WhatsApp draft", () -> {
+            messageButton(recipient.name, () -> {
                 try { compose(recipient.phone, depositMessage(receipt, recipient)); }
                 catch (Exception error) { note(error.getMessage()); }
-            }, false);
+            });
         }
         button(recipient.phone.isEmpty() ? "Enter WhatsApp number" : "Edit recipient",
             () -> editRecipient(receipt, index), recipient.phone.isEmpty());

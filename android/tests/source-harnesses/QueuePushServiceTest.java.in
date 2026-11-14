@@ -1,0 +1,33 @@
+package in.sharepass.foundation;
+public final class QueuePushServiceTest {
+    static class JSONArray{int length(){return 1;}}
+    static class JSONObject{JSONArray getJSONArray(String key){return new JSONArray();}JSONArray optJSONArray(String key){return null;}}
+    static class HostedRegisterClient{
+        static int status;static boolean offline,revoke;static String live="session";final String snapshot=live;
+        HostedRegisterClient(Object context){}
+        String token(){return snapshot;}
+        JSONObject request(String path,Object body)throws Exception{
+            if(!path.equals("/api/queue")||body!=null)throw new AssertionError();
+            if(status!=0)throw new Rejected(status);if(offline)throw new java.io.IOException();if(revoke)live="";return new JSONObject();
+        }
+        static class Rejected extends Exception{final int status;Rejected(int status){this.status=status;}}
+    }
+    static class QueueSummary{static String body(JSONArray drafts,JSONArray messages){return "Taylor · 4 Normal";}}
+    static class QueueNotifications{
+        static int detailed,generic,cancelled;
+        static void show(Object context,int count){generic++;}
+        static void show(Object context,int count,String text){if(!text.equals("Taylor · 4 Normal"))throw new AssertionError();detailed++;}
+        static void cancel(Object context){cancelled++;}
+    }
+    /* PRODUCTION_METHODS */
+    static void reset(){HostedRegisterClient.status=0;HostedRegisterClient.offline=HostedRegisterClient.revoke=false;HostedRegisterClient.live="session";QueueNotifications.detailed=QueueNotifications.generic=QueueNotifications.cancelled=0;}
+    public static void main(String[] args){
+        QueuePushServiceTest service=new QueuePushServiceTest();reset();service.showQueueAlert();if(QueueNotifications.detailed!=1)throw new AssertionError();
+        for(int status:new int[]{401,403}){reset();HostedRegisterClient.status=status;service.showQueueAlert();if(QueueNotifications.cancelled!=1||QueueNotifications.generic!=0||QueueNotifications.detailed!=0)throw new AssertionError();}
+        for(int status:new int[]{429,500,503}){reset();HostedRegisterClient.status=status;service.showQueueAlert();if(QueueNotifications.generic!=1||QueueNotifications.cancelled!=0)throw new AssertionError();}
+        reset();HostedRegisterClient.offline=true;service.showQueueAlert();if(QueueNotifications.generic!=1)throw new AssertionError();
+        reset();HostedRegisterClient.revoke=true;service.showQueueAlert();if(QueueNotifications.detailed!=0||QueueNotifications.generic!=0)throw new AssertionError();
+        reset();HostedRegisterClient.live="";service.showQueueAlert();if(QueueNotifications.detailed!=0||QueueNotifications.generic!=0)throw new AssertionError();
+        System.out.println("PASS queue push preserves generic transient-error alerts and suppresses revoked or changed sessions");
+    }
+}
