@@ -37,17 +37,18 @@ function fixture(env={}){
 // Execute the complete counter script and its actual event handlers. This is a
 // DOM/transport model, not browser rendering or device acceptance.
 async function page(f,{storage=new Map(),options={},intercept,context}={}){
-  const nodes=new Map(),calls=[];
+  const nodes=new Map(),calls=[],testHolds=new Map(),events=new Map(),historyEntries=[];
+  const history={state:null,pushState(state){this.state=state;historyEntries.push(state);},replaceState(state){this.state=state;historyEntries[historyEntries.length?historyEntries.length-1:0]=state;}};
   class Node{
     constructor(id){this.id=id;this.value='';this.hidden=false;this.children=[];this.textContent='';this.required=false;this.readOnly=false;this.selectedOptions=[{textContent:'1 day'}];this.classList={add(){},toggle(){}};this.fields=new Map();this.elements=new Proxy({},{get:(_,key)=>{if(!this.fields.has(key))this.fields.set(key,new Node(id+'-'+key));return this.fields.get(key);}});}
-    addEventListener(){} focus(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
+    addEventListener(){} focus(){} requestSubmit(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
   }
   const ids=new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
   const node=id=>{assert(ids.has(id),'Actual counter markup must contain #'+id);if(!nodes.has(id))nodes.set(id,new Node(id));return nodes.get(id);};
   const sectionIds=[...html.matchAll(/<section id="([^"]+)"/g)].map(m=>m[1]);
   const document={getElementById:node,querySelector:()=>null,querySelectorAll:selector=>selector==='main>section'?sectionIds.map(node):[],createElement:tag=>new Node(tag),addEventListener(){}};
   const stored={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
-  const sandbox={document,window:{SharePassDrafts:{clear(){},composeLink:()=>new Node('link'),renderDeposit(){}},addEventListener(){}},navigator:{},crypto,AbortSignal,URL,
+  const sandbox={document,testHolds,history,window:{sharePassHold:(button,options)=>{testHolds.set(button.id,options);return {cancel(){},setLabel(){}};},SharePassDrafts:{clear(){},composeLink:()=>new Node('link'),renderDeposit(){}},addEventListener(name,callback){events.set(name,callback);}},navigator:{},crypto,AbortSignal,URL,
     sessionStorage:stored,location:{origin:'https://fixture.example',assign(){}},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},
     DemoStore:class{passTypes=[{id:'normal',label:'Normal'},{id:'vip',label:'VIP'},{id:'vvip',label:'VVIP'}];},
     sharePassSteps:()=>({show(){}}),sharePassAutoAdvance(){},fetch:async(path,init={})=>{
@@ -57,83 +58,108 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
       const normal=()=>f.send(path,body,options);
       return intercept?intercept(path,body,normal):normal();
     }};
-  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,reserve,preparePickup:value=>{match=value;},state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
+  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,reserve,finishHandover:()=>testHolds.get("confirm").confirm(),confirmDirect:confirm,seedRecovery:setRecovery,preparePickup:value=>{match=value;byId("collect-form").elements.collector_label.value="Riya";},state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
   const api=sandbox.testCounter;
   async function settle(){for(let i=0;i<100;i++){await Promise.resolve();if(!api.state().busy&&api.state().view!=='loading'){await Promise.resolve();return;}}throw Error('Counter did not settle');}
   await settle();
   const click=async id=>{const result=node(id).onclick();await result;await settle();};
   const submit=async()=>{await node('refresh-code-form').onsubmit({preventDefault(){}});await settle();};
-  return {api,node,calls,storage,stored,click,submit,settle};
+  return {api,node,calls,storage,stored,click,submit,settle,history,historyEntries,back:state=>events.get('popstate')({state})};
 }
 const journal=p=>JSON.parse([...p.storage.values()][0]||'null');
 
-test('one-button handover recovers either lost reply without another release or handover',async()=>{
+test('production navigation handles browser Back without replaying custody or restoring a stale transfer screen',async()=>{
+ const f=fixture();try{
+  const p=await page(f);p.api.show('lookup');p.api.show('history');
+  assert.equal(p.historyEntries.at(-1).sharepassView,'history');
+  p.back({sharepassView:'collect'});assert.equal(p.api.state().view,'lookup');
+  p.back({sharepassView:'handover'});assert.equal(p.api.state().view,'desk');
+  const action={path:'/api/deposits/fixture/release',body:{request_id:'original'}};p.api.seedRecovery(action);
+  p.back({sharepassView:'history'});assert.equal(p.api.state().view,'desk');assert.equal(p.api.state().recovery.body.request_id,'original');
+  assert.equal(p.calls.filter(call=>call.body&&call.path!=='/api/verify').length,0);
+ }finally{f.close();}
+});
+
+test('reservation recovers lost replies but never confirms physical delivery until the final hold',async()=>{
   for(const cut of ['/release','/handover']){
     const f=fixture();try{
-      const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;
-      let lost=true;
-      const p=await page(f,{intercept:async(path,body,normal)=>{
-        const response=await normal();
-        if(lost&&path.endsWith(cut)){lost=false;throw new TypeError('Synthetic lost reply');}
-        return response;
-      }});
-      p.api.preparePickup(claim);
-      const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
-      form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
-      await assert.rejects(p.api.reserve());assert(journal(p));
-      await p.api.recover();assert.equal(p.api.state().view,'done');assert.equal(journal(p),null);
+      const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true;
+      const p=await page(f,{intercept:async(path,body,normal)=>{const response=await normal();if(lost&&path.endsWith(cut)){lost=false;throw new TypeError('Synthetic lost reply');}return response;}});
+      p.api.preparePickup(claim);const form=p.node('collect-form');form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+      if(cut==='/release'){await assert.rejects(p.api.reserve());assert(journal(p));await p.api.recover();}else await p.api.reserve();
+      assert.equal(p.api.state().view,'handover');assert.equal(journal(p),null);
+      assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").get().n,0);
+      await assert.rejects(p.api.confirmDirect(),/Hold/);
+      form.elements.collector_label.value='Omar';await p.api.finishHandover();await p.settle();
+      if(cut==='/handover'){assert(journal(p));await p.api.recover();}
+      assert.equal(p.api.state().view,'done');assert.equal(journal(p),null);
       assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+      assert.equal(JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_collections').get().payload).collector_label,'Riya');
       assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").get().n,1);
-      for(const suffix of ['/release','/handover']){
-        const ids=p.calls.filter(call=>call.path.endsWith(suffix)).map(call=>call.body.request_id);
-        assert.equal(new Set(ids).size,1,'Recovery must retain the original request ID');
-      }
+      for(const suffix of ['/release','/handover'])assert.equal(new Set(p.calls.filter(call=>call.path.endsWith(suffix)).map(call=>call.body.request_id)).size,1);
     }finally{f.close();}
   }
 });
 
-test('handover waits for name confirmation and preserves intent if the second journal write fails',async()=>{
+test('reservation validates collector and journal before transfer; failed final journal leaves a recoverable reservation',async()=>{
   const f=fixture();try{
-    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body,p=await page(f);
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=false;
-    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
-    await assert.rejects(p.api.reserve(),/depositor/);assert.equal(journal(p),null);
-    form.elements.name_confirmed.checked=true;
-    p.api.setStorage({...p.stored,setItem(key,value){if(JSON.parse(value).path.endsWith('/handover'))throw new Error('Synthetic journal failure');return p.stored.setItem(key,value);}});
-    await assert.rejects(p.api.reserve(),/Recover/);assert.equal(journal(p).finalize,true);
-    p.api.setStorage(p.stored);await p.api.recover();assert.equal(journal(p),null);
-    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body,p=await page(f);p.api.preparePickup(claim);
+    const form=p.node('collect-form');form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    form.elements.collector_label.value='';await assert.rejects(p.api.reserve(),/person collecting/);assert.equal(journal(p),null);
+    form.elements.collector_label.value='Riya';await p.api.reserve();assert.equal(p.api.state().view,'handover');
+    p.api.setStorage({...p.stored,setItem(){throw Error('Synthetic journal failure');}});await p.api.finishHandover();await p.settle();
+    assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_collections WHERE pending=1").get().n,1);
+    assert.equal(p.calls.filter(call=>call.path.endsWith('/handover')).length,0);
+    p.api.setStorage(p.stored);await p.api.finishHandover();await p.settle();assert.equal(p.api.state().view,'done');
   }finally{f.close();}
 });
 
-test('a definitively unexecuted expired-claim recovery releases its journal without changing stock',async()=>{
+test('unexecuted expired reservation recovery clears only pre-transfer intent and changes no stock',async()=>{
   const f=fixture();try{
     const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true;
-    const p=await page(f,{intercept:async(path,body,normal)=>{if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Request never reached server');}return normal();}});
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
-    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    const p=await page(f,{intercept:async(path,body,normal)=>{if(lost&&path.endsWith('/release')){lost=false;throw TypeError('Request never reached server');}return normal();}});
+    p.api.preparePickup(claim);p.node('collect-form').querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
     await assert.rejects(p.api.reserve());assert(journal(p));
     const row=f.sqlite.prepare('SELECT payload FROM sharepass_ledger_claims WHERE token=?').get(claim.claim_token);
     f.sqlite.prepare('UPDATE sharepass_ledger_claims SET expires=0,payload=? WHERE token=?').run(JSON.stringify({...JSON.parse(row.payload),expires:0}),claim.claim_token);
-    await assert.rejects(p.api.recover());assert.equal(journal(p),null);
+    await assert.rejects(p.api.recover());assert.equal(journal(p),null);assert.notEqual(p.api.state().view,'handover');
     assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,0);
-    assert.equal(p.api.state().recovery,null);
   }finally{f.close();}
 });
 
-test('expired authentication cannot discard a committed pickup while its response is being recovered',async()=>{
+test('legacy physical attestation survives a definitive failed release and blocks automatic re-delivery',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body,p=await page(f);
+    const row=f.sqlite.prepare('SELECT payload FROM sharepass_ledger_claims WHERE token=?').get(claim.claim_token);
+    f.sqlite.prepare('UPDATE sharepass_ledger_claims SET expires=0,payload=? WHERE token=?').run(JSON.stringify({...JSON.parse(row.payload),expires:0}),claim.claim_token);
+    const action={path:'/api/deposits/'+data.deposit.id+'/release',body:{request_id:'legacy-attested-release',packet_id:data.deposit.packet_id,claim_token:claim.claim_token,version:claim.deposit.version,quantities:{normal:1,vip:0,vvip:0}},finalize:true};
+    p.api.seedRecovery(action);await assert.rejects(p.api.recover(),/supervisor/);
+    assert.equal(journal(p).reconciliation_required,true);assert.deepEqual(journal(p).body,action.body);
+    const calls=p.calls.length;await assert.rejects(p.api.recover(),/supervisor/);assert.equal(p.calls.length,calls);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,0);
+  }finally{f.close();}
+});
+
+test('stale concurrent claims are rejected before any physical handover instruction',async()=>{
+  const f=fixture();try{
+    const data=await receipt(f),a=(await f.call('/api/verify',{collection_code:data.collection_code})).body,b=(await f.call('/api/verify',{collection_code:data.collection_code})).body;
+    const first=(await f.call('/api/deposits/'+data.deposit.id+'/release',{request_id:'other-release',claim_token:a.claim_token,packet_id:data.deposit.packet_id,version:a.deposit.version,quantities:{normal:1,vip:0,vvip:0}})).body;
+    await f.call('/api/collections/'+first.collection.id+'/handover',{request_id:'other-handover',version:first.collection.version,handover_confirmed:true});
+    const p=await page(f);p.api.preparePickup(b);p.node('collect-form').querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    await assert.rejects(p.api.reserve());assert.notEqual(p.api.state().view,'handover');assert.equal(journal(p),null);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+  }finally{f.close();}
+});
+
+test('expired authentication retains a committed reservation and never auto-confirms it on recovery',async()=>{
   const f=fixture();try{
     const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true,unauthorized=false;
-    const p=await page(f,{intercept:async(path,body,normal)=>{
-      if(unauthorized&&path.endsWith('/release'))return Response.json({error:'Reconnect the original staff account.',notExecuted:true},{status:401});
-      const response=await normal();if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Committed reply lost');}return response;
-    }});
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
-    form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
+    const p=await page(f,{intercept:async(path,body,normal)=>{if(unauthorized&&path.endsWith('/release'))return Response.json({error:'Reconnect the original staff account.',notExecuted:true},{status:401});const response=await normal();if(lost&&path.endsWith('/release')){lost=false;throw TypeError('Committed reply lost');}return response;}});
+    p.api.preparePickup(claim);p.node('collect-form').querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
     await assert.rejects(p.api.reserve());const original=journal(p);unauthorized=true;
-    await assert.rejects(p.api.recover(),/Reconnect/);assert.deepEqual(journal(p),original);
-    unauthorized=false;await p.api.recover();assert.equal(journal(p),null);
-    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+    await assert.rejects(p.api.recover(),/uncertain/);assert.deepEqual(journal(p),original);
+    unauthorized=false;await p.api.recover();assert.equal(p.api.state().view,'handover');assert.equal(journal(p),null);
+    assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_collections WHERE pending=1").get().n,1);
   }finally{f.close();}
 });
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};

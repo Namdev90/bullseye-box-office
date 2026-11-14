@@ -146,3 +146,9 @@ body.sharepass-brand{background:#000;color:var(--paper)}
 .sharepass-brand .whatsapp-action,.sharepass-brand a.whatsapp-action{display:inline-flex;align-items:center;justify-content:center;gap:.65rem;background:#087c41;color:#fff;border-color:#075e54;white-space:normal;overflow-wrap:anywhere}
 .whatsapp-action::before{content:"";display:inline-block;flex:0 0 24px;width:24px;height:24px;background:currentColor;mask:url('/assets/whatsapp.svg') center/contain no-repeat;-webkit-mask:url('/assets/whatsapp.svg') center/contain no-repeat}
 .sharepass-brand .whatsapp-action:disabled{background:#30333d;color:#aeb1bb;border-color:#555}
+.hold-confirm{position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+.hold-confirm>span{position:relative;z-index:1}
+.hold-confirm>progress{position:absolute;inset:0;width:100%;height:100%;opacity:.22;pointer-events:none;appearance:none;border:0;background:transparent}
+.hold-confirm>progress::-webkit-progress-bar{background:transparent}.hold-confirm>progress::-webkit-progress-value{background:#fff}.hold-confirm>progress::-moz-progress-bar{background:#fff}
+#collector-hint,#handover-hold-hint{line-height:1.5;margin:.75rem 0}
+.hold-assistive{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

@@ -18,7 +18,7 @@
       <p id="customer-reference" hidden></p>
     </div>
     <form id="customer-form" hidden>
-      <fieldset id="customer-details" data-wizard-page data-next-label="Continue to collector">
+      <fieldset id="customer-details" data-wizard-page>
         <legend>Your details</legend>
         <label class="field"><span id="customer-name-label">First name (optional)</span>
           <input name="name" autocomplete="section-depositor name" maxlength="80">
@@ -28,15 +28,15 @@
           <label class="field">Your WhatsApp number
             <input name="phone" type="tel" inputmode="tel" autocomplete="section-depositor tel-national" aria-describedby="customer-phone-hint" placeholder="9876543210" maxlength="40" disabled>
           </label>
-          <small id="customer-phone-hint">We add +91 to Indian mobiles. Your collector must use a different number.</small>
+          <small id="customer-phone-hint">We add +91 to Indian mobiles.</small>
         </div>
-      </fieldset>
-      <fieldset id="customer-pass-step" hidden>
-        <legend>Who will collect?</legend>
+      <details id="customer-pass-step" hidden>
+        <summary>Add collectors or plans (optional)</summary>
         <div id="recipient-list" class="stack"></div>
         <button id="add-recipient" class="outline-action" type="button">＋ Add recipient</button>
         <p id="allocation-balance" role="status" hidden></p>
         <p id="customer-ready" class="customer-ready" role="status" hidden>✓ Ready to send</p>
+      </details>
       </fieldset>
       <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to booth</button></div>
       <p class="intake-hint">Confirmation appears here automatically. Allow notifications when asked to receive a receipt alert.</p>

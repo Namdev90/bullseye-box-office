@@ -13,11 +13,13 @@ let staffMessageCursor;
 let deskMode="deposit",boothQrUrl="",queuePollTimer,historyData=[],historyFilter="all",historyCursor,historyLoading=false,historyPending=[];
 let previousQueueTokens;
 let historyLoaded=false;
+let resumeHold,resumeHeld=false;
+let navigatingBack=false;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
 const balance = counts => categories(counts).filter(({id})=>counts[id]).map(({id,label})=>counts[id]+' '+label).join(' · ') || 'No passes remaining';
-const wizards=Object.fromEntries(['queue-review','intake-review','deposit','collect'].map(id=>{
+const wizards=Object.fromEntries(['queue-review','intake-review','deposit'].map(id=>{
   const form=byId(id+'-form');
   return [id,sharePassSteps(form,{validate(page){
     byId('error').textContent='';
@@ -35,6 +37,7 @@ const wizards=Object.fromEntries(['queue-review','intake-review','deposit','coll
 }));
 
 function show(id){
+  resumeHold?.cancel();resumeHeld=false;
   viewRevision++;
   if(id!=='desk'&&byId('staff-message').open)byId('staff-message').close();
   if(view==='intake'){
@@ -54,6 +57,10 @@ function show(id){
     if(uncertain)byId('error').textContent='Recover the last action before sharing a collection code.';
   }
   byId('menu').open = false;
+  if(globalThis.history?.pushState&&!navigatingBack&&view!==id){
+    const state={...history.state,sharepassView:id};
+    if(!view||view==='loading')history.replaceState(state,'');else history.pushState(state,'');
+  }
   view = id;
   wizards[id]?.show(0,false);
   if(id === 'desk'){
@@ -68,6 +75,18 @@ function show(id){
   if(id==='history'){byId('tab-deposit').ariaPressed='false';byId('tab-collect').ariaPressed='false';loadHistory();}
   byId(id).querySelector('h1, button')?.focus();
 }
+
+window.addEventListener('popstate',event=>{
+  resumeHold?.cancel();resumeHeld=false;
+  if(busy||recovery){history.pushState({...history.state,sharepassView:view},'');window.sharePassToast?.('Finish or recover the current action first.');return;}
+  const target=event.state?.sharepassView;
+  navigatingBack=true;
+  try{
+    if(target==='lookup'||target==='collect')openLookup();
+    else if(target==='history')show('history');
+    else show('desk');
+  }finally{navigatingBack=false;}
+});
 
 byId('menu').addEventListener('keydown',event=>{
   if(event.key!=='Escape'||!byId('menu').open)return;
@@ -106,7 +125,7 @@ function renderCounts(form,limits){
   byId(form+'-counts').innerHTML = categories(limits).map(({id,label})=>{
     const limit = limits?.[id] ?? 100;
     const available = limits ? '<small>'+limit+' available</small>' : '';
-    return '<div class="row"><label for="'+form+'-'+id+'">'+label+available+'</label><div class="step">'+
+    return '<div class="row"'+(limits&&limit===0?' hidden':'')+'><label for="'+form+'-'+id+'">'+label+available+'</label><div class="step">'+
       '<button type="button" aria-label="Remove one '+label+'" data-step="-1">−</button>'+
       '<input id="'+form+'-'+id+'" name="'+id+'" type="number" min="0" max="'+limit+'" value="0" required inputmode="numeric">'+
       '<button type="button" aria-label="Add one '+label+'" data-step="1">+</button></div></div>';
@@ -143,7 +162,8 @@ function renderHistory(){
     const name=document.createElement('h2');name.textContent=item.depositor_label||'Pass deposit';
     const badge=document.createElement('span');badge.className='history-badge'+(item.handover_pending||item.pending_collection?' pending':'');
     const available=Object.values(item.remaining||{}).reduce((sum,value)=>sum+Number(value||0),0);
-    badge.textContent=item.handover_pending||item.pending_collection?'Handover awaiting confirmation':available?'Available for pickup':'Completed';
+    const expired=available&&item.code_expires_at<=Date.now();
+    badge.textContent=item.handover_pending||item.pending_collection?'Handover awaiting confirmation':available?(expired?'Code expired · passes remain':'Available for pickup'):'Completed';
     const counts=document.createElement('p');counts.textContent='Remaining · '+balance(item.remaining||{});
     const details=document.createElement('small');
     const created=new Date(item.created_at||item.createdAt||'');
@@ -167,7 +187,7 @@ function renderHistory(){
       else showBalance(current);
     });
     row.append(open);
-    if(available&&!item.handover_pending&&!item.pending_collection){
+    if(available&&!expired&&!item.handover_pending&&!item.pending_collection){
       const collect=document.createElement('button');collect.type='button';collect.textContent='Collect passes';
       collect.onclick=()=>perform(async()=>{const current=await fetchJson('/api/deposits/'+item.id+'/receipt');openLookup(current.collection_code);lookupForm.elements.reference.value=current.deposit.packet_id;byId('lookup-reference').hidden=false;await findPasses();});row.append(collect);
     }
@@ -221,6 +241,19 @@ const inlineLookup=byId('desk-code-form');
 inlineLookup.onsubmit=event=>{event.preventDefault();perform(()=>findPasses(inlineLookup.elements.code.value));};
 const pickupForm=byId('collect-form');
 const lookupForm=byId('lookup-form');
+lookupForm.elements.reference.addEventListener('input',()=>{
+  try{const value=draft.receiptDetails(lookupForm.elements.reference.value.trim());lookupForm.elements.code.value=value.code;}catch{}
+});
+function collectorName(){
+  const name=pickupForm.elements.collector_label.value.trim();
+  if(!name||name.length>80||/[\u0000-\u001f\u007f]/.test(name))throw new Error('Choose or enter the name of the person collecting these passes.');
+  return name;
+}
+resumeHold=window.sharePassHold(byId('confirm'),{
+  ready:()=>!busy&&!recovery&&!!pending,signature:()=>JSON.stringify(pending),
+  confirm:()=>{resumeHeld=true;return perform(demoAction(confirm));},status:byId('resume-hold-status')
+});
+pickupForm.addEventListener('input',()=>{byId('reserve-pickup').textContent='Reserve selected passes'+(pickupForm.elements.collector_label.value.trim()?' for '+pickupForm.elements.collector_label.value.trim():'');});
 byId('select-all-passes').onclick=()=>{
   for(const field of byId('collect-counts').querySelectorAll('input'))field.value=field.max;
 };
@@ -289,9 +322,13 @@ async function recover(){
     return refreshQueue(++queueView);
   }
   if(action.path==='/api/codes/refresh')return recoverRefresh(action);
+  if(action.reconciliation_required)throw new Error('A previous physical handover could not be recorded. Ask the supervisor to reconcile it; do not hand out passes again.');
   if(action.finalize){
     try{return await finishDirectHandover(await fetchJson(action.path,action.body));}
-    catch(error){if(knownFailure(error)&&recovery===action)setRecovery(null);throw error;}
+    catch(error){
+      if(knownFailure(error)&&recovery===action){setRecovery({...action,reconciliation_required:true});throw new Error('A previous physical handover could not be recorded. Ask the supervisor to reconcile it; do not hand out passes again.');}
+      throw error;
+    }
   }
   const result=await submit(action);
   if(action.path==='/api/deposits'||action.path.endsWith('/confirm')){
@@ -522,7 +559,9 @@ async function showDeskQr(){
     tile.hidden=false;
     byId('copy-deposit-link').disabled=false;
     const share=byId('share-deposit-link');
-    share.href='https://wa.me/?text='+encodeURIComponent('Leave your passes with SharePass by Bullseye Entertainment. Fill in your details here, then hand the passes to staff: '+boothQrUrl);
+    const invite='https://wa.me/?text='+encodeURIComponent('SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to booth staff. A collection code is issued after staff check and approve the deposit.\n\n'+boothQrUrl);
+    if(invite.length>1200)throw new Error('The booth link is too long to share.');
+    share.href=invite;
     share.hidden=false;byId('desk-link-status').textContent='This booth QR stays the same for every customer.';
   }catch{byId('desk-link-status').textContent='Connecting to your booth… Open Settings to retry if needed.';}
   finally{deskQrLoading=false;}
@@ -736,12 +775,13 @@ function showReceipt(result,privateIntake=false){
   byId('refresh-saved-code').hidden=Boolean(register);
   byId('depositor-receipt').replaceChildren();
   const depositorMessage=receipt.depositor_receipt||(receipt.depositor_update?.channel==='whatsapp'?receipt.depositor_update:null);
-  if(depositorMessage){
-    const link=draft.composeLink({...depositorMessage,name:receipt.depositor_name||receipt.deposit.depositor_label},receipt.depositor_receipt?'Send receipt to depositor':'Depositor update');
-    link.classList.add('whatsapp-action');
-    byId('depositor-receipt').append(link);
-  }
   show('saved');
+  if(depositorMessage){try{
+    const link=draft.composeLink({...depositorMessage,name:receipt.depositor_receipt?receipt.depositor_name||receipt.deposit.depositor_label:depositorMessage.name},receipt.depositor_receipt?'Send receipt to depositor':'Depositor update');
+    link.classList.add('whatsapp-action');
+    if(receipt.depositor_receipt){const purpose=document.createElement('p');purpose.textContent=receipt.receipt_purpose==='replacement'?'New collection code':'Deposit confirmation';byId('depositor-receipt').append(purpose);}
+    byId('depositor-receipt').append(link);
+  }catch{byId('error').textContent='Your receipt is saved. This WhatsApp draft is too long; share the current receipt with help from staff.';}}
 }
 
 function openShare(){
@@ -749,7 +789,8 @@ function openShare(){
   if(!register&&recovery?.path==='/api/codes/refresh')return perform(()=>recoverRefresh(recovery));
   show('share');
   const {deposit,collection_code:code} = receipt;
-  draft.renderDeposit(byId('share-content'),{code,reference:register?undefined:deposit.packet_id,booth:register?'Box office':staff.booth_label||'Box office',location:register?'Main entrance':staff.pickup_location,quantities:deposit.remaining,recipients:receipt.recipients,expiresAt:deposit.code_expires_at,saveRecipients:people=>{receipt.recipients=people;}});
+  const refresh=register?undefined:async()=>draft.eligibleReceipt(await fetchJson('/api/deposits/'+deposit.id+'/receipt'),{id:deposit.id,reference:deposit.packet_id,code});
+  draft.renderDeposit(byId('share-content'),{code,reference:register?undefined:deposit.packet_id,booth:register?'Box office':staff.booth_label||'Box office',location:register?'Main entrance':staff.pickup_location,quantities:deposit.remaining,recipients:receipt.recipients,expiresAt:deposit.code_expires_at,refresh,saveRecipients:people=>{receipt.recipients=people;}});
 }
 
 function openLookup(code=''){
@@ -785,9 +826,11 @@ async function findPasses(code=lookupForm.elements.code.value){
   }
   if(!match.claim_token) throw new Error('This packet is stored at another counter.');
   byId('collect-form').reset();
+  byId('collector-names').replaceChildren(...(match.collectors||[]).map(name=>{const option=document.createElement('option');option.value=name;return option;}));
+  byId('reserve-pickup').textContent='Reserve selected passes';
   byId('pickup-location').hidden=false;
   byId('slot').textContent = /^Packet |^PKT-/.test(pickupLocation(match.deposit))?'':pickupLocation(match.deposit);
-  byId('pickup-customer').textContent=match.deposit.depositor_label||'Group pickup';
+  byId('pickup-customer').textContent='Depositor · '+(match.deposit.depositor_label||'Name not recorded');
   byId('collect-form').elements.packet.value=match.deposit.packet_id;
   renderCounts('collect',match.deposit.remaining);
   show('collect');
@@ -795,28 +838,28 @@ async function findPasses(code=lookupForm.elements.code.value){
 
 async function reserve(){
   const form = byId('collect-form');
-  if(!form.elements.name_confirmed.checked)throw new Error('Confirm the depositor’s name and physical handover.');
+  if(!match)throw new Error('Verify the current receipt first.');
+  collectorName();if(!Object.values(readCounts(form)).some(value=>Number.isInteger(value)&&value>0))throw new Error('Choose at least one pass.');
   const path='/api/deposits/'+match.deposit.id+'/release',body={
-    packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form)
+    packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form),collector_label:collectorName()
   };
-  if(register)return finishDirectHandover(await request(path,body));
+  if(register)return showHandover(await request(path,body));
   if(recovery)throw new Error('Recover the last action first.');
-  const action={path,body:{...body,request_id:crypto.randomUUID()},finalize:true};
+  const action={path,body:{...body,request_id:crypto.randomUUID()}};
   setRecovery(action);
   const controls=[...form.querySelectorAll('button,input')];controls.forEach(control=>control.disabled=true);
-  // Keep physical-handover intent until the confirmation request is journaled.
-  try{await finishDirectHandover(await fetchJson(action.path,action.body));}
+  try{showHandover(await submit(action));}
   catch(error){
     if(knownFailure(error)&&recovery===action)setRecovery(null);
     if(error.notExecuted)throw error;
-    throw new Error('Recover the saved handover from the desk before handing over any more passes.');
+    throw new Error('Reservation is not confirmed. Recover the saved request before giving out any passes.');
   }
   finally{controls.forEach(control=>control.disabled=false);}
 }
 
 async function finishDirectHandover(result){
   const collection=result.collection;
-  if(register){pending=collection;return confirm();}
+  if(register){pending=collection;resumeHeld=true;return confirm();}
   const action={path:'/api/collections/'+collection.id+'/handover',body:{version:collection.version,handover_confirmed:true,request_id:crypto.randomUUID()}};
   setRecovery(action);showBalance(await submit(action));
   window.sharePassToast?.('Handover confirmed.');
@@ -824,23 +867,31 @@ async function finishDirectHandover(result){
 
 function showHandover(result){
   pending = result.collection;
-  byId('handover-summary').textContent = balance(pending.quantities)+' · '+pickupLocation(result.deposit);
+  if(pending?.status==='HANDED_OVER')return showBalance(result);
+  if(pending?.status!=='RELEASE_RECORDED')throw new Error('A confirmed reservation is required before physical handover.');
+  byId('reserved-people').textContent='Depositor: '+(result.deposit.depositor_label||'Name not recorded')+' · Collector: '+(pending.collector_label||'Name not recorded on this older handover');
+  const location=pickupLocation(result.deposit);
+  byId('handover-summary').textContent = 'Reserved · '+balance(pending.quantities)+(/^Packet |^PKT-/.test(location)?'':' · '+location);
+  resumeHold.setLabel('Hold 2 seconds'+(pending.collector_label?' — confirm handover to '+pending.collector_label:' to confirm handover'));
   show('handover');
 }
 
 async function confirm(){
+  if(!resumeHeld)throw new Error('Hold the handover button for two seconds to confirm this recorded handover.');
+  resumeHeld=false;
   showBalance(await request('/api/collections/'+pending.id+'/handover',{version:pending.version,handover_confirmed:true}));
   window.sharePassToast?.('Handover confirmed.');
 }
 
 function showBalance(result){
+  byId('handover-people').textContent='Depositor: '+(result.deposit.depositor_label||result.depositor_name||'Name not recorded')+(result.collection?' · Collector: ':' · Last collector: ')+(result.collection?.collector_label||result.last_collection?.collector_label||'Name not recorded');
   byId('balance').textContent = balance(result.deposit.remaining);
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();
-  if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){
-    compose.append(draft.composeLink({...result.depositor_update,name:result.deposit.depositor_label||result.depositor_update.name},Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
-  }
   show('done');
+  if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){try{
+    compose.append(draft.composeLink(result.depositor_update,Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
+  }catch{byId('error').textContent='The confirmed result is saved. This WhatsApp draft could not be prepared; ask staff for help sharing the update.';}}
 }
 
 const updatesForm=byId('pickup-updates-form');
@@ -848,7 +899,7 @@ byId('back-from-update').onclick=()=>show('saved');
 byId('pickup-updates-open').onclick=()=>perform(async()=>{
   const current=await fetchJson('/api/deposits/'+receipt.deposit.id+'/receipt');
   const target=byId('prepared-depositor-update');target.replaceChildren();
-  if(current.depositor_update)target.append(draft.composeLink({...current.depositor_update,name:current.depositor_name||current.deposit?.depositor_label},'Open depositor WhatsApp draft'));
+  if(current.depositor_update)target.append(draft.composeLink(current.depositor_update,'Open depositor WhatsApp draft'));
   else target.textContent='No depositor WhatsApp contact was provided.';
   show('pickup-updates');
 });
@@ -897,10 +948,10 @@ const steps = [
   ()=>{document.querySelector('.qr-scan')?.close();openLookup();byId('lookup-form').elements.code.value = receipt.collection_code;},
   findPasses,
   ()=>{byId('collect-form').elements.packet.value=receipt.deposit.packet_id;},
-  ()=>wizards.collect.show(0),
+  ()=>{show('collect');byId('collect-form').elements.collector_label.value='Riya';},
   ()=>setCounts('collect',{normal:2,vip:1}),
   reserve,
-  confirm
+  ()=>{if(register)resumeHeld=true;return confirm();}
 ];
 
 function schedule(){
@@ -1053,7 +1104,6 @@ byId('poster-open').onclick = ()=>perform(openBoothPoster);
 byId('poster-print').onclick = ()=>window.print();
 byId('poster-download').onclick = downloadPosterQr;
 byId('queue-review-form').onsubmit = event=>{event.preventDefault();perform(confirmQueueDraft);};
-byId('confirm').onclick = () => perform(demoAction(confirm));
 byId('check-intake').onclick=()=>{if(intakeToken)perform(()=>pollIntake(intakeView));};
 byId('intake-manual').onclick = () => manualIntake();
 byId('intake-correct').onclick = () => manualIntake(intakeCounts);

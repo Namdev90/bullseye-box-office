@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Predicate;
 
 public final class HostedDeskActivity extends Activity {
+    private HoldButton handoverHold;
     private static final String[] KEYS = {"normal", "vip", "vvip", "mip"};
     private static final String[] LABELS = {"Normal", "VIP", "VVIP", "MIP"};
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -98,6 +99,7 @@ public final class HostedDeskActivity extends Activity {
 
     private static final class Recipient {
         String name = "", phone = "";
+        String rawName, rawPhone;
         Object quantities; // Absent means a group contact; JSON null remains invalid, not absent.
     }
 
@@ -212,6 +214,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleQueue(0);
     }
     @Override protected void onPause() {
+        if(handoverHold!=null)handoverHold.cancel();
         DeskSounds.stop();
         foreground = false;
         if(feedbackToast!=null)feedbackToast.cancel();
@@ -227,6 +230,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
+        if(!focused&&handoverHold!=null)handoverHold.cancel();
         if (updates == null) return;
         updates.focusChanged(focused);
         if (focused) updates.offerSetup();
@@ -255,6 +259,7 @@ public final class HostedDeskActivity extends Activity {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private void page(String title, String name, Runnable goBack) {
+        if(handoverHold!=null){handoverHold.cancel();handoverHold=null;}
         if (deskInput != null) deskCode = deskInput.getText().toString();
         View focused = getCurrentFocus();
         if (focused instanceof EditText) {
@@ -494,6 +499,7 @@ public final class HostedDeskActivity extends Activity {
             desk();
             message = "The last action needs to be checked. Use Recover last action before continuing.";
         }
+        if(error instanceof HostedRegisterClient.ReconciliationRequired)message=error.getMessage();
         note(message == null || message.isEmpty() ? "SharePass could not finish this action." : message);
         if (retryLookup != null && deskInput != null && deskInput.length() == 4) retryLookup.setVisibility(View.VISIBLE);
     }
@@ -735,7 +741,7 @@ public final class HostedDeskActivity extends Activity {
         String url = cachedBoothUrl();
         if (url.isEmpty()) { note("The booth link is still loading."); return; }
         Intent draft = new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage("com.whatsapp")
-            .putExtra(Intent.EXTRA_TEXT, "Leave your passes with SharePass · " + boothLabel() + "\n" + url);
+            .putExtra(Intent.EXTRA_TEXT, "SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to booth staff. A collection code is issued after staff check and approve the deposit.\n\n" + url);
         try { startActivity(draft); }
         catch (android.content.ActivityNotFoundException unavailable) {
             draft.setPackage(null);
@@ -1367,11 +1373,14 @@ public final class HostedDeskActivity extends Activity {
         if (path.endsWith("/release")) handover(result);
         else if (path.endsWith("/handover")) {
             page("Passes handed over", "done", this::desk);
+            JSONObject completed=result.optJSONObject("collection");if(completed==null)completed=result.optJSONObject("last_collection");
+            line("Depositor · "+firstNonEmpty(result.getJSONObject("deposit").optString("depositor_label"),"Name not recorded"),17,true);
+            line((path.equals("/api/collections/history/handover")?"Last collector · ":"Collector · ")+firstNonEmpty(completed==null?"":completed.optString("collector_label"),"Name not recorded"),17,true);
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
                 line(hasAvailable(result.getJSONObject("deposit").getJSONObject("remaining"))?"Depositor update":"Final depositor update",16,true);
-                messageButton(result.getJSONObject("deposit").optString("depositor_label"), () -> compose(
+                messageButton(update.optString("name"), () -> compose(
                     update.optString("address"), update.optString("message")));
             }
             button("Done", this::desk, true);
@@ -1413,11 +1422,11 @@ public final class HostedDeskActivity extends Activity {
         JSONObject proof = result.optJSONObject("depositor_receipt");
         button("Share code", () -> sharing(result), true);
         if (proof != null) {
-            line("Deposit confirmation",16,true);
+            line(result.optString("action_path").equals("/api/codes/refresh")||result.optString("action_path").equals("/api/admin/reissue")?"New collection code":"Deposit confirmation",16,true);
             messageButton(result.optString("depositor_name",deposit.optString("depositor_label")), () -> compose(proof.optString("address"), proof.optString("message")));
         } else if(!result.optString("depositor_phone").isEmpty()||result.optJSONObject("depositor_update")!=null||deposit.optJSONObject("update_contact")!=null){
             line("Depositor update",16,true);
-            messageButton(result.optString("depositor_name",deposit.optString("depositor_label")),()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}));
+            messageButton(result.optJSONObject("depositor_update")==null?"":result.optJSONObject("depositor_update").optString("name"),()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}));
         }
 
         button("Done", this::desk, false);
@@ -1564,10 +1573,19 @@ public final class HostedDeskActivity extends Activity {
         JSONObject deposit=result.getJSONObject("deposit");
         if(result.isNull("claim_token")){note("Use the booth shown on the receipt.");return;}
         JSONObject available=deposit.getJSONObject("remaining");
-        page("Hand over passes","prepare",()->desk(code));
+        page("Prepare pickup","prepare",()->desk(code));
         String depositor=deposit.optString("depositor_label").trim();line("Depositor · "+(depositor.isEmpty()?"Name not recorded":depositor),21,true);
         String location=deposit.optString("location");
         if(!location.startsWith("Packet ")&&!location.startsWith("PKT-"))line(location,17,false);
+        EditText collector=field("Collector name",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS,80);
+        collector.setHint("Who is collecting these passes now?");
+        JSONArray names=result.optJSONArray("collectors");
+        if(names!=null&&names.length()>0){
+            String[] choices=new String[names.length()+1];for(int i=0;i<names.length();i++)choices[i]=names.optString(i);choices[names.length()]="Enter another name";
+            button("Choose a recorded collector",()->new AlertDialog.Builder(this).setTitle("Who is collecting now?").setItems(choices,(dialog,index)->{
+                if(index<names.length())collector.setText(choices[index]);else{collector.setText("");collector.requestFocus();getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(collector,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);}
+            }).show(),false);
+        }
         int[] selected=new int[KEYS.length];TextView[] values=new TextView[KEYS.length];
         for(int i=0;i<KEYS.length;i++){
             final int index=i,maximum=available.optInt(KEYS[i]);if(maximum==0)continue;
@@ -1589,13 +1607,20 @@ public final class HostedDeskActivity extends Activity {
             LinearLayout.LayoutParams rowBounds=new LinearLayout.LayoutParams(-1,-2);rowBounds.topMargin=dp(8);content.addView(row,rowBounds);
         }
         button("Select all available",()->{for(int i=0;i<KEYS.length;i++)if(values[i]!=null)setQuantity(selected,i,available.optInt(KEYS[i]),values[i]);},false);
-        CheckBox confirmed=new CheckBox(this);confirmed.setText("I confirmed the depositor’s name and handed over these passes.");confirmed.setTextSize(16);confirmed.setTextColor(DeskSurface.INK);confirmed.setMinHeight(dp(48));content.addView(confirmed);
-        Button finish=button("Confirm handover",()->{
-            try{JSONObject amounts=readQuantities(selected);run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",
-                new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts),true),this::stockResult);}
+        line("Check the receipt and choose quantities. Reserve them before giving out any passes.",16,false);
+        Button finish=button("Reserve selected passes",()->{
+            try{String who=collector.getText().toString().trim();
+                if(who.isEmpty()||who.length()>80||who.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Choose or enter the collector’s name.");
+                JSONObject amounts=readQuantities(selected);
+                JSONObject body=new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts).put("collector_label",who);
+                run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",body),this::stockResult);}
             catch(Exception error){note(error.getMessage());}
         },true);
-        finish.setEnabled(false);confirmed.setOnCheckedChangeListener((button,checked)->finish.setEnabled(checked));
+        collector.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence value,int start,int count,int after){}
+            public void onTextChanged(CharSequence value,int start,int before,int count){String who=value.toString().trim();finish.setText(who.isEmpty()?"Reserve selected passes":"Reserve passes for "+who);}
+            public void afterTextChanged(Editable value){}
+        });
     }
     private void speakDigits(String value){
         android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
@@ -1608,13 +1633,20 @@ public final class HostedDeskActivity extends Activity {
     }
     private void handover(JSONObject result) {
         JSONObject collection = result.optJSONObject("collection");
+        if(collection==null||!"RELEASE_RECORDED".equals(collection.optString("status"))){
+            if(collection!=null&&"HANDED_OVER".equals(collection.optString("status")))try{stockResult(result.put("action_path","/api/collections/history/handover"));}catch(Exception error){note(error.getMessage());}
+            else note("Recover or refresh the reservation before giving out any passes.");return;
+        }
         page("Hand over passes", "handover", this::desk);
+        line("Depositor · "+firstNonEmpty(result.optJSONObject("deposit")==null?"":result.optJSONObject("deposit").optString("depositor_label"),"Name not recorded"),18,true);
         TextView quantities = line(balance(collection.optJSONObject("quantities")), 23, true);
         quantities.setBackground(DeskSurface.panel(this));
         quantities.setPadding(dp(14), dp(12), dp(14), dp(12));
-        line("Confirm only after the collector has the passes. If they already received them, confirm without handing them over again.", 17, false);
-        button("Confirm handover", () -> run(() -> client.stockChange("/api/collections/" + collection.getString("id") + "/handover",
-            new JSONObject().put("version", collection.getInt("version")).put("handover_confirmed", true)), this::stockResult), true);
+        line("These passes are reserved. Hand them to the named collector, then hold below to confirm. If already received, do not give them again.", 17, false);
+        line("Collector · "+firstNonEmpty(collection.optString("collector_label"),"Name not recorded on this older handover"),17,true);
+        Button finish=button("Hold 2 seconds"+(collection.optString("collector_label").isEmpty()?" to confirm handover":" — confirm handover to "+collection.optString("collector_label")),()->{},true);
+        handoverHold=new HoldButton(finish,handler,()->{if(busy||!foreground)throw new IllegalStateException("Wait for the current action.");return collection.toString();},()->run(() -> client.stockChange("/api/collections/" + collection.getString("id") + "/handover",
+            new JSONObject().put("version", collection.getInt("version")).put("handover_confirmed", true)), this::stockResult),this::note);
     }
     private void pendingList(JSONObject result) throws Exception {
         JSONArray pending = result.getJSONArray("deposits");
@@ -1752,10 +1784,7 @@ public final class HostedDeskActivity extends Activity {
         if (!recipient.phone.isEmpty()) {
             line(recipient.phone, 17, false);
             button("Show WhatsApp QR", () -> sharingQr(receipt, index), true);
-            messageButton(recipient.name, () -> {
-                try { compose(recipient.phone, depositMessage(receipt, recipient)); }
-                catch (Exception error) { note(error.getMessage()); }
-            });
+            messageButton(recipient.name, () -> run(()->freshSharingReceipt(receipt),current->compose(recipient.phone,depositMessage(current,recipient))));
         }
         button(recipient.phone.isEmpty() ? "Enter WhatsApp number" : "Edit recipient",
             () -> editRecipient(receipt, index), recipient.phone.isEmpty());
@@ -1769,17 +1798,19 @@ public final class HostedDeskActivity extends Activity {
     private void editRecipient(JSONObject receipt, int index) {
         Recipient recipient = recipients.get(index);
         page("WhatsApp recipient", "recipient", () -> {
-            if (!recipient.phone.isEmpty() || recipient.quantities != null) sharingPerson(receipt, index);
-            else if (recipients.size() > 1) {
-                recipients.remove(index);
-                sharingPerson(receipt, Math.max(0, index - 1));
-            } else receipt(receipt);
+            sharingPerson(receipt, index);
         });
         EditText name = field("Recipient name (optional)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS, 80);
-        name.setText(recipient.name);
+        name.setText(recipient.rawName==null?recipient.name:recipient.rawName);
         EditText phone = field("Recipient WhatsApp number", InputType.TYPE_CLASS_PHONE, 40);
         phone.setHint("10-digit mobile or international + code");
-        phone.setText(recipient.phone);
+        phone.setText(recipient.rawPhone==null?recipient.phone:recipient.rawPhone);
+        TextWatcher preserve=new TextWatcher(){
+            public void beforeTextChanged(CharSequence value,int start,int count,int after){}
+            public void onTextChanged(CharSequence value,int start,int before,int count){recipient.rawName=name.getText().toString();recipient.rawPhone=phone.getText().toString();}
+            public void afterTextChanged(Editable value){}
+        };
+        name.addTextChangedListener(preserve);phone.addTextChangedListener(preserve);
         Runnable prepare = () -> {
             try {
                 recipient.phone = "+" + WhatsAppDraft.phone(phone.getText().toString());
@@ -1820,7 +1851,7 @@ public final class HostedDeskActivity extends Activity {
             allocation = draftCounts((JSONObject) recipient.quantities);
         }
         return WhatsAppDraft.message(receipt.getString("collection_code"), "", context.optString("booth_label","Box office"),
-            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation,HostedRegisterClient.ORIGIN);
+            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation,HostedRegisterClient.ORIGIN,receipt.getJSONObject("deposit").optLong("code_expires_at"));
     }
     private static Map<String,Object> draftCounts(JSONObject quantities) {
         Map<String,Object> counts = new LinkedHashMap<>();
@@ -1837,6 +1868,15 @@ public final class HostedDeskActivity extends Activity {
         } catch (IllegalArgumentException error) { note(error.getMessage()); }
     }
     private void sharingQr(JSONObject receipt, int index) {
+        run(()->freshSharingReceipt(receipt),current->showSharingQr(current,index));
+    }
+    private JSONObject freshSharingReceipt(JSONObject previous) throws Exception {
+        JSONObject old=previous.getJSONObject("deposit"),current=client.openReceipt(old.getString("id")),deposit=current.getJSONObject("deposit");
+        if(!old.getString("id").equals(deposit.getString("id"))||!old.getString("packet_id").equals(deposit.getString("packet_id"))||!previous.getString("collection_code").equals(current.getString("collection_code")))throw new IllegalArgumentException("The receipt changed. Open its current receipt before sharing.");
+        if(deposit.optBoolean("handover_pending")||deposit.optJSONObject("pending_collection")!=null||deposit.optLong("code_expires_at")<=System.currentTimeMillis()||!hasAvailable(deposit.getJSONObject("remaining")))throw new IllegalArgumentException("This receipt is not available for collection. Check its current status with staff.");
+        return current;
+    }
+    private void showSharingQr(JSONObject receipt, int index) {
         Recipient recipient = recipients.get(index);
         String label = recipient.name.isEmpty() ? "Recipient " + (index + 1) : recipient.name;
         page("WhatsApp · " + label, "share-qr", () -> sharingPerson(receipt, index));

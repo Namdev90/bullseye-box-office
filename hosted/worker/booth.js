@@ -2,6 +2,20 @@ const BOOTH_LABEL='Box office';
 const QUEUE_LIFETIME_MS=2*60*60*1000;
 const QUEUE_RECOVERY_MS=24*60*60*1000;
 
+function messageCounts(counts){return ['normal','vip','vvip','mip'].filter(key=>counts[key]>0).map(key=>counts[key]+' '+(key==='normal'?'Normal':key.toUpperCase())).join(' + ');}
+function messageGreeting(name){return 'Hi'+(name?' '+name:'')+'!\nSharePass by Bullseye Entertainment\n\n';}
+function receiptProof(result,origin,name,phone,staffName,replacement=false){
+  const deposit=result.deposit,code=result.collection_code;
+  if(!phone||!/^\d{4}$/.test(code)||!/^PKT-[A-F0-9]{8}$/.test(deposit.packet_id))return null;
+  const url=new URL(origin);
+  if(url.origin!==origin||url.protocol!=='https:')return null;
+  const expiry=Number.isFinite(deposit.code_expires_at)?'Code expires: '+new Date(deposit.code_expires_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true})+' IST (UTC+05:30)\n':'';
+  const message=messageGreeting(name)+(replacement?'New collection code: '+code+'\nThe previous code no longer works.\nGroup passes remaining: '+messageCounts(deposit.remaining)+'\n':
+    'Deposit confirmed'+(staffName?' by '+staffName:'')+'.\nPasses received: '+messageCounts(deposit.initial||deposit.remaining)+'\nCollection code: '+code+'\n')+
+    expiry+'Receipt: '+origin+'/pickup#'+code+'.'+deposit.packet_id+'\n\n'+(replacement?'Share this updated receipt only with your collectors.':'Keep this as your deposit confirmation.');
+  return {address:phone,name,message};
+}
+
 function boothMissing(){return error('This booth link is unavailable. Ask the booth team for help.',404);}
 
 function contactFields(value){
@@ -71,11 +85,11 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   if(recipients.some(item=>!item||!(item.name||item.phone||item.email)))return error('Review the recipient names and contact details.',400);
   if(!separateCollectorPhones(contact,recipients))return error('The collector must have a different WhatsApp number from the depositor.',400);
   if(current){
-    recipients=recipients.map((person,i)=>({...person,quantities:passQuantities(input.recipients[i].quantities)}));
-    if(!sharePassPhone(contact.phone)||!recipients.length||recipients.some(person=>!person.name||!sharePassPhone(person.phone)||
-      !person.quantities||!Object.values(person.quantities).some(Boolean))||
-      ['normal','vip','vvip','mip'].some(key=>recipients.reduce((sum,person)=>sum+(person.quantities[key]||0),0)!==(quantities[key]||0))){
-      return error('Check WhatsApp numbers and allocate exactly the deposited passes by type.',400);
+    recipients=recipients.map((person,i)=>({...person,...(Object.hasOwn(input.recipients[i],'quantities')?{quantities:passQuantities(input.recipients[i].quantities)}:{})}));
+    if(!sharePassPhone(contact.phone)||recipients.some(person=>!person.name||!sharePassPhone(person.phone)||
+      (Object.hasOwn(person,'quantities')&&(!person.quantities||!Object.values(person.quantities).some(Boolean))))||
+      ['normal','vip','vvip','mip'].some(key=>recipients.reduce((sum,person)=>sum+(person.quantities?.[key]||0),0)>(quantities[key]||0))){
+      return error('Check WhatsApp numbers. Optional collector plans must fit within the deposited passes by type.',400);
     }
   }
   const update=updatePreference(input.update_channel,contact);
@@ -131,7 +145,7 @@ async function boothReceipt(db,poster,ticket){
     return json({status:'closed',queue_ref});
   }
   return json({status:'confirmed',queue_ref,booth:poster.name,collection_code:deposit.active_collection_code||committed.receipt.collection_code,
-    name:fields.name,collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,
+    name:fields.name,collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,remaining:deposit.remaining,
     recipients:fields.recipients.map(({name,phone,quantities})=>({name,phone,quantities}))});
 }
 
@@ -182,15 +196,13 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
   const recipients=fields.recipients.length?fields.recipients:
     [{name:fields.name,phone:fields.phone,email:fields.email}].filter(item=>item.phone||item.email);
   const depositorPhone=sharePassPhone(fields.phone);
-  const counts=Object.entries(fields.quantities).filter(([,count])=>count).map(([key,count])=>count+' '+key.toUpperCase()).join(' + ');
   const received=await result.clone().json();
-  const proof=depositorPhone?{address:depositorPhone,message:'Hi '+fields.name+'! SharePass staff '+staff.name+' received '+counts+
-    ' passes at your booth. Collection code '+received.collection_code+'. Keep this confirmation as proof of deposit.'}:null;
+  const proof=receiptProof(received,new URL(request.url).origin,fields.name,depositorPhone,staff.name);
   return json({...await result.json(),recipients,update_channel:preference?.channel||'',
     depositor_phone:depositorPhone||'',depositor_name:fields.name,depositor_receipt:proof});
 }
 
-async function refreshedReceiptContacts(db,staff,response){
+async function refreshedReceiptContacts(db,staff,response,origin){
   if(!response.ok)return response;
   const result=await response.json();
   const row=await db.prepare(`SELECT q.payload,d.payload->'$.update_contact' AS update_contact FROM sharepass_booth_queue q
@@ -200,10 +212,8 @@ async function refreshedReceiptContacts(db,staff,response){
     .bind(staff.workspace,staff.booth_id||'B1',result.deposit.id).first();
   if(!row)return json(result);
   const fields=JSON.parse(row.payload),phone=sharePassPhone(fields.phone),preference=row.update_contact?JSON.parse(row.update_contact):null;
-  const counts=Object.entries(result.deposit.remaining).filter(([,count])=>count).map(([key,count])=>count+' '+key.toUpperCase()).join(' + ');
-  return json({...result,depositor_phone:phone||'',depositor_name:fields.name,
+  return json({...result,receipt_purpose:'replacement',depositor_phone:phone||'',depositor_name:fields.name,
     recipients:fields.recipients,update_channel:preference?.channel||'',
     update_address:preference?.channel==='whatsapp'?preference.address:'',
-    depositor_receipt:phone?{address:phone,message:'Hi '+fields.name+'! Your SharePass pickup code has changed to '+result.collection_code+
-      '. The previous code no longer works. Available passes: '+counts+'. Share the new code only with your collectors.'}:null});
+    depositor_receipt:receiptProof(result,origin,fields.name,phone,'',true)});
 }

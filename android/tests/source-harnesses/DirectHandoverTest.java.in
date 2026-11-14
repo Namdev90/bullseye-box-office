@@ -18,11 +18,12 @@ public class DirectHandoverTest {
         JSONObject cloneValue(){JSONObject copy=new JSONObject();values.forEach((key,value)->copy.put(key,value instanceof JSONObject j?j.cloneValue():value));return copy;}
     }
     static class Rejected extends Exception {boolean notExecuted;int status;}
+    static class ReconciliationRequired extends IOException {}
     static class Client {
         JSONObject saved=new JSONObject();
         Map<String,JSONObject> committed=new HashMap<>();
         int released,handedOver;
-        boolean loseRelease,loseHandover,crashAfterRelease,failFirstJournal;
+        boolean loseRelease,loseHandover,crashAfterRelease,failFirstJournal,rejectRelease;
         boolean hasPending(){return saved.has("pending");}
         JSONObject copy(){return saved.cloneValue();}
         void write(JSONObject updated)throws Exception{
@@ -32,6 +33,7 @@ public class DirectHandoverTest {
         }
         static <T>T retryPickup(String path,Callable<T> action)throws Exception{return action.call();}
         JSONObject request(String path,JSONObject body)throws Exception{
+            if(path.endsWith("/release")&&rejectRelease){Rejected denied=new Rejected();denied.status=409;denied.notExecuted=true;throw denied;}
             String id=body.getString("request_id");
             if(committed.containsKey(id))return committed.get(id).cloneValue();
             JSONObject response=new JSONObject().put("deposit",new JSONObject().put("id","deposit"))
@@ -61,10 +63,15 @@ public class DirectHandoverTest {
         require(!crash.hasPending()&&crash.saved.getJSONObject("handover").optBoolean("finalize_confirmed"));
         crash.completeConfirmedHandover();require(crash.released==1&&crash.handedOver==1);
         Client old=new Client();old.stockChange("/api/deposits/deposit/release",amounts());
-        require(old.released==1&&old.handedOver==0);
+        require(old.released==1&&old.handedOver==0&&old.saved.has("handover"));
+        interrupted(()->old.stockChange("/api/deposits/other/release",amounts()));require(old.released==1);
         interrupted(old::completeConfirmedHandover);require(old.handedOver==0);
         Client disk=new Client();disk.failFirstJournal=true;
         interrupted(()->disk.stockChange("/api/deposits/deposit/release",amounts(),true));require(disk.released==0&&disk.handedOver==0);
+        Client rejected=new Client();rejected.rejectRelease=true;
+        interrupted(()->rejected.stockChange("/api/deposits/deposit/release",amounts(),true));
+        require(rejected.hasPending()&&rejected.saved.getJSONObject("pending").optBoolean("reconciliation_required"));
+        interrupted(rejected::recover);require(rejected.released==0&&rejected.handedOver==0&&rejected.hasPending());
         System.out.println("PASS exact client methods preserve direct handover intent and original request IDs through lost replies and process interruption");
     }
 }

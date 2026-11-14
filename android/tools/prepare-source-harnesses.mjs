@@ -38,6 +38,8 @@ export function extractJavaMethod(source, signature) {
 
 export function sourceHarnesses() {
   return [
+    ['FreshSharingTest','HostedDeskActivity',['private JSONObject freshSharingReceipt(JSONObject previous) throws Exception','private static boolean hasAvailable(JSONObject quantities)']],
+    ['QueueNotificationPolicyTest','QueueNotifications',['static boolean allowed(Context context)','static boolean allowed(Context context,String channel)']],
     ['QueuePushServiceTest','QueuePushService',['private void showQueueAlert()'],'fcm'],
     ['QueueSummaryTest','QueueSummary',['static String body(JSONArray drafts,JSONArray messages)']],
     ['QrEncoderCacheTest','QrPreview',['private static String encoderSource(Context context) throws Exception']],

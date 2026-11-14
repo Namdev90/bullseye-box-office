@@ -143,10 +143,13 @@ async function adminSetup(request,db,workspace,origin){
   }
   const now=Date.now(),expires_at=now+SETUP_LIFETIME_MS;
   await db.prepare("UPDATE sharepass_configured_devices SET setup_code='' WHERE setup_code<>'' AND invite_expires<=?").bind(now).run();
-  const staff=await db.prepare('SELECT id FROM sharepass_configured_staff WHERE workspace=? AND booth_id=? AND name=?')
+  // One SQLite statement serializes concurrent first invitations for this person.
+  await db.prepare(`INSERT INTO sharepass_configured_staff(workspace,id,booth_id,name)
+    SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM sharepass_configured_staff WHERE workspace=? AND booth_id=? AND name=?)`)
+    .bind(workspace,crypto.randomUUID(),booth,name,workspace,booth,name).run();
+  const staff=await db.prepare('SELECT id FROM sharepass_configured_staff WHERE workspace=? AND booth_id=? AND name=? ORDER BY id LIMIT 1')
     .bind(workspace,booth,name).first();
-  const staffId=staff?.id||crypto.randomUUID();
-  if(!staff)await db.prepare('INSERT INTO sharepass_configured_staff(workspace,id,booth_id,name) VALUES(?,?,?,?)').bind(workspace,staffId,booth,name).run();
+  const staffId=staff.id;
   const id=crypto.randomUUID(),invite=crypto.randomUUID();
   for(let attempt=0;attempt<12;attempt++){
     const code=String(crypto.getRandomValues(new Uint32Array(1))[0]%10000).padStart(4,'0');

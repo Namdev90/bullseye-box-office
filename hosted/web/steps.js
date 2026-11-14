@@ -29,6 +29,7 @@ window.sharePassSteps=(form,{validate=()=>true,onShow=()=>{}}={})=>{
     list.forEach((entry,index)=>entry.hidden=index!==current);
     back.hidden=current===0;
     progress.textContent='Step '+(current+1)+' of '+list.length;
+    progress.hidden=list.length<2;
     next.textContent=current===list.length-1?finishLabel:list[current].dataset.nextLabel||'Next';
     onShow(list[current]);
     if(focus&&previous!==list[current])window.sharePassMorph(list[current]);

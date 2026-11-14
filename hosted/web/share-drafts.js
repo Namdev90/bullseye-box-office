@@ -8,7 +8,9 @@
   return digits;
  }
  function composeUrl(address,message){
-  return 'https://wa.me/'+normalizePhone(address)+'?text='+encodeURIComponent(message);
+  const url='https://wa.me/'+normalizePhone(address)+'?text='+encodeURIComponent(message);
+  if(url.length>1200)throw new Error('Shorten the pickup details for this QR.');
+  return url;
  }
  function composeLink(details,label='Open WhatsApp draft'){
   const name=String(details.name||'').trim();
@@ -46,17 +48,33 @@
   if(!counts)throw new Error(scope==='group'?'There are no remaining passes to share.':'Review the recipient’s planned share.');
   const planned=allocated?passCounts(options.allocation):'';
   if(allocated&&!planned)throw new Error('Review the recipient’s planned share.');
-  const expires=Number.isFinite(expiresAt)?' Code expires '+new Date(expiresAt).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})+'.':'';
-  const message='Hi'+(name.trim()?' '+name.trim():'')+'! '+(scope==='planned'?
-   'Your planned share: '+counts+' passes.':allocated?
-   'Your planned share: '+planned+' passes.\nGroup balance on this receipt: '+counts+' passes.':
-   'The receipt lists '+counts+' passes for our group.')+' SharePass by Bullseye Entertainment.\n\n'+
-   (eventName?.trim()?'For '+eventName.trim()+', use code ':'Use code ')+code+(reference&&!/^[0-9]{4}$/.test(code)?' and pickup reference '+reference:'')+' to collect from '+booth.trim()+(location?.trim()?', '+location.trim():'')+'.'+expires+'\n\n'+
-   (reference&&/^[0-9]{4}$/.test(code)?'Receipt: '+receiptUrl(code,reference)+'\n\n':'')+
+  if(Number.isFinite(expiresAt)&&expiresAt<=Date.now())throw new Error('This collection code has expired. Ask staff for the current receipt.');
+  const expires=Number.isFinite(expiresAt)?'Code expires: '+expiry(expiresAt)+'\n':'';
+  const message=reference&&/^[0-9]{4}$/.test(code)?'Hi'+(name.trim()?' '+name.trim():'')+'!\nSharePass by Bullseye Entertainment\n\n'+
+   (eventName?.trim()?'Event: '+eventName.trim()+'\n':'')+
+   (scope==='planned'?'Original plan for you: '+counts+'\n':allocated?
+   'Original plan for you: '+planned+'\nGroup balance on this receipt: '+counts+'\n':
+   'Group balance on this receipt: '+counts+'\n')+
+   'Collection code: '+code+'\nCollect at: '+booth.trim()+(location?.trim()?', '+location.trim():'')+'\n'+expires+
+   (reference&&/^[0-9]{4}$/.test(code)?'Receipt: '+receiptUrl(code,reference)+'\n':reference?'Pickup reference: '+reference+'\n':'')+'\n'+
+   'Show the current receipt to staff. Shared group code. '+(scope==='planned'||allocated?'Plans are not reservations; staff confirm availability. ':'Staff confirm availability. ')+
+   'Pickups are not tracked by person.':
+   'Hi'+(name.trim()?' '+name.trim():'')+'! '+(scope==='planned'?'Your planned share: '+counts+' passes.':allocated?
+   'Your planned share: '+planned+' passes.\nGroup balance on this receipt: '+counts+' passes.':'The receipt lists '+counts+' passes for our group.')+
+   ' SharePass by Bullseye Entertainment.\n\n'+(eventName?.trim()?'For '+eventName.trim()+', use code ':'Use code ')+code+
+   (reference?' and pickup reference '+reference:'')+' to collect from '+booth.trim()+(location?.trim()?', '+location.trim():'')+'.\n\n'+
    'Shared group code. Staff must confirm availability; pickups are not tracked per person.';
   const url=composeUrl(recipient,message);
   if(url.length>1200)throw new Error('Shorten the pickup details for this QR.');
   return Object.freeze({message,url,recipient,name:name.trim()});
+ }
+ function expiry(value){return new Date(value).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true})+' IST (UTC+05:30)';}
+ function eligibleReceipt(current,expected){
+  const deposit=current?.deposit;
+  if(!deposit||deposit.id!==expected.id||deposit.packet_id!==expected.reference||current.collection_code!==expected.code)throw new Error('The receipt changed. Open its current receipt before sharing.');
+  receiptUrl(current.collection_code,deposit.packet_id);
+  if(deposit.handover_pending||deposit.pending_collection||deposit.code_expires_at<=Date.now()||!Number.isFinite(deposit.code_expires_at)||!passCounts(deposit.remaining))throw new Error('This receipt is not available for collection. Check its current status with staff.');
+  return {quantities:deposit.remaining,expiresAt:deposit.code_expires_at};
  }
  function receiptUrl(code,reference,origin=globalThis.location?.origin||'https://sharepass.example.test'){
   if(!/^[0-9]{4}$/.test(code)||!/^PKT-[A-F0-9]{8}$/.test(reference))throw new Error('Use a current pickup receipt.');
@@ -105,15 +123,19 @@
   document.body.append(scan);
   active={container,controller,dialog:scan};
   const cards=node('div',undefined,'draft-cards');
-  let selected=0,visibleEntry=0,sequence=0;
+  let selected=0,visibleEntry=0,sequence=0,scanRevision=0;
   const button=(label,action,style)=>{const b=node('button',label,style);b.type='button';b.addEventListener('click',action,{signal});return b;};
-  const closeScan=()=>{if(scan.open)scan.close();scan.replaceChildren();};
+  const closeScan=()=>{scanRevision++;if(scan.open)scan.close();scan.replaceChildren();};
   scan.addEventListener('close',()=>{if(!scan.open)scan.replaceChildren();},{signal});
 
-  function drawScan(){
+  function drawScan(checked=false){
    const ready=entries.filter(entry=>entry.draft);
    const entry=ready[selected];
    if(!entry){closeScan();return;}
+   if(details.refresh&&!checked){
+    closeScan();const revision=scanRevision;
+    return entry.refresh().then(()=>{if(!signal.aborted&&revision===scanRevision){drawScan(true);scan.showModal();}}).catch(error=>{if(!signal.aborted)entry.status.textContent=error.message;});
+   }
    const close=button('×',closeScan,'icon-button');
    close.setAttribute('aria-label','Close QR');
    scan.replaceChildren(close,node('p','WhatsApp · '+entry.label,'scan-recipient'),node('h2',details.code,'scan-code'));
@@ -163,6 +185,7 @@
    const entry={card,draft:null,label:'Recipient '+number,
     saved:sharePassPhone(initial.phone)||Object.hasOwn(initial,'quantities')?
      savedPerson(initial.name||'',sharePassPhone(initial.phone)?'+'+sharePassPhone(initial.phone):initial.phone||''):undefined};
+   entry.status=status;
    entries.push(entry);cards.append(card);
    const remember=()=>details.saveRecipients?.(entries.map(item=>item.saved).filter(Boolean));
    const remove=button('Remove recipient',()=>{
@@ -170,15 +193,29 @@
     entries.splice(entries.indexOf(entry),1);card.remove();remember();showEntry(visibleEntry);add.focus();
    });
    const edit=button('Edit recipient',()=>{entry.draft=null;output.hidden=true;form.hidden=false;phone.focus();});
-   function generate(focusResult){
+   function generate(focusResult,current){
+    if(details.refresh&&!current){
+     status.textContent='Checking current receipt…';
+     return details.refresh().then(value=>{if(!signal.aborted)generate(focusResult,value);}).catch(error=>{if(!signal.aborted)status.textContent=error.message;});
+    }
     try{
-     entry.draft=depositDraft({...details,...allocation,scope:'group',name:name.value,phone:phone.value});
+     entry.draft=depositDraft({...details,...current,...allocation,scope:'group',name:name.value,phone:phone.value});
      entry.label=entry.draft.name||'Recipient '+number;
      entry.saved=savedPerson(entry.draft.name,'+'+entry.draft.recipient);
+     const fresh=async()=>{
+      const value=await details.refresh();
+      if(signal.aborted)throw new Error('Sharing was closed.');
+      entry.draft=depositDraft({...details,...value,...allocation,scope:'group',name:name.value,phone:phone.value});
+      return entry.draft;
+     };
+     entry.refresh=fresh;
      const tile=button('Show WhatsApp QR',()=>{
-      selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();scan.showModal();
+      selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();if(!details.refresh)scan.showModal();
      },'scan-tile');
      const link=composeLink({address:entry.draft.recipient,message:entry.draft.message,name:entry.draft.name});
+     if(details.refresh)link.addEventListener('click',event=>{
+      event.preventDefault();fresh().then(value=>{globalThis.location.assign(value.url);}).catch(error=>status.textContent=error.message);
+     },{signal});
      const preview=node('details'),message=node('textarea');
      message.readOnly=true;message.rows=5;message.value=entry.draft.message;
      message.setAttribute('aria-label','Prepared WhatsApp message');
@@ -190,13 +227,13 @@
    }
    const generateButton=node('button','Prepare WhatsApp','primary');
    generateButton.type='submit';
-   form.append(generateButton,status);
+   form.append(generateButton);
    form.onsubmit=event=>{event.preventDefault();generate(true);};
    for(const field of [name,phone])field.addEventListener('input',()=>{
     entry.draft=null;output.hidden=true;status.textContent='';closeScan();
    },{signal});
    sharePassAutoAdvance(phone,sharePassPhoneComplete,()=>generate(true),signal);
-   card.append(form,output,remove);
+   card.append(form,output,status,remove);
    if(sharePassPhone(initial.phone))generate(false);
    if(focus){showEntry(entries.length-1);name.focus();}
   }
@@ -209,5 +246,5 @@
   const parent=container.closest('dialog');parent?.addEventListener('close',()=>{if(!parent.open)clear();},{signal});
   window.addEventListener('pagehide',clear,{signal});
  }
- window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,normalizePhone,qrImage,receiptUrl,receiptDetails,scanReceipt,clear});
+ window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,composeUrl,normalizePhone,qrImage,receiptUrl,receiptDetails,scanReceipt,expiry,eligibleReceipt,clear});
 })();

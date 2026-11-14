@@ -142,18 +142,23 @@ async function currentDepositReceipt(db,staff,id){
   const contact=queue?JSON.parse(queue.payload):{};
   const currentCode=await ledgerStatement(db,'SELECT code FROM sharepass_ledger_codes WHERE owner=? AND event=? AND deposit_id=? ORDER BY code LIMIT 1',staff.workspace,EVENT,id).first();
   const update=deposit.update_contact;
+  const last=collection?null:await ledgerStatement(db,`SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND booth=? AND pending=0
+    ORDER BY payload->>'handed_over_at' DESC,id DESC LIMIT 1`,staff.workspace,id,staff.booth_id||'B1').first();
+  const lastCollection=last?JSON.parse(last.payload):null;
   const updatePhone=update?.channel==='whatsapp'?sharePassPhone(update.address):'';
   const phone=sharePassPhone(contact.phone)||'',remaining=model.passTypes.filter(type=>deposit.remaining[type.id]>0)
     .map(type=>deposit.remaining[type.id]+' '+type.label).join(' + ');
+  const updateName=update?.name||(updatePhone&&updatePhone===phone?(contact.name||deposit.depositor_label||''):'');
   return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
     recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
-    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,message:'Hi'+((update.name||contact.name)?' '+(update.name||contact.name):'')+'! SharePass deposit update. '+
-      (remaining?'Still available: '+remaining+'.':'All passes in this deposit have been collected.')}}:{})});
+    ...(lastCollection?{last_collection:{collector_label:lastCollection.collector_label||'',quantities:lastCollection.quantities,handed_over_at:lastCollection.handed_over_at}}:{}),
+    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:updateName,message:messageGreeting(updateName)+'Deposit update\n'+
+      (remaining?'Group passes remaining: '+remaining:'All passes in this deposit have been collected.')}}:{})});
 }
 
 async function ledgerVerify(db,owner,body,legacy,model){
   const now=Date.now();
-  const failure=()=>error('Too many unsuccessful checks. Wait a minute or start a fresh demo.',429);
+  const failure=()=>json({error:'Too many unsuccessful checks in this workspace. Wait one minute before trying again.',notExecuted:true,retry_after:60},429);
   const count=await ledgerStatement(db,'SELECT count(*) AS n FROM sharepass_ledger_failures WHERE owner=? AND failed_at>?',owner,now-60000).first();
   if(count.n>=5)return failure();
   const row=await ledgerDepositByCode(db,owner,body.collection_code);
@@ -184,7 +189,11 @@ async function ledgerVerify(db,owner,body,legacy,model){
     ledgerStatement(db,'INSERT INTO sharepass_ledger_claims(owner,token,expires,payload) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND revision=?)',
       owner,result.claim_token,claim.expires,ledgerJson(claim),owner,row.id,row.revision)
   ]);
-  return writes[1].meta.changes===1?json(result):error('The balance changed. Verify the code again.',409);
+  if(writes[1].meta.changes!==1)return error('The balance changed. Verify the code again.',409);
+  const contact=await ledgerStatement(db,`SELECT q.payload FROM sharepass_booth_queue q JOIN sharepass_ledger_requests r
+    ON r.owner=q.workspace AND r.id='booth-'||q.token WHERE r.owner=? AND r.deposit_id=? AND q.booth_id=? AND q.confirmed=1 LIMIT 1`,owner,row.id,body.booth_id).first();
+  const people=contact?JSON.parse(contact.payload).recipients:null,collectors=Array.isArray(people)?people:[];
+  return json({...result,collectors:[...new Set(collectors.map(person=>person?.name).filter(name=>typeof name==='string'&&name.trim()&&name.length<=80&&!/[\u0000-\u001f\u007f]/.test(name)).map(name=>name.trim()))].slice(0,20)});
 }
 
 async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false){

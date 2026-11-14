@@ -15,7 +15,8 @@ test('native allocation load/save preserves explicit quantities including malfor
  assert.match(save,/client\.rememberRecipients\(receipt\.getString\("collection_code"\), people\)/);
  const edit=section('private void editRecipient(','private void rememberRecipients(');
  assert(!edit.includes('quantities ='),'Editing contact details cannot reallocate passes');
- assert.match(edit,/!recipient\.phone\.isEmpty\(\) \|\| recipient\.quantities != null/);
+ assert.match(edit,/recipient\.rawName=name\.getText\(\)\.toString\(\);recipient\.rawPhone=phone\.getText\(\)\.toString\(\)/);
+ assert(!edit.slice(0,edit.indexOf('EditText name')).includes('recipients.remove'),'Back preserves the contact draft');
  assert.match(save,/!recipient\.phone\.isEmpty\(\) \|\| recipient\.quantities != null/);
  assert.match(load,/if \(recipient\.quantities != null\) \{\s+recipient\.phone = saved\.optString\("phone"\);\s+recipients\.add\(recipient\)/);
 });
@@ -30,11 +31,11 @@ test('native formatter receives separate uncoerced original allocations and rece
  assert.match(message,/getJSONObject\("remaining"\)/);
  assert.match(message,/if \(!\(recipient\.quantities instanceof JSONObject\)\) throw/);
  assert.match(message,/allocation = draftCounts\(\(JSONObject\) recipient\.quantities\)/);
- assert.match(message,/optString\("packet_id"\), allocation,HostedRegisterClient\.ORIGIN\)/);
+ assert.match(message,/optString\("packet_id"\), allocation,HostedRegisterClient\.ORIGIN,receipt\.getJSONObject\("deposit"\)\.optLong\("code_expires_at"\)/);
  assert.match(message,/counts\.put\(key, quantities\.opt\(key\)\)/);
  assert(!message.includes('optInt('),'Invalid counts must not be coerced or truncated');
  assert(!message.includes('Math.min'),'A group debit cannot be assigned to a person');
  const share=section('private void sharingPerson(','private void editRecipient(');
  assert.match(share,/messageButton\(recipient.name, \(\) ->/);
- assert.match(share,/compose\(recipient\.phone, depositMessage\(receipt, recipient\)\)/);
+ assert.match(share,/freshSharingReceipt\(receipt\),current->compose\(recipient\.phone,depositMessage\(current,recipient\)\)/);
 });

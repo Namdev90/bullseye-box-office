@@ -9,7 +9,7 @@ const harness = import('../tools/prepare-source-harnesses.mjs');
 test('initial confirmation and current depositor update are mutually exclusive on the receipt',async()=>{
   const {extractJavaMethod}=await harness;
   const receipt=extractJavaMethod(read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java'),'private void receipt(JSONObject result)');
-  assert.match(receipt,/if \(proof != null\) \{[\s\S]*line\("Deposit confirmation"[\s\S]*messageButton[\s\S]*\} else if\(/);
+  assert.match(receipt,/if \(proof != null\) \{[\s\S]*"New collection code":"Deposit confirmation"[\s\S]*messageButton[\s\S]*\} else if\(/);
   assert.match(receipt,/result\.optJSONObject\("depositor_update"\)!=null/);
   assert.match(receipt,/client\.openReceipt\(deposit\.getString\("id"\)\)/,'Updates still fetch the current receipt before composing');
 });
@@ -32,7 +32,7 @@ test('Java method extraction preserves lambdas, comments, braces and quoted char
 test('JVM fixture generation uses current production methods and needs no Java installation', async () => {
   const {sourceHarnesses, extractJavaMethod} = await harness;
   const fixtures = sourceHarnesses();
-  assert.deepEqual(fixtures.map(f => f.name), ['QueuePushServiceTest', 'QueueSummaryTest', 'QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
+  assert.deepEqual(fixtures.map(f => f.name), ['FreshSharingTest', 'QueueNotificationPolicyTest', 'QueuePushServiceTest', 'QueueSummaryTest', 'QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
   for (const fixture of fixtures) assert(!fixture.source.includes('/* PRODUCTION_METHODS */'));
   const desk = read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
   assert(fixtures.find(f=>f.name==='StaffMessageInboxTest').source.includes(extractJavaMethod(desk, 'private void showStaffMessage(boolean manual)')));

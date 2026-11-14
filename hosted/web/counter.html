@@ -164,22 +164,23 @@
       </label>
       <button class="primary">Find passes</button>
     </form></section>
-    <section id="collect" hidden><h1 tabindex="-1">Hand over passes</h1><form id="collect-form">
+    <section id="collect" hidden><h1 tabindex="-1">Prepare pickup</h1><form id="collect-form">
       <fieldset data-wizard-page><legend>Review this pickup</legend>
         <div class="location" id="pickup-location"><p>Pickup details</p><strong id="slot"></strong><p id="pickup-customer"></p></div>
         <input name="packet" type="hidden">
-        <p>Choose the passes you are handing over now.</p><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button>
-        <label class="confirmation"><input type="checkbox" name="name_confirmed" required> I confirmed the depositor’s name and handed over these passes.</label>
+        <label class="field">Collector name <input name="collector_label" id="collector-name" list="collector-names" autocomplete="off" maxlength="80" required aria-describedby="collector-hint"></label>
+        <datalist id="collector-names"></datalist><p id="collector-hint">Choose a recorded name or enter who is collecting now.</p>
+        <p>Check the receipt and choose quantities. Reserve them before giving out any passes.</p><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button>
       </fieldset>
-      <div class="wizard-nav"><button class="primary" data-wizard-next>Confirm handover</button></div>
+      <div class="wizard-nav"><button class="primary" id="reserve-pickup" type="submit">Reserve selected passes</button></div>
     </form></section>
     <section id="handover" hidden><h1 tabindex="-1">Hand over passes</h1><div class="stack">
-      <div class="receipt"><p id="handover-summary"></p></div>
-      <p>Confirm after the collector has these passes. If they already received them, confirm without handing them over again.</p>
-      <button id="confirm" class="primary">Confirm handover</button>
+      <div class="receipt"><p id="reserved-people"></p><p id="handover-summary"></p></div>
+      <p>These passes are reserved. Hand them to the named collector, then confirm below. If they already received them, do not give them again.</p>
+      <button id="confirm" class="primary" type="button" aria-describedby="resume-hold-hint hold-keyboard-hint">Hold 2 seconds to confirm handover</button><p id="resume-hold-hint">Holding confirms you matched the depositor and the collector received these reserved passes. Release to cancel.</p><p class="hold-assistive" id="hold-keyboard-hint">Hold Space or Enter for two seconds. Assistive activation starts a two-second countdown; activate again to cancel.</p><p id="resume-hold-status" role="status"></p>
     </div></section>
     <section id="done" hidden><h1 tabindex="-1">Passes handed over</h1><div class="stack">
-      <div class="receipt"><h2>Remaining</h2><p id="balance"></p></div><div id="pickup-update-draft"></div><button id="done-action" class="primary">Done</button>
+      <div class="receipt"><p id="handover-people"></p><h2>Remaining</h2><p id="balance"></p></div><div id="pickup-update-draft"></div><button id="done-action" class="primary">Done</button>
     </div></section>
     <section id="guide" hidden><h1 tabindex="-1">Help</h1><p>Deposit passes after counting them and putting the packet on the shelf. When someone gives you a code, review the matching deposit and choose the passes for this pickup. Confirm only after handing over the selected passes.</p><button id="help-alerts" type="button">Notifications</button><p id="help-alert-status" role="status"></p></section>
     <p class="error" id="error" role="alert"></p>
@@ -202,6 +203,6 @@
 <script defer src="/phone.js"></script><script defer src="/steps.js"></script>
 <script defer src="/share-drafts.js"></script>
 <script defer src="/info.js"></script>
-<script defer src="/counter.js"></script>
+<script defer src="/hold-confirm.js"></script><script defer src="/counter.js"></script>
 <script defer src="/collect-tools.js"></script>
 <script defer src="/staff-install.js"></script></body></html>

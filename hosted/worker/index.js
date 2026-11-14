@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'38',
+  'X-SharePass-Version':'39',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -67,6 +67,10 @@ function validate(body,path,operator,booth='B1'){
   }
   if(typeof body.request_id!=='string'||!/^[a-zA-Z0-9-]{8,100}$/.test(body.request_id))return null;
   const common={...scope,operator,request_id:body.request_id};
+  if((path.endsWith('/release')||path.endsWith('/handover'))&&body.collector_label!==undefined){
+    if(typeof body.collector_label!=='string'||body.collector_label.trim().length>80||/[\u0000-\u001f\u007f]/.test(body.collector_label))return null;
+    common.collector_label=body.collector_label.trim();
+  }
   if(path.endsWith('/updates')){
     const packet=setupText(body.packet_id,40).toUpperCase();
     if(!/^PKT-[A-F0-9]{8}$/.test(packet)||!['none','whatsapp','sms','email'].includes(body.channel))return null;
@@ -308,9 +312,10 @@ export default {async fetch(request,env,ctx){
            !intakeTokenPattern.test(input.request_id||''))return error('Enter the expired reference, shelf, and packet label.',400);
         const booth=input.booth_id||'B1';
         if(!boothIdPattern.test(booth))return error('Choose the packet’s booth.',400);
-        return await guestReceiptResult(await mutate(env.DB,staff.workspace,path,{
+        const refreshed=await mutate(env.DB,staff.workspace,path,{
           event_id:EVENT,booth_id:booth,operator:staff.operator,request_id:input.request_id,collection_code:code,packet_id:packet,location,...options
-        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse),env,ctx,staff);
+        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,{...staff,booth_id:booth},refreshed,url.origin),env,ctx,staff);
       }
       if(request.method==='POST'&&path==='/api/profile'){
         if(configured)return error('Ask the desktop administrator to update your profile.',403);
@@ -375,7 +380,7 @@ export default {async fetch(request,env,ctx){
         const refreshed=await mutate(env.DB,staff.workspace,path,{event_id:EVENT,booth_id:staff.booth_id||'B1',operator:staff.operator,
           request_id:input.request_id,collection_code:code,packet_id:packet,location:deposit.location,valid_minutes:1440},
           staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
-        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed),env,ctx,staff);
+        return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed,url.origin),env,ctx,staff);
       }
       if(path==='/api/intakes'&&request.method==='POST')return await startIntake(env.DB,staff,url.origin);
       if(path.startsWith('/api/intakes/')){

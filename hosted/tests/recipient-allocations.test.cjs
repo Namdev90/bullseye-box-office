@@ -184,6 +184,14 @@ test('the actual public intake receipt prepares unequal personal plans without a
  links=context.receiptShare.querySelectorAll('a');assert.equal(links.length,2);
  assert.deepEqual(links.map(link=>new URL(link.href).searchParams.get('text')),messages);
  assert.equal(context.receiptPolls,2,'Each visible receipt schedules the automatic status check');
+ context.result.recipients[0].phone='invalid';
+ vm.runInContext('showReceipt(result);',context);
+ assert.equal(context.receiptShare.querySelectorAll('a').length,1,'One bad optional draft must not suppress another recipient');
+ assert.equal(context.lastReceipt,'confirmed');assert.equal(context.receiptPolls,3);
+ context.result.booth='界'.repeat(100);
+ vm.runInContext('showReceipt(result);',context);
+ assert.equal(context.receiptShare.querySelectorAll('a').length,0,'Overlong URLs fail closed');
+ assert.equal(context.lastReceipt,'confirmed');assert.equal(context.receiptPolls,4,'Receipt state and polling survive every draft failure');
  assert.deepEqual(p.externalCalls,[]);
 });
 

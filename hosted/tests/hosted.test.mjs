@@ -41,6 +41,94 @@ const scope={event_id:'training-event-001',booth_id:'B1'};
 const state='/api/state?event_id=training-event-001';
 const deposit={...scope,request_id:'deposit-0001',location:'A-01',custody_confirmed:true,quantities:{normal:4,vip:2,vvip:0}};
 
+test('deposit collectors and plans are optional; supplied plans remain bounded and approval alone creates the code',async t=>{
+  const f=fixture();t.after(f.close);
+  const path='/api/public'+new URL((await f.call('/api/booth')).body.url).pathname;
+  const base={intake_version:2,name:'Taylor Example',phone:'+12025550110',quantities:{normal:4,vip:2,vvip:0,mip:1}};
+  for(const recipients of [[],[{name:'Riya',phone:'+12025550123'}],[{name:'Riya',phone:'+12025550123',quantities:{normal:1,vip:0,vvip:0,mip:0}}]]){
+    const request_id=crypto.randomUUID(),body={...base,request_id,recipients};
+    const submitted=await f.call(path,body,'');assert.equal(submitted.status,200);assert.equal(submitted.body.collection_code,undefined);
+    assert.equal((await f.call(path,body,'')).status,200);
+    assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_booth_queue WHERE token=?').get(request_id).n,1);
+    const accepted=await f.call('/api/queue/'+request_id+'/confirm',{custody_confirmed:true});assert.equal(accepted.status,200);
+    const current=await f.call(path+'?ticket='+request_id,undefined,'');assert.equal(current.body.collection_code,accepted.body.collection_code);
+    assert.deepEqual(current.body.remaining,base.quantities);
+  }
+  for(const recipients of [[{name:'Riya',phone:'+12025550123',quantities:{normal:5,vip:0,vvip:0,mip:0}}],[{name:'',phone:'+12025550123'}],[{name:'Riya',phone:'+12025550123',quantities:null}]]){
+    assert.equal((await f.call(path,{...base,request_id:crypto.randomUUID(),recipients},'')).status,400);
+  }
+});
+
+test('concurrent first invitations share one staff identity without rewriting historical identities',async t=>{
+  const f=fixture();t.after(f.close);
+  const invites=await Promise.all(['Phone A','Phone B'].map(device_label=>f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'Concurrent staff',device_label})));
+  assert.deepEqual(invites.map(r=>r.status),[200,200]);
+  const rows=f.sqlite.prepare("SELECT staff_id FROM sharepass_configured_devices WHERE label IN ('Phone A','Phone B')").all();
+  assert.equal(new Set(rows.map(row=>row.staff_id)).size,1);
+  assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_configured_staff WHERE name='Concurrent staff'").get().n,1);
+});
+
+test('administrator replacement proof uses the authorized packet booth and newly returned receipt identity',async t=>{
+ const f=fixture();t.after(f.close);
+ const setup=(await f.call('/api/admin/setup',{action:'booth',name:'Synthetic West',location:'West entrance'})).body;
+ const booth=setup.booths.find(row=>row.name==='Synthetic West');
+ const invite=(await f.call('/api/admin/setup',{action:'invite',booth_id:booth.id,staff_name:'West staff',device_label:'West phone'})).body;
+ const secret='W'.repeat(43),headers={'X-SharePass-Session':secret,'X-SharePass-Client':'0.9.19'};
+ assert.equal((await f.call('/api/device/connect',{code:invite.code,verifier:secret},'')).status,200);
+ const poster=(await f.call('/api/booth',undefined,'',undefined,headers)).body,ticket=crypto.randomUUID();
+ const body={request_id:ticket,intake_version:2,name:'Taylor',phone:'+12025550101',quantities:{normal:1,vip:0,vvip:0},recipients:[]};
+ assert.equal((await f.call('/api/public'+new URL(poster.url).pathname,body,'')).status,200);
+ const accepted=(await f.call('/api/queue/'+ticket+'/confirm',{custody_confirmed:true,location:'W-01'},'',undefined,headers)).body;
+ assert.match(accepted.depositor_receipt.message,/Deposit confirmed by West staff/);
+ const saved=JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(accepted.deposit.id).payload);saved.code_expires_at=Date.now()-1;
+ f.sqlite.prepare('UPDATE sharepass_ledger_deposits SET payload=? WHERE id=?').run(JSON.stringify(saved),saved.id);
+ const input={request_id:crypto.randomUUID(),booth_id:booth.id,collection_code:accepted.collection_code,packet_id:saved.packet_id,location:saved.location,valid_minutes:60};
+ const replaced=await f.call('/api/admin/reissue',input);assert.equal(replaced.status,200);
+ assert.equal(replaced.body.receipt_purpose,'replacement');assert.equal(replaced.body.depositor_receipt.address,'12025550101');
+ assert(replaced.body.depositor_receipt.message.includes('Receipt: https://test.example/pickup#'+replaced.body.collection_code+'.'+saved.packet_id));
+ assert.match(replaced.body.depositor_receipt.message,/The previous code no longer works/);assert.match(replaced.body.depositor_receipt.message,/IST \(UTC\+05:30\)/);
+ assert.equal((await f.call('/api/admin/reissue',input)).body.collection_code,replaced.body.collection_code);
+});
+
+test('collector identity is scoped, validated, persisted and included in named partial/final depositor drafts',async t=>{
+  const f=fixture();t.after(f.close);
+  const poster=(await f.call('/api/booth')).body,token=new URL(poster.url).pathname.split('/').at(-1),ticket=crypto.randomUUID();
+  const quantities={normal:4,vip:2,vvip:0,mip:1};
+  const submitted=await f.call('/api/public/booth/'+token,{request_id:ticket,intake_version:2,name:'Taylor Example',phone:'+12025550110',quantities,
+    recipients:[{name:'Riya',phone:'+12025550123',quantities:{normal:2,vip:1,vvip:0,mip:0}},{name:'Omar',phone:'+12025550124',quantities:{normal:2,vip:1,vvip:0,mip:1}}]},'');
+  assert.equal(submitted.status,200);
+  const created=(await f.call('/api/queue/'+ticket+'/confirm',{custody_confirmed:true,custom_code:'0007',valid_minutes:1440})).body;
+  const lookup=(await f.call('/api/verify',{collection_code:'0007'})).body;
+  assert.deepEqual(lookup.collectors,['Riya','Omar']);assert(!JSON.stringify(lookup.collectors).includes('1202555'));
+  assert.equal((await f.call('/api/verify',{collection_code:'0007'},'account-two')).status,403);
+  async function pickup(who,counts,claim){
+    const checked=claim||(await f.call('/api/verify',{collection_code:'0007'})).body;
+    const path='/api/deposits/'+created.deposit.id+'/release',body={request_id:crypto.randomUUID(),claim_token:checked.claim_token,packet_id:checked.deposit.packet_id,version:checked.deposit.version,quantities:counts,collector_label:who};
+    for(const invalid of [['not a string'],'bad\nname','x'.repeat(81)])assert.equal((await f.call(path,{...body,request_id:crypto.randomUUID(),collector_label:invalid})).status,400);
+    const released=await f.call(path,body);assert.equal(released.status,200);assert.equal(released.body.collection.collector_label,who);
+    const releaseReplay=await f.call(path,body);assert.equal(releaseReplay.status,200,JSON.stringify(releaseReplay));assert.equal(releaseReplay.body.replayed,true);
+    const handover='/api/collections/'+released.body.collection.id+'/handover',confirm={request_id:crypto.randomUUID(),version:released.body.collection.version,handover_confirmed:true};
+    const done=await f.call(handover,confirm);assert.equal(done.status,200);
+    assert.equal(done.body.collection.collector_label,who);assert.equal(done.body.depositor_update.name,'Taylor Example');assert.equal(done.body.depositor_update.collector_name,who);
+    assert.match(done.body.depositor_update.message,/^Hi Taylor Example!/);assert(done.body.depositor_update.message.includes('Collector: '+who+'\n'));
+    const handoverReplay=await f.call(handover,confirm);assert.equal(handoverReplay.status,200,JSON.stringify(handoverReplay));assert.equal(handoverReplay.body.replayed,true);
+    assert.equal((await f.call(path,{...body,collector_label:'Someone else'})).status,409);
+    return done.body;
+  }
+  const partial=await pickup('Riya',{normal:2,vip:1,vvip:0,mip:0},lookup);assert.deepEqual(partial.deposit.remaining,{normal:2,vip:1,vvip:0,mip:1});
+  const final=await pickup('Omar',{normal:2,vip:1,vvip:0,mip:1});assert.match(final.depositor_update.message,/All passes.*collected/);
+  const current=(await f.call('/api/deposits/'+created.deposit.id+'/receipt')).body;assert.equal(current.last_collection.collector_label,'Omar');assert.deepEqual(current.last_collection.quantities,{normal:2,vip:1,vvip:0,mip:1});
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,2);
+  const audit=f.sqlite.prepare("SELECT payload FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").all();
+  assert(audit.some(row=>row.payload.includes('Riya'))&&audit.some(row=>row.payload.includes('Omar')));
+  const legacy=(await f.call('/api/deposits',{...deposit,request_id:'legacy-collector-deposit',location:'LEGACY',quantities:{normal:1,vip:0,vvip:0}})).body;
+  const oldClaim=(await f.call('/api/verify',{collection_code:legacy.collection_code})).body;
+  const oldRelease=await f.call('/api/deposits/'+legacy.deposit.id+'/release',{request_id:'legacy-collector-release',claim_token:oldClaim.claim_token,packet_id:legacy.deposit.packet_id,version:oldClaim.deposit.version,quantities:{normal:1,vip:0,vvip:0}});
+  assert.equal(oldRelease.status,200);assert.equal(oldRelease.body.collection.collector_label,'');
+  const oldDone=await f.call('/api/collections/'+oldRelease.body.collection.id+'/handover',{request_id:'legacy-collector-handover',version:oldRelease.body.collection.version,handover_confirmed:true});
+  assert.equal(oldDone.status,200);assert.equal(oldDone.body.collection.collector_label,'','Old clients remain compatible without inventing a collector');
+});
+
 test('archived-booth expired pickups can be recovered idempotently without reopening intake or invitations',async t=>{
   const f=fixture();t.after(f.close);
   const created=(await f.call('/api/deposits',{...deposit,custom_code:'0007',valid_minutes:5})).body;
@@ -334,7 +422,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'38');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'39');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -342,7 +430,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js?v=38-'));
+  assert((await signed.text()).includes('src="/counter.js?v=39-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });
@@ -575,8 +663,8 @@ test('staff gets a depositor draft only after confirmed handover, with exact qua
       const update=done.body.depositor_update;
       assert.equal(update.channel,'sms');assert.equal(update.address,'12025550123');
       assert.match(update.message,/Hi Test Depositor!/);
-      assert.match(update.message,/handed over 1 Normal/);
-      assert.match(update.message,i===0?/Still available: 1 Normal/:/All passes/);
+      assert.match(update.message,/Handed over: 1 Normal/);
+      assert.match(update.message,i===0?/Group passes remaining: 1 Normal/:/All passes/);
       assert.deepEqual((await f.call(handover,command)).body.depositor_update,update);
     }
   }finally{f.close();}
@@ -1180,6 +1268,9 @@ test('deposit intake rejects the same normalized depositor and collector phone w
   assert.equal(current.body.update_channel,'whatsapp');
   assert.equal(current.body.update_address,'919876543212');
   assert.equal(current.body.depositor_phone,'919876543210');
+  const named=(await f.call('/api/deposits/'+confirmed.body.deposit.id+'/receipt')).body;
+  assert.equal(named.depositor_update.address,'919876543212');assert.equal(named.depositor_update.name,'');
+  assert.match(named.depositor_update.message,/^Hi!/);assert(!named.depositor_update.message.includes(input.name),'A different unnamed update recipient must not inherit the depositor name');
 });
 
 test('device setup derives its label and authenticated status reports retain the phone registry after sign-out',async t=>{

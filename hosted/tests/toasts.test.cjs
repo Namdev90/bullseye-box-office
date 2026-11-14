@@ -36,11 +36,31 @@ test('current receipt offers the authenticated named WhatsApp update directly wi
   const render=source.slice(source.indexOf('function showReceipt('),source.indexOf('\nfunction openShare('));
   const elements=new Map(),links=[],toasts=[];
   const byId=id=>{if(!elements.has(id))elements.set(id,{replaceChildren(){},append(link){links.push(link);}});return elements.get(id);};
-  const input={collection_code:'0007',depositor_name:'Taylor Example',deposit:{depositor_label:'Taylor Example'},depositor_update:{channel:'whatsapp',address:'12025550123',message:'Still available: 4 Normal.'}};
+  const input={collection_code:'0007',depositor_name:'Taylor Example',deposit:{depositor_label:'Taylor Example'},depositor_update:{channel:'whatsapp',address:'12025550123',name:'Riya',message:'Group passes remaining: 4 Normal'}};
   runInNewContext(render+'\nshowReceipt(input);',{byId,input,register:false,show(){},sharePassPhone:()=>false,
     window:{sharePassToast:text=>toasts.push(text)},draft:{composeLink:(details,label)=>({details,label,classList:{add(){}}})}});
-  assert.equal(links.length,1);assert.equal(links[0].details.name,'Taylor Example');assert.equal(links[0].details.address,'12025550123');assert.equal(links[0].label,'Depositor update');assert.equal(toasts.length,0);
+  assert.equal(links.length,1);assert.equal(links[0].details.name,'Riya');assert.equal(links[0].details.address,'12025550123');assert.equal(links[0].label,'Depositor update');assert.equal(toasts.length,0);
   delete input.depositor_name;links.length=0;
   runInNewContext(render+'\nshowReceipt(input);',{byId,input,register:false,show(){},sharePassPhone:()=>false,window:{},draft:{composeLink:(details,label)=>({details,label,classList:{add(){}}})}});
-  assert.equal(links[0].details.name,'Taylor Example');
+  assert.equal(links[0].details.name,'Riya');
+});
+
+test('confirmed handover shows both roles and names the depositor message button',()=>{
+  const source=readFileSync('web/counter.js','utf8'),render=source.slice(source.indexOf('function showBalance('),source.indexOf('\nconst updatesForm='));
+  const nodes=new Map(),links=[];const byId=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){},append(value){links.push(value);}});return nodes.get(id);};
+  const result={deposit:{depositor_label:'Taylor Example',remaining:{normal:1}},collection:{collector_label:'Riya'},depositor_update:{channel:'whatsapp',address:'12025550110',name:'Taylor Example',message:'Hi Taylor Example! We handed over 2 Normal to Riya.'}};
+  runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> '1 Normal',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
+  assert.match(nodes.get('handover-people').textContent,/Depositor: Taylor Example · Collector: Riya/);
+  assert.equal(links[0].name,'Taylor Example');assert.match(links[0].message,/to Riya/);
+  delete result.collection;result.last_collection={collector_label:'Omar'};
+  runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> 'No passes remaining',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
+  assert.match(nodes.get('handover-people').textContent,/Last collector: Omar/);
+});
+
+test('optional WhatsApp URL failure cannot hide a confirmed handover or leave its transfer screen active',()=>{
+ const source=readFileSync('web/counter.js','utf8'),render=source.slice(source.indexOf('function showBalance('),source.indexOf('\nconst updatesForm='));
+ const nodes=new Map();const byId=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){},append(){}});return nodes.get(id);};let view='handover';
+ const result={deposit:{depositor_label:'Taylor',remaining:{normal:0}},collection:{collector_label:'Riya'},depositor_update:{channel:'whatsapp',address:'12025550101',message:'界'.repeat(200)}};
+ runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> 'No passes remaining',show:id=>view=id,sharePassPhone:()=>true,draft:{composeLink(){throw Error('URL too long');}}});
+ assert.equal(view,'done');assert.match(byId('error').textContent,/confirmed result is saved/);assert.match(byId('handover-people').textContent,/Collector: Riya/);
 });
