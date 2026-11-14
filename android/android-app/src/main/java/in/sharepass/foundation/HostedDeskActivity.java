@@ -1412,8 +1412,10 @@ public final class HostedDeskActivity extends Activity {
         }
         JSONObject proof = result.optJSONObject("depositor_receipt");
         button("Share code", () -> sharing(result), true);
-        if (proof != null) messageButton(result.optString("depositor_name",deposit.optString("depositor_label")), () -> compose(proof.optString("address"), proof.optString("message")));
-        if(!result.optString("depositor_phone").isEmpty()||deposit.optJSONObject("update_contact")!=null){
+        if (proof != null) {
+            line("Deposit confirmation",16,true);
+            messageButton(result.optString("depositor_name",deposit.optString("depositor_label")), () -> compose(proof.optString("address"), proof.optString("message")));
+        } else if(!result.optString("depositor_phone").isEmpty()||result.optJSONObject("depositor_update")!=null||deposit.optJSONObject("update_contact")!=null){
             line("Depositor update",16,true);
             messageButton(result.optString("depositor_name",deposit.optString("depositor_label")),()->run(()->client.openReceipt(deposit.getString("id")),current->{JSONObject update=current.optJSONObject("depositor_update");if(update!=null)compose(update.optString("address"),update.optString("message"));else note("No depositor WhatsApp contact was provided.");}));
         }
