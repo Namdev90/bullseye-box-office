@@ -69,6 +69,10 @@ final class DeskSurface {
         int edge = primary ? 0xff8a0921 : 0xff8d929c;
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{-android.R.attr.state_enabled},plate(context,new int[]{0xff292b31,0xff24262c},12,0xff41434b));
+        if(!primary){
+            states.addState(new int[]{android.R.attr.state_selected,android.R.attr.state_pressed},buttonFace(context,true,0xffff4261,true));
+            states.addState(new int[]{android.R.attr.state_selected,android.R.attr.state_focused},buttonFace(context,true,PAPER,false));
+        }
         states.addState(new int[]{android.R.attr.state_pressed}, buttonFace(context, primary, edge, true));
         states.addState(new int[]{android.R.attr.state_focused}, buttonFace(context, primary, ACCENT, false));
         if (!primary) states.addState(new int[]{android.R.attr.state_selected},

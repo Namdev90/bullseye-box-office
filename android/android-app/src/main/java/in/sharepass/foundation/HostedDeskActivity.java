@@ -1529,7 +1529,7 @@ public final class HostedDeskActivity extends Activity {
         bounds.rowSpec = GridLayout.spec(slot / columns);
         bounds.columnSpec = GridLayout.spec(slot % columns, 1f);
         bounds.width = 0;
-        bounds.height = dp(50);
+        bounds.height = -2;
         bounds.setMargins(dp(3),dp(4),dp(3),dp(4));
         return bounds;
     }
@@ -1557,10 +1557,10 @@ public final class HostedDeskActivity extends Activity {
             LinearLayout controls=new LinearLayout(this);controls.setGravity(android.view.Gravity.END|android.view.Gravity.CENTER_VERTICAL);
             TextView label=new TextView(this);label.setText(LABELS[i]+" · "+maximum+" available");label.setTextSize(16);label.setTextColor(DeskSurface.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
             TextView count=new TextView(this);count.setText("0");count.setTextSize(22);count.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);count.setTextColor(DeskSurface.INK);count.setGravity(android.view.Gravity.CENTER);count.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);values[i]=count;
-            controls.addView(stepButton("−","Decrease "+LABELS[i],()->setQuantity(selected,index,Math.max(0,selected[index]-1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));
+            controls.addView(stepButton("−","Decrease "+LABELS[i],()->setQuantity(selected,index,Math.max(0,selected[index]-1),count)),new LinearLayout.LayoutParams(dp(48),-2));
             int countWidth=Math.max(dp(48),(int)Math.ceil(count.getPaint().measureText(String.valueOf(maximum)))+dp(12));
             controls.addView(count,new LinearLayout.LayoutParams(countWidth,-2));
-            controls.addView(stepButton("+","Increase "+LABELS[i],()->setQuantity(selected,index,Math.min(maximum,selected[index]+1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));row.addView(controls);
+            controls.addView(stepButton("+","Increase "+LABELS[i],()->setQuantity(selected,index,Math.min(maximum,selected[index]+1),count)),new LinearLayout.LayoutParams(dp(48),-2));row.addView(controls);
             row.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
                 float labelWidth=Math.max(label.getPaint().measureText(LABELS[index]),label.getPaint().measureText(maximum+" available"));
                 boolean stacked=right-left<Math.ceil(labelWidth)+dp(104)+countWidth;
