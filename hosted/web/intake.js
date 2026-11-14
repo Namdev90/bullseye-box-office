@@ -22,7 +22,7 @@ function canContinue(){
   return Boolean(form.elements.name.value.trim())&&Object.values(quantities).some(Boolean)&&Boolean(sharePassPhone(guestPhone.value));
 }
 const phoneError='Enter a valid WhatsApp number. Include the country code for international numbers.';
-let requestId,submission;
+let requestId,submission,boothArchived=false;
 let lastReceipt,lastCode;
 let receiptPollTimer,receiptChecking=false,receiptFailures=0;
 const alertButton=document.getElementById('receipt-alerts');
@@ -469,6 +469,14 @@ function scheduleReceiptPoll(){
   const delay=receiptFailures?Math.min(60000,15000*receiptFailures):15000;
   receiptPollTimer=setTimeout(checkReceipt,delay);
 }
+function forgetMissingReceipt(error){
+  if(error.status!==404||submission)return false;
+  requestId=undefined;
+  try{sessionStorage.removeItem('sharepass-receipt:'+token);}catch{}
+  receipt.hidden=true;form.hidden=boothArchived;
+  statusLine.textContent=boothArchived?'This booth is archived. Ask staff about your previous deposit.':'Your previous receipt is unavailable. Ask staff about an existing deposit, or enter a new deposit below.';
+  return true;
+}
 async function checkReceipt(){
   if(receiptChecking||!requestId)return;
   receiptChecking=true;
@@ -484,7 +492,8 @@ async function checkReceipt(){
     receiptFailures=0;errorLine.textContent='';
     if(submission){submission=null;try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}}
     if(result.status!==lastReceipt||result.collection_code!==lastCode)showReceipt(result);
-  }catch{
+  }catch(error){
+    if(check===receiptCheck&&ticket===requestId&&forgetMissingReceipt(error))return;
     receiptFailures++;
     if(check===receiptCheck&&ticket===requestId)document.getElementById('receipt-sync-status').textContent='Waiting for connection. Retrying automatically…';
   }finally{receiptChecking=false;scheduleReceiptPoll();}
@@ -545,6 +554,7 @@ form.onsubmit=async event=>{
     if(reopened)history.replaceState(history.state,'',location.pathname+location.search);
     const result=await customerRequest();
     alertKey=result.alerts_key;
+    boothArchived=Boolean(result.archived);
     if(result.booth)document.getElementById('customer-booth').textContent=result.booth;
     if(booth)try{
       const saved=sessionStorage.getItem('sharepass-receipt:'+token);
@@ -557,7 +567,8 @@ form.onsubmit=async event=>{
         showReceipt(await customerRequest(null,requestId));
         if(reopened)try{sessionStorage.setItem('sharepass-receipt:'+token,requestId);}catch{}
         return;
-      }catch{
+      }catch(error){
+        if(forgetMissingReceipt(error))return;
         showReceipt({status:'submitted'});
         document.getElementById('receipt-sync-status').textContent='Recovering your original submission. Please wait or ask staff; do not submit again.';
         return;

@@ -7,13 +7,25 @@ const source=readFileSync('web/intake.js','utf8');
 function page(storage=new Map()){
  const nodes=new Map(),seen=[];
  const document={getElementById(id){if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);}};
- const context={document,booth:true,token:'synthetic-booth',requestId:undefined,submission:undefined,alertKey:'',navigator:{},window:{},crypto,
+ const context={document,booth:true,boothArchived:false,receipt:{},statusLine:{},token:'synthetic-booth',requestId:undefined,submission:undefined,alertKey:'',navigator:{},window:{},crypto,
   form:{elements:{name:{value:'Taylor'},phone:{value:'+12025550101'}}},guestPhone:{value:'+12025550101'},quantities:{normal:2,vip:0,vvip:0,mip:1},
   people:()=>[],sharePassPhone:()=> '12025550101',errorLine:{},sessionStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
   showReceipt:value=>seen.push(value),setTimeout:()=>0,location:{hash:'',pathname:'/booth/synthetic-booth',search:''}};
+ runInNewContext(source.slice(source.indexOf('function forgetMissingReceipt('),source.indexOf('async function checkReceipt(')),context);
  return {context,storage,seen};
 }
 function submitHandler(context){runInNewContext(source.slice(source.indexOf('form.onsubmit=async event=>{'),source.indexOf('(async()=>{',source.indexOf('form.onsubmit=async event=>{'))),context);return ()=>context.form.onsubmit({preventDefault(){}});}
+
+test('a pruned accepted receipt ends recovery and permits a new form only at an active booth',async()=>{
+ for(const archived of [false,true]){
+  const p=page(),ticket=crypto.randomUUID();p.storage.set('sharepass-receipt:synthetic-booth',ticket);
+  p.context.customerRequest=async(_,id)=>{if(id)throw Object.assign(Error('Pruned receipt'),{status:404});return {booth:'Synthetic booth',archived};};
+  await runInNewContext(source.slice(source.lastIndexOf('(async()=>{')),p.context);
+  assert.equal(p.context.requestId,undefined);assert.equal(p.storage.has('sharepass-receipt:synthetic-booth'),false);
+  assert.equal(p.context.form.hidden,archived);assert.equal(p.context.receipt.hidden,true);assert.equal(p.seen.length,0);
+  assert.match(p.context.statusLine.textContent,archived?/archived/:/previous receipt is unavailable/);
+ }
+});
 
 test('definite validation rejection permits correction; conflict, permission and uncertain errors keep the original intent',async()=>{
  for(const status of [400,401,403,409,500,undefined]){

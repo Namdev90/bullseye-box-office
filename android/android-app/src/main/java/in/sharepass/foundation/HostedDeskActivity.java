@@ -1873,7 +1873,7 @@ public final class HostedDeskActivity extends Activity {
     private JSONObject freshSharingReceipt(JSONObject previous) throws Exception {
         JSONObject old=previous.getJSONObject("deposit"),current=client.openReceipt(old.getString("id")),deposit=current.getJSONObject("deposit");
         if(!old.getString("id").equals(deposit.getString("id"))||!old.getString("packet_id").equals(deposit.getString("packet_id"))||!previous.getString("collection_code").equals(current.getString("collection_code")))throw new IllegalArgumentException("The receipt changed. Open its current receipt before sharing.");
-        if(deposit.optBoolean("handover_pending")||deposit.has("pending_collection")||deposit.optLong("code_expires_at")<=System.currentTimeMillis()||!hasAvailable(deposit.getJSONObject("remaining")))throw new IllegalArgumentException("This receipt is not available for collection. Check its current status with staff.");
+        if(deposit.optBoolean("handover_pending")||deposit.optJSONObject("pending_collection")!=null||deposit.optLong("code_expires_at")<=System.currentTimeMillis()||!hasAvailable(deposit.getJSONObject("remaining")))throw new IllegalArgumentException("This receipt is not available for collection. Check its current status with staff.");
         return current;
     }
     private void showSharingQr(JSONObject receipt, int index) {
