@@ -94,7 +94,7 @@ test('collector identity is scoped, validated, persisted and included in named p
   const f=fixture();t.after(f.close);
   const poster=(await f.call('/api/booth')).body,token=new URL(poster.url).pathname.split('/').at(-1),ticket=crypto.randomUUID();
   const quantities={normal:4,vip:2,vvip:0,mip:1};
-  const submitted=await f.call('/api/public/booth/'+token,{request_id:ticket,intake_version:2,name:'Taylor Example',phone:'+12025550110',quantities,
+  const submitted=await f.call('/api/public/deposit',{request_id:ticket,intake_version:2,name:'Taylor Example',phone:'+12025550110',quantities,
     recipients:[{name:'Riya',phone:'+12025550123',quantities:{normal:2,vip:1,vvip:0,mip:0}},{name:'Omar',phone:'+12025550124',quantities:{normal:2,vip:1,vvip:0,mip:1}}]},'');
   assert.equal(submitted.status,200);
   const created=(await f.call('/api/queue/'+ticket+'/confirm',{custody_confirmed:true,custom_code:'0007',valid_minutes:1440})).body;
@@ -129,7 +129,7 @@ test('collector identity is scoped, validated, persisted and included in named p
   assert.equal(oldDone.status,200);assert.equal(oldDone.body.collection.collector_label,'','Old clients remain compatible without inventing a collector');
 });
 
-test('archived-booth expired pickups can be recovered idempotently without reopening intake or invitations',async t=>{
+test('legacy archive flags preserve shared intake and idempotent expired-ticket recovery',async t=>{
   const f=fixture();t.after(f.close);
   const created=(await f.call('/api/deposits',{...deposit,custom_code:'0007',valid_minutes:5})).body;
   const saved=JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_deposits WHERE id=?').get(created.deposit.id).payload);
@@ -142,9 +142,9 @@ test('archived-booth expired pickups can be recovered idempotently without reope
   assert.equal(recovered.body.collection_code,'0133');
   assert.equal((await f.call('/api/admin/reissue',replace)).body.replayed,true);
   assert.deepEqual((await f.call('/api/verify',{collection_code:'0133'})).body.deposit.remaining,deposit.quantities);
-  assert.equal((await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'New staff'})).status,400);
-  assert.equal((await f.call('/api/deposits',{...deposit,request_id:'new-archived-deposit'})).status,409);
-  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,1);
+  assert.equal((await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'New staff'})).status,200);
+  assert.equal((await f.call('/api/deposits',{...deposit,location:'A-new-shared',request_id:'new-archived-deposit'})).status,200);
+  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,2);
 });
 
 test('owner alerts ignore a different-booth cookie and preserve the separate staff subscription and delivery',async t=>{
@@ -253,7 +253,7 @@ test('the allocator finds the last available four-digit code and reports exhaust
   assert.equal(full.status,409);
 });
 
-test('guest receipt alerts are consented, booth scoped, private, and sent once per committed change',async()=>{
+test('guest receipt alerts are consented, ticket scoped, private, and sent once per committed change',async()=>{
   const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'P-256'});
   const pub=publicKey.export({format:'jwk'});
   const vapid=Buffer.concat([Buffer.from([4]),Buffer.from(pub.x,'base64url'),Buffer.from(pub.y,'base64url')]).toString('base64url');
@@ -283,7 +283,7 @@ test('guest receipt alerts are consented, booth scoped, private, and sent once p
     const setup=(await f.call('/api/admin/setup',{action:'booth',name:'Other gate',location:'Other test area'})).body;
     const otherBooth=setup.booths.find(booth=>booth.name==='Other gate');
     const otherPoster=f.sqlite.prepare('SELECT poster_token FROM sharepass_configured_booths WHERE id=?').get(otherBooth.id).poster_token;
-    assert.equal((await f.call('/api/public/booth/'+otherPoster+'/alerts',enable,'')).status,404);
+    assert.equal((await f.call('/api/public/booth/'+otherPoster+'/alerts',enable,'')).status,200);
     assert.equal((await f.call(path+'/alerts',{...enable,ticket:missing},'')).status,404);
     assert.equal((await f.call(path+'/alerts',enable,'')).body.enabled,true);
     assert.equal((await f.call(path+'/alerts',{...enable,ticket:other},'')).status,409);
@@ -422,7 +422,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'39');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'40');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -430,7 +430,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js?v=39-'));
+  assert((await signed.text()).includes('src="/counter.js?v=40-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });
@@ -578,7 +578,7 @@ test('custom references accept leading zeroes and expire without removing stock 
   }finally{f.close();}
 });
 
-test('owner creates a separate booth and staff pairs once, sees only their booth, and can be revoked',async()=>{
+test('legacy staff setup pairs once, sees the shared register, and can be revoked',async()=>{
   const f=fixture();
   try{
     const create=await f.call('/api/admin/setup',{action:'booth',name:'West Gate',location:'West concourse'});
@@ -592,25 +592,25 @@ test('owner creates a separate booth and staff pairs once, sees only their booth
     const secret='P'.repeat(43),headers={'X-SharePass-Session':secret,'X-SharePass-Client':'0.8.0'};
     const paired=await f.call('/api/device/connect',{code:issued.body.code,verifier:secret},'');
     assert.equal(paired.status,200);
-    assert.equal(paired.body.booth_label,'West Gate');
+    assert.equal(paired.body.booth_label,'SharePass staff');
     assert.equal(paired.body.staff_label,'Booth staff');
-    assert.equal(paired.body.pickup_location,'West concourse');
+    assert.equal(paired.body.pickup_location,'');
     assert.equal(paired.body.admin,false);
     assert.equal((await f.call('/api/device/connect',{code:issued.body.code,verifier:'Q'.repeat(43)},'')).status,403);
     assert.equal((await f.call('/api/device/connect',{code:issued.body.code,verifier:secret},'')).status,200);
     assert.equal((await f.call('/api/admin/setup',undefined,'',undefined,headers)).status,404);
     const poster=(await f.call('/api/booth',undefined,'',undefined,headers)).body;
-    assert.equal(poster.booth,'West Gate');
-    assert.notEqual(poster.url,(await f.call('/api/booth')).body.url);
+    assert.equal(poster.booth,'SharePass staff');
+    assert.equal(poster.url,(await f.call('/api/booth')).body.url);
     const draft={request_id:crypto.randomUUID(),name:'Test Guest',phone:'',email:'',recipients:[],quantities:{normal:1,vip:0,vvip:0}};
     const post=await f.call('/api/public'+new URL(poster.url).pathname,draft,'');
     assert.equal(post.status,200);
-    assert.deepEqual((await f.call('/api/queue')).body.drafts,[]);
+    assert.equal((await f.call('/api/queue')).body.drafts.length,1);
     assert.equal((await f.call('/api/queue',undefined,'',undefined,headers)).body.drafts.length,1);
     const confirmed=await f.call('/api/queue/'+draft.request_id+'/confirm',{location:'A1',custody_confirmed:true,custom_code:'3705'},'',undefined,headers);
     assert.equal(confirmed.status,200);
-    assert.equal(confirmed.body.deposit.booth_id,booth.id);
-    assert.equal((await f.call('/api/verify',{collection_code:'3705'})).status,409);
+    assert.equal(confirmed.body.deposit.booth_id,'B1');
+    assert.equal((await f.call('/api/verify',{collection_code:'3705'})).status,200);
     assert.equal((await f.call('/api/verify',{collection_code:'3705'},'',undefined,headers)).status,200);
     assert.equal((await f.call('/api/admin/setup',{action:'revoke',device_id:device.id})).status,200);
     assert.equal((await f.call('/api/context',undefined,'',undefined,headers)).status,401);
@@ -670,7 +670,7 @@ test('staff gets a depositor draft only after confirmed handover, with exact qua
   }finally{f.close();}
 });
 
-test('optional push registers live devices and sends one private, booth-scoped alert after a fresh submission',async t=>{
+test('optional push registers live devices and sends one private workspace alert after a fresh submission',async t=>{
   const env={},jobs=[],assertions=[],sends=[];
   const f=fixture({env,ctx:{waitUntil:job=>jobs.push(job)}});
   const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -724,7 +724,7 @@ test('optional push registers live devices and sends one private, booth-scoped a
     assert.equal((await f.call(path,draft,'')).status,200);
     assert.equal(jobs.length,1);
     await flush();
-    assert.deepEqual(sends.map(send=>send.message.token).sort(),[tokenA2,tokenB].sort());
+    assert.deepEqual(sends.map(send=>send.message.token).sort(),[tokenA2,tokenB,tokenC].sort());
     assert.equal(assertions.length,1);
     const [header,claims,signature]=assertions[0].split('.');
     assert.equal(JSON.parse(Buffer.from(header,'base64url')).alg,'RS256');
@@ -747,11 +747,11 @@ test('optional push registers live devices and sends one private, booth-scoped a
     assert.equal(jobs.length,0);
     assert.equal((await f.call(path,{...draft,request_id:crypto.randomUUID()},'')).status,200);
     await flush();
-    assert.equal(sends.length,4);
+    assert.equal(sends.length,6);
     const east=(await f.call('/api/booth',undefined,'',undefined,c.headers)).body;
     assert.equal((await f.call('/api/public'+new URL(east.url).pathname,{...draft,request_id:crypto.randomUUID()},'')).status,200);
     await flush();
-    assert.equal(sends.at(-1).message.token,tokenC);
+    assert.deepEqual(sends.slice(-3).map(send=>send.message.token).sort(),[tokenA2,tokenB,tokenC].sort());
     assert.equal(assertions.length,1);
     f.sqlite.prepare('UPDATE sharepass_configured_devices SET session_expires=0 WHERE id=?').run(a.id);
     assert.equal((await push('register',b.headers,tokenA2)).status,200);
@@ -760,17 +760,17 @@ test('optional push registers live devices and sends one private, booth-scoped a
     invalidToken=tokenA2;
     assert.equal((await f.call(path,{...draft,request_id:crypto.randomUUID()},'')).status,200);
     await flush();
-    assert.equal(sends.length,6);
+    assert.equal(sends.length,10);
     assert.equal(f.sqlite.prepare('SELECT count(*) AS count FROM sharepass_push_tokens').get().count,0);
   }finally{await flush();f.close();}
 });
 
-test('the owner report counts received, available, reserved and handed-over passes separately per booth',async()=>{
+test('the owner report counts received, available, reserved and handed-over passes by receiving staff',async()=>{
   const f=fixture();
   try{
     assert.equal((await f.call('/api/admin/report',undefined,'')).status,401);
     assert.deepEqual((await f.call('/api/admin/report')).body.booths,[
-      {id:'B1',name:'Box office',deposits:0,received:0,available:0,pending:0,handed_over:0}
+      {id:'B1',name:'SharePass',deposits:0,received:0,available:0,pending:0,handed_over:0}
     ]);
     const created=(await f.call('/api/deposits',deposit)).body;
     const releasePath='/api/deposits/'+created.deposit.id+'/release';
@@ -797,9 +797,9 @@ test('the owner report counts received, available, reserved and handed-over pass
     assert.equal((await f.call('/api/admin/report',undefined,'',undefined,headers)).status,404);
     const report=await f.call('/api/admin/report');
     assert.equal(report.status,200);
-    assert.deepEqual(report.body.booths,[
-      {id:'B1',name:'Box office',deposits:1,received:6,available:3,pending:1,handed_over:2},
-      {id:east.id,name:'East Gate',deposits:1,received:3,available:3,pending:0,handed_over:0}
+    assert.deepEqual(report.body.totals,{name:'SharePass',deposits:2,received:9,available:6,pending:1,handed_over:2});
+    assert.deepEqual(report.body.staff.map(row=>({name:row.name,received:row.received,available:row.available,pending:row.pending,handed_over:row.handed_over})).sort((a,b)=>a.name.localeCompare(b.name)),[
+      {name:'East desk',received:3,available:3,pending:0,handed_over:0},{name:'Owner',received:6,available:3,pending:1,handed_over:2}
     ]);
   }finally{f.close();}
 });
@@ -863,7 +863,7 @@ test('competing confirmation requests cannot both confirm the same physical hand
     const results=await Promise.all(['confirm-race-01','confirm-race-02'].map(request_id=>f.call(path,{...confirmation,request_id})));
     assert.deepEqual(results.map(x=>x.status).sort(),[200,409]);
     assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").get().n,1);
-    assert.deepEqual((await f.call('/api/admin/report')).body.booths[0],{id:'B1',name:'Box office',deposits:1,received:6,available:0,pending:0,handed_over:6});
+    assert.deepEqual((await f.call('/api/admin/report')).body.booths[0],{id:'B1',name:'SharePass',deposits:1,received:6,available:0,pending:0,handed_over:6});
   }finally{f.close();}
 });
 
@@ -935,7 +935,7 @@ test('a native device reconciles the same completed handover without writing or 
     const setup=await f.call('/api/admin/setup',{action:'booth',name:'Other fixture booth',location:'Side door'});
     const other=setup.body.booths.find(row=>row.name==='Other fixture booth');
     f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run(other.id,original.operator);
-    assert.equal((await native(original,confirmPath,{...retry,request_id:'wrong-booth-confirm'})).status,409);
+    assert.equal((await native(original,confirmPath,{...retry,request_id:'wrong-booth-confirm'})).status,200);
     assert.deepEqual(snapshot(),originalState);
     assert.equal(scheduled.length,priorAlerts);
   }finally{await Promise.all(scheduled);f.close();}
@@ -1301,7 +1301,7 @@ test('device setup derives its label and authenticated status reports retain the
   assert.equal((await call('/api/device/status',{app_version:'unknown'})).status,401);
 });
 
-test('History paginates booth records without private codes or contacts and keeps pending handovers independently available',async t=>{
+test('History paginates shared records without private codes or contacts and keeps owned pending handovers available',async t=>{
   const f=fixture();t.after(f.close);
   const first=(await f.call('/api/deposits',{...deposit,request_id:'history-first',location:'H-01',custom_code:'0420'})).body;
   await f.call('/api/deposits/'+first.deposit.id+'/updates',{request_id:'history-contact',packet_id:first.deposit.packet_id,
@@ -1325,7 +1325,7 @@ test('History paginates booth records without private codes or contacts and keep
   const invitation=await f.call('/api/admin/setup',{action:'invite',booth_id:other.id,staff_name:'Other staff'});
   const token='H'.repeat(43),headers={'X-SharePass-Session':token};
   await f.call('/api/device/connect',{code:invitation.body.code,verifier:token},'');
-  assert.equal((await f.call('/api/history',undefined,'',undefined,headers)).body.deposits.length,0);
+  assert.equal((await f.call('/api/history',undefined,'',undefined,headers)).body.deposits.length,3);
   assert.equal((await f.call('/api/history',undefined,'')).status,401);
   assert.equal((await f.call('/api/history?cursor=bad')).status,400);
   const ids=new Set();let cursor=null;

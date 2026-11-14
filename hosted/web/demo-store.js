@@ -117,7 +117,7 @@ class DemoStore {
     const location=String(b.location||'').trim();if(!location||location.length>30)this.error('Enter a synthetic shelf slot, up to 30 characters.');
     if(b.custody_confirmed!==true)this.error('Confirm the simulated custody first.');
     if(this.deposits.some(d=>d.event_id===b.event_id&&d.booth_id===booth_id&&d.location.toUpperCase()===location.toUpperCase()))this.error('Use a fresh shelf slot for this booth.');
-    const d={id:this.id(),event_id:b.event_id,packet_id:fixedPacket||'PKT-'+this.id().slice(0,8).toUpperCase(),location,depositor_label,booth_id,notification_channels,evidence_status:'none',...(evidence||{}),created_by:operator,created_at:this.stamp(),version:1,initial:{...b.quantities},remaining:{...b.quantities}};
+    const d={id:this.id(),event_id:b.event_id,packet_id:fixedPacket||'PKT-'+this.id().slice(0,8).toUpperCase(),location,depositor_label,booth_id,notification_channels,evidence_status:'none',...(evidence||{}),created_by:operator,...(this.actorName?{received_by_name:this.actorName}:{}),created_at:this.stamp(),version:1,initial:{...b.quantities},remaining:{...b.quantities}};
     if(b.update_contact)d.update_contact=this.clone(b.update_contact);
     if(b.valid_minutes!==undefined)d.code_expires_at=this.now()+b.valid_minutes*60000;
     const custom=b.custom_code;
@@ -154,7 +154,7 @@ class DemoStore {
     if(this.collections.some(c=>c.deposit_id===id&&c.status==='RELEASE_RECORDED'))this.error('Finish the existing handover first.',409);
     if(d.code_expires_at<=this.now())this.error('This code expired. Ask the booth supervisor to reconcile the packet.',409);
     if(this.keys().some(k=>(b.quantities[k]??0)>(d.remaining[k]??0)))this.error('Requested quantities exceed the available balance.',409);
-    const c={id:this.id(),event_id:d.event_id,deposit_id:id,packet_id:d.packet_id,booth_id,collector_label,notification_channels,evidence_status:'none',...(evidence||{}),version:1,status:'RELEASE_RECORDED',quantities:{...b.quantities},created_by:operator,created_at:this.stamp(),handed_over_by:null,handed_over_at:null};
+    const c={id:this.id(),event_id:d.event_id,deposit_id:id,packet_id:d.packet_id,booth_id,collector_label,notification_channels,evidence_status:'none',...(evidence||{}),version:1,status:'RELEASE_RECORDED',quantities:{...b.quantities},created_by:operator,...(this.actorName?{reserved_by_name:this.actorName}:{}),created_at:this.stamp(),handed_over_by:null,handed_over_at:null};
     for(const k of Object.keys(d.remaining))d.remaining[k]-=b.quantities[k]??0;
     d.version++;this.collections.push(c);
     this.record('RELEASE_RECORDED',d,operator,{quantities:{...b.quantities},booth_id,collector_label},c.id);
@@ -170,7 +170,7 @@ class DemoStore {
     const booth_id=this.booth(b.booth_id,c.booth_id),notification_channels=this.channels(b.notification_channels,c.notification_channels),evidence=this.evidence(b);
     if(booth_id!==c.booth_id)this.error('Return to the original physical booth to reconcile this handover.',409);
     const collector_label=b.collector_label===undefined?c.collector_label:this.optionalLabel(b.collector_label,'collector');
-    c.status='HANDED_OVER';c.version++;c.handed_over_by=operator;c.handed_over_at=this.stamp();c.booth_id=booth_id;c.collector_label=collector_label;c.notification_channels=notification_channels;if(evidence)Object.assign(c,evidence);d.version++;
+    c.status='HANDED_OVER';c.version++;c.handed_over_by=operator;if(this.actorName)c.handed_over_by_name=this.actorName;c.handed_over_at=this.stamp();c.booth_id=booth_id;c.collector_label=collector_label;c.notification_channels=notification_channels;if(evidence)Object.assign(c,evidence);d.version++;
     this.record('HANDOVER_CONFIRMED',d,operator,{quantities:{...c.quantities},booth_id,collector_label},c.id);
     this.intent('HANDOVER_CONFIRMED',d,c.id,notification_channels,c);
     return {deposit:this.publicDeposit(d),collection:this.clone(c),...(d.update_contact?{depositor_update:this.pickupUpdate(d,c)}:{})};
@@ -181,7 +181,7 @@ class DemoStore {
     const remaining=describe(d.remaining);
     return {channel,address,name,collector_name:c.collector_label||'',subject:'SharePass pickup update',message:
       'Hi'+(name?' '+name:'')+'!\nSharePass by Bullseye Entertainment\n\nPickup confirmed\n'+
-      (c.collector_label?'Collector: '+c.collector_label+'\n':'')+'Handed over: '+describe(c.quantities)+'\n'+
+      (d.depositor_label?'Depositor: '+d.depositor_label+'\n':'')+(c.collector_label?'Collector: '+c.collector_label+'\n':'')+(c.handed_over_by_name?'Handed over by: '+c.handed_over_by_name+'\n':'')+'Handed over: '+describe(c.quantities)+'\n'+
       (remaining?'Group passes remaining: '+remaining:'\nAll passes in this deposit have now been collected.')};
   }
   setUpdates(id,b){

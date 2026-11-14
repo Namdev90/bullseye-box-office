@@ -45,8 +45,12 @@ final class WhatsAppDraft {
         return message(code,event,booth,location,counts,name,reference,allocation,origin,0);
     }
     static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation,String origin,long expiresAt){
+        return message(code,event,booth,location,counts,name,reference,allocation,origin,expiresAt,"","");
+    }
+    static String message(String code,String event,String booth,String location,Map<String,?> counts,String name,String reference,Map<String,?> allocation,String origin,long expiresAt,String depositorName,String staffName){
         // Validate pickup/contact details through the same rules for either message kind.
         validateDetails(code,event,booth,location,name,reference);
+        for(String value:new String[]{depositorName,staffName})if(value==null||value.length()>80||value.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Use valid depositor and staff names");
         String quantities=passCounts(counts);
         if(quantities.isEmpty())throw new IllegalArgumentException("Pass counts required");
         String planned=allocation==null?"":passCounts(allocation);
@@ -54,6 +58,7 @@ final class WhatsAppDraft {
         if(!origin.isEmpty()){
             if(expiresAt>0&&expiresAt<=System.currentTimeMillis())throw new IllegalArgumentException("This collection code has expired");
             return "Hi"+(name.trim().isEmpty()?"":" "+name.trim())+"!\nSharePass by Bullseye Entertainment\n\n"+
+                (depositorName.isEmpty()?"":"Depositor: "+depositorName+"\n")+(staffName.isEmpty()?"":"Received by: "+staffName+"\n")+
                 (event.trim().isEmpty()?"":"Event: "+event.trim()+"\n")+
                 (allocation==null?"":"Original plan for you: "+planned+"\n")+"Group balance on this receipt: "+quantities+
                 "\nCollection code: "+code+"\nCollect at: "+booth.trim()+(location.trim().isEmpty()?"":", "+location.trim())+"\n"+

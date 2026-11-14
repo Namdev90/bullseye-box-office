@@ -30,14 +30,15 @@ async function webPushSubscription(request,env,staff){
     .bind(endpoint.href,staff.workspace,booth,staff.operator,staff.device_id||null,expires,staff.workspace,booth,now,endpoint.href,now).run();
   return inserted.meta.changes===1?json({registered:true}):error('This browser subscription is unavailable for this booth.',409);
 }
-async function deliverWebPush(env,workspace,booth){
+async function deliverWebPush(env,workspace,booth,staffMessage=false){
   const config=webPushSettings(env);
   if(!config)return;
   const rows=await env.DB.prepare('SELECT p.endpoint FROM sharepass_web_push p '+
     'LEFT JOIN sharepass_configured_devices d ON p.device_id=d.id AND d.workspace=p.workspace '+
-    'LEFT JOIN sharepass_staff s ON p.operator=s.user_id WHERE p.workspace=? AND p.booth_id=? AND p.expires_at>? AND '+
-    '((p.device_id IS NOT NULL AND d.active=1 AND d.session_expires>?) OR (p.device_id IS NULL AND s.user_id IS NOT NULL)) LIMIT 24')
-    .bind(workspace,booth,Date.now(),Date.now()).all();
+    'LEFT JOIN sharepass_staff s ON p.operator=s.user_id WHERE p.workspace=? AND p.expires_at>? AND '+
+    '((p.device_id IS NOT NULL AND d.active=1 AND d.session_expires>?) OR (p.device_id IS NULL AND s.user_id IS NOT NULL)) '+
+    "AND (?=0 OR ?='all' OR (? LIKE 'staff:%' AND p.operator=?) OR p.booth_id=?) LIMIT 24")
+    .bind(workspace,Date.now(),Date.now(),Number(staffMessage),booth,booth,booth.startsWith('staff:')?booth.slice(6):'',booth).all();
   await sendWebPush(config,rows.results,'sharepass-queue',endpoint=>
     env.DB.prepare('DELETE FROM sharepass_web_push WHERE endpoint=? AND workspace=?').bind(endpoint,workspace).run());
 }
@@ -70,16 +71,17 @@ async function guestReceiptSubscription(request,env,poster,origin){
   if(!endpoint||typeof ticket!=='string'||!intakeTokenPattern.test(ticket)||!['enable','stop','status'].includes(action)){
     return error('Open your receipt to manage its alerts.',400);
   }
-  const db=env.DB,workspace=poster.workspace,booth=poster.booth_id;
+  const db=env.DB,workspace=poster.workspace;
   if(action==='stop'){
-    await db.prepare('DELETE FROM sharepass_receipt_push WHERE workspace=? AND booth_id=? AND ticket=? AND endpoint=?')
-      .bind(workspace,booth,ticket,endpoint.href).run();
+    await db.prepare('DELETE FROM sharepass_receipt_push WHERE workspace=? AND ticket=? AND endpoint=?')
+      .bind(workspace,ticket,endpoint.href).run();
     return json({enabled:false});
   }
   if(!webPushSettings(env))return error('Receipt alerts are unavailable.',503);
-  const row=await db.prepare("SELECT expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=? AND payload->>'intake_version'=2")
-    .bind(workspace,booth,ticket).first();
+  const row=await db.prepare("SELECT expires_at,confirmed,booth_id FROM sharepass_booth_queue WHERE workspace=? AND token=? AND payload->>'intake_version'=2")
+    .bind(workspace,ticket).first();
   if(!row)return action==='status'?json({enabled:false}):boothMissing();
+  const booth=row.booth_id;
   if(action==='status'){
     // Proof of an existing opt-in only. This action never creates or extends it.
     const saved=await db.prepare('SELECT expires_at FROM sharepass_receipt_push WHERE workspace=? AND booth_id=? AND ticket=? AND endpoint=? AND expires_at>?')

@@ -85,8 +85,9 @@ async function deliverBoothPush(env,workspace,booth,staffMessage){
   const targets=await db.prepare(`SELECT p.device_id,p.token FROM sharepass_push_tokens p
     JOIN sharepass_configured_devices d ON d.id=p.device_id
     JOIN sharepass_configured_staff s ON s.id=d.staff_id
-    WHERE d.workspace=? AND s.booth_id=? AND d.active=1 AND d.session_expires>?
-    ORDER BY p.device_id LIMIT 40`).bind(workspace,booth,Date.now()).all();
+    WHERE d.workspace=? AND d.active=1 AND d.session_expires>?
+      AND (?=0 OR ?='all' OR (? LIKE 'staff:%' AND s.id=?) OR s.booth_id=?)
+    ORDER BY p.device_id LIMIT 40`).bind(workspace,Date.now(),Number(staffMessage),booth,booth,booth.startsWith('staff:')?booth.slice(6):'',booth).all();
   if(!targets.results.length)return;
   const access=await fcmAccess(config);
   const url='https://fcm.googleapis.com/v1/projects/'+config.project+'/messages:send';
@@ -116,7 +117,7 @@ async function pushFanout(targets,send){
 
 async function scheduleBoothPush(env,ctx,workspace,booth,staffMessage=false){
   if(!env.SHAREPASS_FCM_SERVICE_ACCOUNT&&!env.SHAREPASS_WEB_PUSH_PRIVATE_JWK)return;
-  const delivery=Promise.allSettled([deliverBoothPush(env,workspace,booth,staffMessage),deliverWebPush(env,workspace,booth)]);
+  const delivery=Promise.allSettled([deliverBoothPush(env,workspace,booth,staffMessage),deliverWebPush(env,workspace,booth,staffMessage)]);
   if(typeof ctx?.waitUntil==='function')ctx.waitUntil(delivery);
   else await delivery;
 }

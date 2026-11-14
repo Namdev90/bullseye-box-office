@@ -4,23 +4,17 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 
 const source=readFileSync('web/admin.js','utf8');
-test('archived booths remain selectable for recovery but never for a new invitation',()=>{
-  const select=()=>({value:'old',options:[],replaceChildren(...options){this.options=options;this.value=options[0]?.value||'';}});
-  const invite=select(),reissue=select(),message=select();
-  const form={elements:{booth_id:reissue}};
-  const sandbox={Map,Option:function(text,value){return {text,value};},
-    messageForm:{elements:{booth_id:message}},inviteForm:{elements:{booth_id:invite}},reissueForm:form,
-    boothList:{replaceChildren(){},append(){}},deviceList:{replaceChildren(){},append(){}},openInvite:{},
-    item:()=>({append(){}}),document:{createElement:()=>({})},updateSetup(){}};
-  const render=runInNewContext('('+source.slice(source.indexOf('function renderSetup('),source.indexOf('\nasync function updateSetup('))+')',sandbox);
-  const data={booths:[{id:'new',name:'Active'},{id:'old',name:'Archived',archived:1}],staff:[],devices:[]};
-  render(data);
-  assert.deepEqual(invite.options.map(option=>option.value),['new']);assert.equal(invite.value,'new');
-  assert.deepEqual(reissue.options.map(option=>option.value),['new','old']);assert.equal(reissue.value,'old');
-  assert.equal(sandbox.openInvite.disabled,false);
-  render({...data,booths:[data.booths[1]]});
-  assert.equal(invite.options.length,0);assert.equal(sandbox.openInvite.disabled,true);
-  assert.equal(reissue.options[0].value,'old');
+test('administration offers staff names without booth choices, including when starting empty',()=>{
+ const elements=new Map(),select={value:'',options:[],replaceChildren(...options){this.options=options;}};
+ const byId=id=>{if(!elements.has(id))elements.set(id,{replaceChildren(){}});return elements.get(id);};
+ const sandbox={Map,Option:function(text,value){return {text,value};},setupPeople:[],messageForm:{elements:{recipient_id:select}},byId,
+   deviceList:{replaceChildren(){},append(){}},openInvite:{},item:()=>({append(){}}),document:{createElement:()=>({})}};
+ const end=source.indexOf('\ninviteForm.elements.staff_name',source.indexOf('function renderSetup('));
+ const render=runInNewContext('('+source.slice(source.indexOf('function renderSetup('),end)+')',sandbox);
+ render({staff:[{id:'person-one',name:'Asha'}],devices:[],booths:[{id:'old',name:'Legacy partition',archived:1}]});
+ assert.deepEqual(select.options.map(option=>option.text),['All staff','Asha']);assert.equal(sandbox.openInvite.disabled,false);
+ render({staff:[],devices:[],booths:[]});assert.equal(sandbox.openInvite.disabled,false);
+ const html=readFileSync('web/admin.html','utf8');assert(!html.includes('Add booth'));assert(!html.includes('name="booth_id"'));assert(html.includes('name="staff_name"'));
 });
 
 test('administrator browser alerts use an owner endpoint and an independent worker scope',async()=>{

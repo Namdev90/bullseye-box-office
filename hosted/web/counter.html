@@ -26,7 +26,7 @@
       <label class="field">Your name <input name="name" autocomplete="name" maxlength="80" required></label>
       <button class="primary">Continue</button>
     </form></section>
-    <section id="desk" hidden><div class="desk-heading"><div><p class="eyebrow">SharePass · Box office</p><h1 tabindex="-1">Pass desk</h1></div></div><div class="desk-priority">
+    <section id="desk" hidden><div class="desk-heading"><div><p class="eyebrow">SharePass · Staff</p><h1 tabindex="-1">Pass desk</h1></div></div><div class="desk-priority">
       <form id="desk-code-form" class="desk-collect" hidden>
         <h2>Collect passes</h2>
         <label class="field">Collection code <input name="code" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" inputmode="numeric" enterkeyhint="search" aria-describedby="desk-code-hint"></label>
@@ -39,30 +39,30 @@
         <div id="desk-deposit-qr" class="intake-qr" hidden></div>
         <div class="desk-share-actions"><button id="copy-deposit-link" type="button" disabled>Copy form link</button><a id="share-deposit-link" class="menu-link" target="_blank" rel="noopener noreferrer" hidden>WhatsApp draft</a></div>
         <p id="desk-link-status" class="quiet-status" role="status"></p>
-        <button class="action" id="deposit-action" type="button">Open printable booth QR</button>
+        <button class="action" id="deposit-action" type="button">Open printable deposit QR</button>
       </section>
     </div><div id="recovery" class="stack recovery"></div>
     <button type="button" id="staff-message-open" hidden>Staff messages</button>
     <div class="queue-panel" id="queue-panel" hidden>
-      <div class="queue-heading"><h2>Booth queue</h2>
+      <div class="queue-heading"><h2>Waiting deposits</h2>
         <span id="queue-count" class="queue-head-count" role="status"></span></div>
       <p id="queue-status" role="status"></p>
       <ul class="queue-list" id="queue-list"></ul>
     </div></section>
     <section id="history" hidden><h1 tabindex="-1">History</h1>
-      <p>Deposits and handovers at this booth.</p>
+      <p>Deposits and handovers in this register.</p>
       <div class="history-filters"><button id="history-all" type="button" aria-pressed="true">All deposits</button><button id="history-pending" type="button" aria-pressed="false">Pending handovers</button><button id="history-refresh" type="button">Refresh history</button></div>
       <p id="history-status" class="quiet-status" role="status"></p><ul id="history-list" class="history-list"></ul>
       <button id="history-more" type="button" hidden>Load more deposits</button>
     </section>
     <section id="settings" hidden><h1 tabindex="-1">Settings</h1>
-      <div class="stack settings-group"><h2>Connection and alerts</h2><button id="queue-alerts" type="button">Enable booth notifications</button><p id="queue-alert-status" class="quiet-status" role="status"></p><button id="refresh-queue" type="button">Refresh connection</button></div>
-      <details class="quiet-tools"><summary>Additional deposit tools</summary><div class="stack"><button id="poster-open" type="button">Print booth QR</button><button id="one-time-intake" type="button">One-time customer form</button></div></details>
+      <div class="stack settings-group"><h2>Connection and alerts</h2><button id="queue-alerts" type="button">Enable staff notifications</button><p id="queue-alert-status" class="quiet-status" role="status"></p><button id="refresh-queue" type="button">Refresh connection</button></div>
+      <details class="quiet-tools"><summary>Additional deposit tools</summary><div class="stack"><button id="poster-open" type="button">Print deposit QR</button><button id="one-time-intake" type="button">One-time customer form</button></div></details>
     </section>
-    <section id="booth-poster" hidden><h1 tabindex="-1">Booth poster</h1>
+    <section id="booth-poster" hidden><h1 tabindex="-1">Deposit QR</h1>
       <div class="booth-poster">
         <img src="/assets/sharepass-approved-logo.jpg" alt="SharePass by Bullseye Entertainment" width="106">
-        <p class="eyebrow" id="poster-booth">Box office</p>
+        <p class="eyebrow" id="poster-booth">SharePass staff</p>
         <h2>Leaving passes for someone?</h2>
         <p>Scan while you wait. Enter your details and pass counts, then hand your passes to staff.</p>
         <div id="poster-qr" class="intake-qr" hidden></div>

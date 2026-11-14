@@ -32,9 +32,10 @@
   return value&&typeof value==='object'?(Array.isArray(value)?[...value]:{...value}):value;
  }
  function depositDraft(options){
-  const {phone,name='',code,reference,eventName,booth,location,quantities,expiresAt}=options;
+  const {phone,name='',code,reference,eventName,booth,location,quantities,expiresAt,depositorName='',staffName=''}=options;
   const recipient=normalizePhone(phone);
   if(typeof name!=='string'||name.length>80||/[\u0000-\u001f\u007f]/.test(name))throw new Error('Use a name of up to 80 characters.');
+  for(const value of [depositorName,staffName])if(typeof value!=='string'||value.length>80||/[\u0000-\u001f\u007f]/.test(value))throw new Error('Use valid depositor and staff names.');
   if(typeof code!=='string'||!/^[A-Z0-9]{4}$/.test(code))throw new Error('Verify a current collection code.');
   if(reference!=null&&(typeof reference!=='string'||!/^PKT-[A-F0-9]{8}$/.test(reference)))throw new Error('Verify a current pickup reference.');
   for(const value of [eventName,booth,location])if(value!=null&&(typeof value!=='string'||value.length>100||/[\u0000-\u001f\u007f]/.test(value)))throw new Error('Use valid event and pickup details.');
@@ -51,6 +52,7 @@
   if(Number.isFinite(expiresAt)&&expiresAt<=Date.now())throw new Error('This collection code has expired. Ask staff for the current receipt.');
   const expires=Number.isFinite(expiresAt)?'Code expires: '+expiry(expiresAt)+'\n':'';
   const message=reference&&/^[0-9]{4}$/.test(code)?'Hi'+(name.trim()?' '+name.trim():'')+'!\nSharePass by Bullseye Entertainment\n\n'+
+   (depositorName?'Depositor: '+depositorName+'\n':'')+(staffName?'Received by: '+staffName+'\n':'')+
    (eventName?.trim()?'Event: '+eventName.trim()+'\n':'')+
    (scope==='planned'?'Original plan for you: '+counts+'\n':allocated?
    'Original plan for you: '+planned+'\nGroup balance on this receipt: '+counts+'\n':
@@ -107,6 +109,23 @@
   const bg=document.createElementNS(ns,'rect');bg.setAttribute('width',size);bg.setAttribute('height',size);bg.setAttribute('fill','#fff');svg.append(bg);
   let path='';matrix.forEach((row,y)=>row.forEach((dark,x)=>{if(dark)path+='M'+(x+4)+' '+(y+4)+'h1v1h-1z';}));
   const ink=document.createElementNS(ns,'path');ink.setAttribute('d',path);ink.setAttribute('fill','#000');svg.append(ink);return svg;
+ }
+ async function qrPng(url){
+  if(!window.SharePassQR)throw new Error('The QR renderer is unavailable.');
+  const matrix=window.SharePassQR.matrix(url),scale=8,canvas=document.createElement('canvas');
+  canvas.width=canvas.height=(matrix.length+8)*scale;
+  const context=canvas.getContext('2d');if(!context)throw new Error('The QR image could not be prepared.');
+  context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.fillStyle='#000';
+  matrix.forEach((row,y)=>row.forEach((dark,x)=>{if(dark)context.fillRect((x+4)*scale,(y+4)*scale,scale,scale);}));
+  return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('The QR image could not be prepared.')),'image/png'));
+ }
+ async function shareQr(details){
+  const blob=await qrPng(details.url),file=new File([blob],'SharePass-collector-QR.png',{type:'image/png'});
+  if(globalThis.navigator?.canShare?.({files:[file]})&&globalThis.navigator?.share){
+   await navigator.share({files:[file],text:details.message,title:'SharePass collection receipt'});return 'Share sheet opened. Delivery is not confirmed.';
+  }
+  const url=URL.createObjectURL(blob),download=node('a');download.href=url;download.download=file.name;download.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);return 'QR downloaded. Attach it to the collector’s WhatsApp message.';
  }
  function clear(){
   if(!active)return;
@@ -176,8 +195,8 @@
     field.type=type;field.autocomplete='off';field.value=value||'';field.maxLength=maxLength;
     label.append(field);form.append(label);return field;
    }
-   const name=input('Recipient name (optional)','text',initial.name,80);
-   const phone=input('Recipient WhatsApp number','tel',initial.phone,40);
+   const name=input('Collector name (optional)','text',initial.name,80);
+   const phone=input('Collector WhatsApp number','tel',initial.phone,40);
    phone.placeholder='10-digit mobile or international + code';
    // An allocation is the original plan, not a personal remaining balance.
    const allocation=Object.hasOwn(initial,'quantities')?{allocation:copyQuantities(initial.quantities)}:{};
@@ -213,6 +232,11 @@
       selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();if(!details.refresh)scan.showModal();
      },'scan-tile');
      const link=composeLink({address:entry.draft.recipient,message:entry.draft.message,name:entry.draft.name});
+     const imageShare=button('Share message + QR',async()=>{
+      try{imageShare.disabled=true;const current=details.refresh?await fresh():entry.draft;if(signal.aborted)return;status.textContent=await shareQr(current);}
+      catch(error){status.textContent=error.name==='AbortError'?'Sharing cancelled. Your receipt is still available.':error.message;}
+      finally{imageShare.disabled=false;}
+     });
      if(details.refresh)link.addEventListener('click',event=>{
       event.preventDefault();fresh().then(value=>{globalThis.location.assign(value.url);}).catch(error=>status.textContent=error.message);
      },{signal});
@@ -220,7 +244,7 @@
      message.readOnly=true;message.rows=5;message.value=entry.draft.message;
      message.setAttribute('aria-label','Prepared WhatsApp message');
      preview.append(node('summary','Preview message'),message);
-     output.replaceChildren(node('h4','WhatsApp · '+entry.label),node('p','+'+entry.draft.recipient),tile,link,edit,preview);
+     output.replaceChildren(node('h4','WhatsApp · '+entry.label),node('p','+'+entry.draft.recipient),link,imageShare,tile,edit,preview);
      output.hidden=false;form.hidden=true;status.textContent='';
      if(focusResult){remember();window.sharePassMorph?.(output);tile.focus();}
     }catch(error){status.textContent=error.message;phone.focus();}
@@ -246,5 +270,5 @@
   const parent=container.closest('dialog');parent?.addEventListener('close',()=>{if(!parent.open)clear();},{signal});
   window.addEventListener('pagehide',clear,{signal});
  }
- window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,composeUrl,normalizePhone,qrImage,receiptUrl,receiptDetails,scanReceipt,expiry,eligibleReceipt,clear});
+ window.SharePassDrafts=Object.freeze({renderDeposit,depositDraft,composeLink,composeUrl,normalizePhone,qrImage,qrPng,shareQr,receiptUrl,receiptDetails,scanReceipt,expiry,eligibleReceipt,clear});
 })();

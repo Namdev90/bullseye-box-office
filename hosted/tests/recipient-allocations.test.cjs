@@ -26,7 +26,7 @@ function page(){
  document.createElement=tag=>new Element(tag);document.createElementNS=(_,tag)=>new Element(tag);document.body=new Element('body');
  const denied=operation=>()=>{externalCalls.push(operation);throw Error('Unexpected external call: '+operation);};
  const windowEvents=new Element('window');
- const context=vm.createContext({document,AbortController,
+ const context=vm.createContext({document,AbortController,URL,location:{origin:'https://sharepass.example.test'},
   setTimeout:run=>{timers.set(++timer,run);return timer;},clearTimeout:id=>timers.delete(id),
   addEventListener:windowEvents.addEventListener.bind(windowEvents),fetch:denied('fetch'),open:denied('navigation'),
   XMLHttpRequest:function(){denied('XHR')();},navigator:{mediaDevices:{getUserMedia:denied('camera')}}});
@@ -153,46 +153,34 @@ test('an allocated contact with a missing or invalid phone is retained for repai
 });
 
 
-test('the actual public intake receipt prepares unequal personal plans without a group-balance claim',()=>{
- const p=page(),context=p.context,element=tag=>p.document.createElement(tag);
+test('the public receipt offers named collector messages and QR with original plans, current group stock and staff names',async()=>{
+ const p=page(),context=p.context,element=tag=>p.document.createElement(tag),nodes=new Map();
  Object.assign(context,{
-  form:{reset(){},hidden:false},recipientList:element('div'),receipt:element('section'),reference:element('p'),
-  receiptShare:element('div'),statusLine:element('p'),receiptState:element('p'),
-  booth:true,alertKey:'',requestId:null,lastReceipt:'',lastCode:'',receiptPolls:0,
+  form:{reset(){},hidden:false},recipientList:element('div'),receipt:element('section'),reference:element('p'),errorLine:element('p'),
+  receiptShare:element('div'),statusLine:element('p'),receiptState:element('p'),receiptPeople:undefined,
+  booth:true,alertKey:'',requestId:'synthetic-ticket',lastReceipt:'',lastCode:'',receiptPolls:0,
   scheduleReceiptPoll:()=>context.receiptPolls++,
-  result:{status:'confirmed',queue_ref:'FIX123',collection_code:base.code,collection_reference:base.reference,
-   booth:base.booth,recipients:json(people)}
+  result:{status:'confirmed',queue_ref:'FIX123',collection_code:'0007',collection_reference:base.reference,remaining:base.quantities,
+   name:'Taylor',depositor_name:'Taylor',staff_name:'Asha',booth:'SharePass staff',recipients:json(people)}
  });
- const check=element('button'),sync=element('p');p.document.getElementById=id=>{
-  assert(['check-receipt','receipt-sync-status'].includes(id));return id==='check-receipt'?check:sync;
- };
+ context.customerRequest=async()=>context.result;
+ p.document.getElementById=id=>{if(!nodes.has(id))nodes.set(id,element('div'));return nodes.get(id);};
  const source=readFileSync(join(__dirname,'../web/intake.js'),'utf8');
- const start=source.indexOf('function showReceipt(result){'),end=source.indexOf('async function prepareReceiptAlerts(',start);
- assert(start>=0&&end>start,'Execute the production showReceipt function, not a reimplemented call');
- vm.runInContext(source.slice(start,end)+'\nshowReceipt(result);',context);
- let links=context.receiptShare.querySelectorAll('a');assert.equal(links.length,2);
+ const start=source.indexOf('function showReceipt(result){'),end=source.indexOf('// Best-effort maintenance',start);
+ vm.runInContext(source.slice(start,end)+'\nshowReceipt(result);',context);await new Promise(setImmediate);
+ let links=context.receiptShare.querySelectorAll('a');assert.equal(links.length,2,JSON.stringify({error:context.errorLine.textContent,status:context.receiptShare.querySelectorAll('p').map(p=>p.textContent)}));
  const messages=links.map(link=>new URL(link.href).searchParams.get('text'));
- assert.match(messages[0],/Hi First fixture! Your planned share: 1 Normal \+ 2 VIP passes\./);
- assert.match(messages[1],/Hi Second fixture! Your planned share: 3 Normal \+ 1 MIP passes\./);
- for(const message of messages){
-  assert.doesNotMatch(message,/Group balance|passes for our group|4 Normal/);
-  assert.match(message,/Shared group code\. Staff must confirm availability; pickups are not tracked per person\./);
- }
+ assert.match(messages[0],/Original plan for you: 1 Normal \+ 2 VIP/);assert.match(messages[1],/Original plan for you: 3 Normal \+ 1 MIP/);
+ for(const message of messages){assert.match(message,/Group balance on this receipt/);assert.match(message,/Depositor: Taylor/);assert.match(message,/Received by: Asha/);assert.match(message,/Receipt: https:/);}
  assert.equal(new URL(links[0].href).pathname,'/12025550101');assert.equal(new URL(links[1].href).pathname,'/12025550102');
- // Rechecking returns original plans again. The public response has no group remaining field.
- vm.runInContext('showReceipt(result);',context);
- links=context.receiptShare.querySelectorAll('a');assert.equal(links.length,2);
- assert.deepEqual(links.map(link=>new URL(link.href).searchParams.get('text')),messages);
- assert.equal(context.receiptPolls,2,'Each visible receipt schedules the automatic status check');
- context.result.recipients[0].phone='invalid';
- vm.runInContext('showReceipt(result);',context);
- assert.equal(context.receiptShare.querySelectorAll('a').length,1,'One bad optional draft must not suppress another recipient');
- assert.equal(context.lastReceipt,'confirmed');assert.equal(context.receiptPolls,3);
- context.result.booth='界'.repeat(100);
- vm.runInContext('showReceipt(result);',context);
- assert.equal(context.receiptShare.querySelectorAll('a').length,0,'Overlong URLs fail closed');
- assert.equal(context.lastReceipt,'confirmed');assert.equal(context.receiptPolls,4,'Receipt state and polling survive every draft failure');
- assert.deepEqual(p.externalCalls,[]);
+ assert(context.receiptShare.querySelectorAll('button').some(button=>button.textContent==='Share message + QR'));
+ assert.match(nodes.get('receipt-people').textContent,/Received by · Asha/);assert.equal(nodes.get('confirmation-wait').hidden,true);
+ context.result.recipients[0].phone='invalid';context.receiptPeople=undefined;
+ vm.runInContext('showReceipt(result);',context);await new Promise(setImmediate);
+ assert.equal(context.receiptShare.querySelectorAll('a').length,1);assert.equal(context.lastReceipt,'confirmed');
+ context.result.staff_name='界'.repeat(80);context.receiptPeople=undefined;
+ vm.runInContext('showReceipt(result);',context);await new Promise(setImmediate);
+ assert.equal(context.receiptShare.querySelectorAll('a').length,0);assert.equal(context.receiptPolls,3,'Optional draft errors cannot stop receipt polling');
 });
 
 test('default planned-only and explicit group modes are distinct, and unknown scopes fail closed',()=>{

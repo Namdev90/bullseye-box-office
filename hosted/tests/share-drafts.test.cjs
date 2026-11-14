@@ -38,6 +38,27 @@ test('production messages preserve receipt identity, explicit timezone and optio
  assert.throws(()=>drafts.composeLink({address:options.phone,message:'界'.repeat(200)}),/Shorten/);
 });
 
+test('collector QR shares PNG plus the exact message, or downloads it without claiming delivery',async()=>{
+ const draws=[],downloads=[],revoked=[],shares=[];let shareable=true;
+ const canvas={width:0,height:0,getContext:()=>({fillStyle:'',fillRect:(...bounds)=>draws.push(bounds)}),toBlob:(done,type)=>{assert.equal(type,'image/png');done(new Blob(['synthetic PNG'],{type}));}};
+ const document={createElement:tag=>tag==='canvas'?canvas:{click(){downloads.push({href:this.href,name:this.download});}}};
+ const navigator={canShare:({files})=>shareable&&files[0].type==='image/png',share:async payload=>shares.push(payload)};
+ const {drafts}=draftTools({document,navigator,Blob,File,URL:{createObjectURL:()=> 'blob:synthetic-qr',revokeObjectURL:url=>revoked.push(url)},setTimeout:callback=>callback()});
+ const details={url:'https://sharepass.example.test/pickup#0007.PKT-A1B2C3D4',message:'Depositor: Taylor\nCollector: Riya\nReceived by: Asha\nCode: 0007'};
+ const result=await drafts.shareQr(details);assert.match(result,/Delivery is not confirmed/);
+ assert.equal(shares.length,1);assert.equal(shares[0].text,details.message);assert.equal(shares[0].files[0].name,'SharePass-collector-QR.png');
+ assert.deepEqual(draws[0],[0,0,canvas.width,canvas.height]);
+ assert(draws.slice(1).every(([x,y,w,h])=>x>=32&&y>=32&&x+w<=canvas.width-32&&y+h<=canvas.height-32),'Keep a four-module white quiet zone');
+ shareable=false;assert.match(await drafts.shareQr(details),/QR downloaded/);assert.equal(shares.length,1);
+ assert.deepEqual(downloads,[{href:'blob:synthetic-qr',name:'SharePass-collector-QR.png'}]);assert.deepEqual(revoked,['blob:synthetic-qr']);
+});
+
+test('waiting confirmation is visible only while submitted and respects reduced motion',()=>{
+ const intake=readFileSync(join(__dirname,'../web/intake.js'),'utf8'),html=readFileSync(join(__dirname,'../web/intake.html'),'utf8'),css=readFileSync(join(__dirname,'../web/brand.css'),'utf8');
+ assert(html.includes('id="confirmation-wait"'));assert(intake.includes("document.getElementById('confirmation-wait').hidden=result.status!=='submitted'"));
+ assert(css.includes('@media(prefers-reduced-motion:reduce){.waiting-spinner{animation:none;'));
+});
+
 test('fresh collection guidance rejects expired, replaced, completed and pending receipts',()=>{
  const {drafts}=draftTools({URL,location:{origin:'https://sharepass.example.test'}});
  const expected={id:'deposit-one',code:'0007',reference:'PKT-A1B2C3D4'};

@@ -78,21 +78,21 @@ test('a full code pool does not prevent intake or consume stock before staff ver
   assert.equal(accepted.status,200);assert.equal(accepted.body.collection_code,'0420');
 });
 
-test('archiving closes new intake and setup while preserving current receipts and pickup',async t=>{
+test('legacy partition archive flags do not block shared intake, setup or pickup',async t=>{
   const f=fixture();t.after(f.close);
   const path='/api/public'+new URL((await f.call('/api/booth')).body.url).pathname;
   const active=await f.call('/api/deposits',deposit);assert.equal(active.status,200);
   const invite=await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'Late staff'});
   assert.equal((await f.call('/api/admin/setup',{action:'archive-booth',booth_id:'B1',confirmed:false})).status,400);
   assert.equal((await f.call('/api/admin/setup',{action:'archive-booth',booth_id:'B1',confirmed:true})).status,200);
-  assert.equal((await f.call(path,undefined,null,true)).body.archived,true);
-  assert.equal((await f.call(path,draft(),null,true)).status,409);
-  assert.equal((await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'New staff'})).status,400);
-  assert.equal((await f.call('/api/device/connect',{code:invite.body.code,verifier:'A'.repeat(43)},null,true)).status,403);
-  assert.equal((await f.call('/api/deposits',{...deposit,request_id:'archived-deposit',location:'A-02'})).status,409);
+  assert.equal((await f.call(path,undefined,null,true)).body.archived,false);
+  assert.equal((await f.call(path,draft(),null,true)).status,200);
+  assert.equal((await f.call('/api/admin/setup',{action:'invite',booth_id:'B1',staff_name:'New staff'})).status,200);
+  assert.equal((await f.call('/api/device/connect',{code:invite.body.code,verifier:'A'.repeat(43)},null,true)).status,200);
+  assert.equal((await f.call('/api/deposits',{...deposit,request_id:'archived-deposit',location:'A-02'})).status,200);
   assert.equal((await f.call('/api/verify',{collection_code:active.body.collection_code})).status,200);
-  assert.equal((await f.call('/api/history')).body.deposits.length,1);
-  assert.equal((await f.call('/api/admin/report')).body.booths[0].received,1);
+  assert.equal((await f.call('/api/history')).body.deposits.length,2);
+  assert.equal((await f.call('/api/admin/report')).body.totals.received,2);
 });
 
 test('a zero-balance pending handover never becomes a completed history receipt or final depositor draft',async t=>{
@@ -115,21 +115,21 @@ test('a zero-balance pending handover never becomes a completed history receipt 
   assert.equal(completed.deposit.handover_pending,false);assert.match(completed.depositor_update.message,/All passes/);
 });
 
-test('archived booths block new private intake and manual completion of empty forms but keep submitted work recoverable',async t=>{
+test('legacy private intake and manual receipt remain compatible with the shared register',async t=>{
   const f=fixture();t.after(f.close);const session=await f.pair('Synthetic intake staff','E');
   const empty=(await f.call('/api/intakes',{},session)).body;
   const submitted=(await f.call('/api/intakes',{},session)).body;
   const publicPath='/api/public/intake/'+submitted.token;
   assert.equal((await f.call(publicPath,{name:'Existing synthetic guest',quantities},null,true)).status,200);
   await f.call('/api/admin/setup',{action:'archive-booth',booth_id:'B1',confirmed:true});
-  assert.equal((await f.call('/api/intakes',{},session)).status,409);
-  assert.equal((await f.call('/api/public/intake/'+empty.token,{name:'New synthetic guest',quantities},null,true)).status,409);
-  assert.equal((await f.call('/api/intakes/'+empty.token+'/confirm',{manual:true,location:'A-empty',custody_confirmed:true,quantities},session)).status,409);
+  assert.equal((await f.call('/api/intakes',{},session)).status,200);
+  assert.equal((await f.call('/api/public/intake/'+empty.token,{name:'New synthetic guest',quantities},null,true)).status,200);
+  assert.equal((await f.call('/api/intakes/'+empty.token+'/confirm',{manual:true,location:'A-empty',custody_confirmed:true,quantities},session)).status,200);
   const confirm={location:'A-existing',custody_confirmed:true};
   assert.equal((await f.call('/api/intakes/'+submitted.token+'/confirm',confirm,session)).status,200);
   assert.equal((await f.call('/api/intakes/'+submitted.token+'/confirm',confirm,session)).body.replayed,true);
-  assert.equal(f.db.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,1);
-  assert.equal((await f.call('/api/context')).body.booth_archived,true);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM sharepass_ledger_deposits').get().n,2);
+  assert.equal((await f.call('/api/context')).body.booth_archived,false);
 });
 
 test('approval replay preserves the request fingerprint recorded before automatic update contacts existed',async t=>{

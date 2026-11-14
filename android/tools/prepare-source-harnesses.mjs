@@ -38,6 +38,7 @@ export function extractJavaMethod(source, signature) {
 
 export function sourceHarnesses() {
   return [
+    ['RegisterResetTest','HostedRegisterClient',['private static JSONObject resetTransactions(JSONObject data,long resetAt) throws Exception']],
     ['FreshSharingTest','HostedDeskActivity',['private JSONObject freshSharingReceipt(JSONObject previous) throws Exception','private static boolean hasAvailable(JSONObject quantities)']],
     ['QueueNotificationPolicyTest','QueueNotifications',['static boolean allowed(Context context)','static boolean allowed(Context context,String channel)']],
     ['QueuePushServiceTest','QueuePushService',['private void showQueueAlert()'],'fcm'],

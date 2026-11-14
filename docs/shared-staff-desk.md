@@ -1,0 +1,13 @@
+# One shared SharePass desk
+
+The owner requested a permanent QR, removal of booth options and a full register/staff reset. `/deposit` is the built-in deposit URL on web and Android. QR generation needs no staff-specific URL request, invitation or rotating token. Setup invitations remain separate single-use credentials.
+
+Authenticated staff can see the shared waiting queue, history and current receipts, and collect any ticket in their workspace. The server derives retained legacy storage keys from the owned record; it never trusts a client-selected partition. Original request fingerprints, receipt identity, version checks, atomic reservation and original-operator/supervisor handover recovery remain enforced. Other workspaces are inaccessible.
+
+Staff setup and message targeting use names. Reports group balanced received/available/reserved/handed-over totals by receiving staff. Legacy schema keys and compatible URLs remain internal; historical rows are not rewritten to implement the shared interface.
+
+New deposits record the accepting staff name; handovers record the actual collector and handing staff. Collector drafts include supplied depositor/staff names, original plans and current group stock without inventing personal balances. A depositor's page shows a waiting indicator until staff confirm, then the code, named WhatsApp drafts and QR controls. Image sharing uses the platform share sheet with PNG and message text, or downloads the QR for manual attachment. Neither path claims delivery. Reduced motion keeps a static waiting indicator.
+
+The administrator can export a complete database backup, then explicitly type `RESET SHAREPASS` and confirm a full reset. The reset uses one D1 batch, preserves administrator access/artwork/settings and foreign-register accounts/data, and removes this register's customer transactions, queues, staff accounts, pairings and subscriptions. Non-identifying retired code/request/ticket IDs prevent stale retry resurrection or old codes authorizing new stock. A repeated reset request ID cannot erase newly entered data. A reset epoch clears old device transaction state after reconnection without discarding normal uncertain recovery.
+
+No migration, new service or production dependency is required. Essential real Workerd/D1 tests cover full exports beyond bounded table-viewer cells, exact restore/integrity, reset/permission scope, foreign-data preservation, targeted staff messages and idempotence. Native checks cover monotonic reset cleanup and preserve current paired identity during a fresh connection. Actual phone attachment/share-sheet, camera, sound and notification receipt remain separate acceptance checks.

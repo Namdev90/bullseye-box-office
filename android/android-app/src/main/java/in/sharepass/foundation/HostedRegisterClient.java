@@ -28,11 +28,13 @@ final class HostedRegisterClient {
         final int status;
         final boolean notExecuted;
         final boolean pickupReferenceRequired;
+        final long registerResetAt;
         Rejected(int status, JSONObject response) {
             super(response.optString("error", "SharePass could not complete the request."));
             this.status = status;
             this.notExecuted = response.optBoolean("notExecuted", false);
             this.pickupReferenceRequired = response.optBoolean("pickup_reference_required", false);
+            this.registerResetAt = response.optLong("register_reset_at",0);
         }
     }
     static final class ReconciliationRequired extends IOException {
@@ -124,10 +126,11 @@ final class HostedRegisterClient {
     }
 
     private void saveContext(JSONObject context, JSONObject updated, boolean newSession) throws Exception {
+        updated=resetTransactions(updated,context.optLong("register_reset_at",0));
         String account = context.getString("session_key");
         String previous = updated.optString("account");
         if (!previous.isEmpty() && !previous.equals(account)) {
-            if (hasPending() || handover() != null) {
+            if (updated.has("pending") || updated.optJSONObject("handover") != null) {
                 updated.remove("token");
                 updated.remove("expires_at");
                 write(updated);
@@ -136,7 +139,7 @@ final class HostedRegisterClient {
             updated.remove("receipt");
             updated.remove("intake");
         }
-        if (newSession || !previous.equals(account)) write(updated.put("account", account));
+        if (newSession || !previous.equals(account) || context.optLong("register_reset_at",0)>saved.optLong("register_reset_at",0)) write(updated.put("account", account));
     }
 
     void forgetExpiredSession() throws Exception {
@@ -155,7 +158,18 @@ final class HostedRegisterClient {
     }
 
     JSONObject request(String path, JSONObject body) throws Exception {
-        return request(path, body, token());
+        try{return request(path, body, token());}
+        catch(Rejected error){
+            if(error.status==401&&error.registerResetAt>saved.optLong("register_reset_at",0))write(resetTransactions(new JSONObject(),error.registerResetAt));
+            throw error;
+        }
+    }
+    private static JSONObject resetTransactions(JSONObject data,long resetAt) throws Exception {
+        if(resetAt>data.optLong("register_reset_at",0)){
+            for(String key:new String[]{"receipt","pending","handover","intake","account"})data.remove(key);
+            data.put("register_reset_at",resetAt);
+        }
+        return data;
     }
 
     JSONObject deviceStatus(String session, boolean notifications) throws Exception {

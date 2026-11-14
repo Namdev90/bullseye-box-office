@@ -46,19 +46,20 @@ const reusableCode=alias=>`EXISTS(SELECT 1 FROM sharepass_ledger_deposits d
 
 async function ledgerCode(db,owner,theme,exclude='',preferred='',allowReuse=false){
   const model=ledgerModel();
+  const retired=new Set((await registerResetState(db,owner)).codes||[]);
   const policy=await savedCodePolicy(db,owner,theme);
   if(ledgerCodePolicy?.theme!==policy.theme||ledgerCodePolicy.overrides!==policy.overrides){
     const weights=codeWeights(policy.theme,JSON.parse(policy.overrides));
     ledgerCodePolicy={...policy,weights,total:weights.reduce((sum,[,weight])=>sum+weight,0),eligible:new Set(weights.map(([code])=>code))};
   }
   const {weights,total,eligible}=ledgerCodePolicy;
-  const allowed=code=>/^[0-9]{4}$/.test(code)&&(!CODE_CATALOGUE.has(code)||eligible.has(code));
+  const allowed=code=>/^[0-9]{4}$/.test(code)&&!retired.has(code)&&(!CODE_CATALOGUE.has(code)||eligible.has(code));
   // Put the requested jokes first, then the complete curated catalogue. A
   // random ordinary number is used only once that catalogue is exhausted.
   // Shuffle each tier by weight without replacement, so unlucky sampling can
   // never skip an available memorable code.
   const ordered=entries=>{
-    const remaining=entries.filter(([code])=>code!==exclude),result=[];
+    const remaining=entries.filter(([code])=>code!==exclude&&!retired.has(code)),result=[];
     while(remaining.length){
       let pick=model.randomBelow(remaining.reduce((sum,[,weight])=>sum+weight,0));
       const index=remaining.findIndex(([,weight])=>(pick-=weight)<0);
@@ -102,14 +103,14 @@ async function ledgerHistory(db,staff,params){
   const [records,pending]=await db.batch([
     ledgerStatement(db,`SELECT d.id,d.payload,EXISTS(SELECT 1 FROM sharepass_ledger_collections c
       WHERE c.owner=d.owner AND c.deposit_id=d.id AND c.pending=1) AS handover_pending FROM sharepass_ledger_deposits d
-      WHERE d.owner=? AND d.event=? AND d.booth=?${after}
+      WHERE d.owner=? AND d.event=?${after}
       ORDER BY (d.payload->>'created_at') DESC,d.id DESC LIMIT ?`,
-      staff.workspace,EVENT,booth,...(cursor?[cursor[0],cursor[0],cursor[1]]:[]),limit+1),
+      staff.workspace,EVENT,...(cursor?[cursor[0],cursor[0],cursor[1]]:[]),limit+1),
     ledgerStatement(db,`SELECT d.payload AS deposit,c.payload AS collection FROM sharepass_ledger_collections c
       JOIN sharepass_ledger_deposits d ON d.owner=c.owner AND d.id=c.deposit_id
-      WHERE c.owner=? AND d.event=? AND c.booth=? AND d.booth=c.booth AND c.pending=1
+      WHERE c.owner=? AND d.event=? AND d.booth=c.booth AND c.pending=1
         AND (? OR c.payload->>'created_by'=?) ORDER BY c.payload->>'created_at' DESC,c.id DESC`,
-      staff.workspace,EVENT,booth,Number(staff.admin),staff.operator)
+      staff.workspace,EVENT,Number(staff.admin),staff.operator)
   ]);
   const model=ledgerModel();
   model.collections=pending.results.map(row=>JSON.parse(row.collection));
@@ -131,7 +132,7 @@ async function ledgerReceipt(db,owner,requestId){
 }
 
 async function currentDepositReceipt(db,staff,id){
-  const row=await ledgerStatement(db,'SELECT payload FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND booth=?',staff.workspace,id,staff.booth_id||'B1').first();
+  const row=await ledgerStatement(db,'SELECT payload FROM sharepass_ledger_deposits WHERE owner=? AND id=?',staff.workspace,id).first();
   if(!row)return error('Deposit not found at this booth.',404);
   const deposit=JSON.parse(row.payload),model=ledgerModel();
   const pending=await ledgerStatement(db,'SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND pending=1',staff.workspace,id).first();
@@ -142,8 +143,8 @@ async function currentDepositReceipt(db,staff,id){
   const contact=queue?JSON.parse(queue.payload):{};
   const currentCode=await ledgerStatement(db,'SELECT code FROM sharepass_ledger_codes WHERE owner=? AND event=? AND deposit_id=? ORDER BY code LIMIT 1',staff.workspace,EVENT,id).first();
   const update=deposit.update_contact;
-  const last=collection?null:await ledgerStatement(db,`SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND booth=? AND pending=0
-    ORDER BY payload->>'handed_over_at' DESC,id DESC LIMIT 1`,staff.workspace,id,staff.booth_id||'B1').first();
+  const last=collection?null:await ledgerStatement(db,`SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND pending=0
+    ORDER BY payload->>'handed_over_at' DESC,id DESC LIMIT 1`,staff.workspace,id).first();
   const lastCollection=last?JSON.parse(last.payload):null;
   const updatePhone=update?.channel==='whatsapp'?sharePassPhone(update.address):'';
   const phone=sharePassPhone(contact.phone)||'',remaining=model.passTypes.filter(type=>deposit.remaining[type.id]>0)
@@ -151,7 +152,7 @@ async function currentDepositReceipt(db,staff,id){
   const updateName=update?.name||(updatePhone&&updatePhone===phone?(contact.name||deposit.depositor_label||''):'');
   return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
     recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
-    ...(lastCollection?{last_collection:{collector_label:lastCollection.collector_label||'',quantities:lastCollection.quantities,handed_over_at:lastCollection.handed_over_at}}:{}),
+    ...(lastCollection?{last_collection:{collector_label:lastCollection.collector_label||'',handed_over_by_name:lastCollection.handed_over_by_name||'',quantities:lastCollection.quantities,handed_over_at:lastCollection.handed_over_at}}:{}),
     ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:updateName,message:messageGreeting(updateName)+'Deposit update\n'+
       (remaining?'Group passes remaining: '+remaining:'All passes in this deposit have been collected.')}}:{})});
 }
@@ -163,6 +164,7 @@ async function ledgerVerify(db,owner,body,legacy,model){
   if(count.n>=5)return failure();
   const row=await ledgerDepositByCode(db,owner,body.collection_code);
   const deposit=row&&JSON.parse(row.payload);
+  if(deposit){body={...body,booth_id:deposit.booth_id};if(!model.booths.some(b=>b.id===deposit.booth_id))model.booths.push({id:deposit.booth_id,label:BOOTH_LABEL});}
   if(!row||(body.collection_reference&&body.collection_reference!==deposit.packet_id)){
     const results=await db.batch([
       ledgerStatement(db,'DELETE FROM sharepass_ledger_failures WHERE owner=? AND failed_at<=?',owner,now-60000),
@@ -196,28 +198,25 @@ async function ledgerVerify(db,owner,body,legacy,model){
   return json({...result,collectors:[...new Set(collectors.map(person=>person?.name).filter(name=>typeof name==='string'&&name.trim()&&name.length<=80&&!/[\u0000-\u001f\u007f]/.test(name)).map(name=>name.trim()))].slice(0,20)});
 }
 
-async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false){
+async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false,actorName='',session=null){
   // Rotation retires its old code permanently for this event. Even legacy
   // reuse configuration must not turn an old receipt into a different pickup.
   if(path==='/api/codes/refresh'||path==='/api/admin/reissue')allowReuse=false;
   await ensureLedger(db,owner);
-  const model=ledgerModel();
-  if(!model.booths.some(booth=>booth.id===body.booth_id)){
-    const booth=await boothConfiguration(db,owner,body.booth_id);
-    if(!booth)return error('Your booth is unavailable.',403);
-    model.booths.push({id:booth.id,label:booth.name});
-  }
+  const reset=await registerResetState(db,owner),expectedReset=Number(session?.register_reset_at??reset.at);
+  if(expectedReset!==reset.at||(reset.requests||[]).includes(body.request_id))return json({error:'This register was reset. Start a new deposit or staff connection.',notExecuted:true,register_reset_at:reset.at},410);
+  if(body.custom_code&&(reset.codes||[]).includes(body.custom_code))return error('That old code was retired when the register was reset. Choose a new code.',409);
+  const model=ledgerModel();model.actorName=actorName||'';
+  const originalBody=body;
   if(path==='/api/verify')return ledgerVerify(db,owner,body,legacy,model);
   const read=(sql,...args)=>ledgerStatement(db,sql,owner,...args).first();
   const isCreate=path==='/api/deposits',isReissue=path==='/api/admin/reissue'||path==='/api/codes/refresh';
-  const needsActiveBooth=isCreate&&!(intake?.booth||intake?.submitted);
+
   for(let attempt=0;attempt<8;attempt++){
     const previous=await read('SELECT deposit_id,payload FROM sharepass_ledger_requests WHERE owner=? AND id=?',body.request_id);
     if(replayOnly&&!previous)return intakeUnavailable();
     const stored=previous&&JSON.parse(previous.payload);
-    if(!previous&&needsActiveBooth&&(await boothConfiguration(db,owner,body.booth_id))?.archived){
-      return error('This booth is archived. Existing pickups can still be completed.',409);
-    }
+
     const parts=path.split('/');
     const collectionId=stored?.result.collection?.id||(parts[2]==='collections'?parts[3]:null);
     const link=!previous&&collectionId?await read('SELECT deposit_id FROM sharepass_ledger_collections WHERE owner=? AND id=?',collectionId):null;
@@ -226,6 +225,9 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
     // concurrent handover or update observed between these reads.
     const row=id?await read('SELECT * FROM sharepass_ledger_deposits WHERE owner=? AND id=?',id):
       isReissue?await ledgerDepositByCode(db,owner,body.collection_code):null;
+    // Derive legacy storage scope from the owned record; authorization remains workspace and staff identity.
+    body={...originalBody,booth_id:stored?JSON.parse(stored.fingerprint)[1].booth_id:(row?.booth||'B1')};
+    if(!model.booths.some(b=>b.id===body.booth_id))model.booths.push({id:body.booth_id,label:BOOTH_LABEL});
     const collection=collectionId?await read('SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND id=?',collectionId):null;
     const pending=row?await read('SELECT id,payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND pending=1',row.id):null;
     model.deposits=row?[JSON.parse(row.payload)]:[];
@@ -299,8 +301,8 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
       return json(result);
     }
     const d=model.deposits.find(item=>item.id===result.deposit.id);
-    const statements=[];
-    if(needsActiveBooth)statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_guard(ok) VALUES(NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1))',owner,body.booth_id));
+    const statements=[ledgerStatement(db,"INSERT INTO sharepass_ledger_guard(ok) VALUES(coalesce((SELECT theme FROM sharepass_code_policy WHERE owner=? AND event=?),'0')=?)",owner,RESET_STATE_EVENT,String(expectedReset))];
+    if(session?.device_id)statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_guard(ok) VALUES(EXISTS(SELECT 1 FROM sharepass_configured_devices WHERE workspace=? AND id=? AND digest=? AND active=1 AND session_expires>?))',owner,session.device_id,session.digest,Date.now()));
     if(row){
       statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_guard(ok) VALUES(EXISTS(SELECT 1 FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND revision=?))',owner,row.id,row.revision));
       statements.push(ledgerStatement(db,'UPDATE sharepass_ledger_deposits SET revision=revision+1,payload=? WHERE owner=? AND id=?',ledgerJson(d),owner,d.id));
@@ -321,7 +323,7 @@ async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,the
     for(const entry of model.audit)statements.push(ledgerStatement(db,'INSERT INTO sharepass_ledger_audit(owner,payload) VALUES(?,?)',owner,ledgerJson(entry)));
     if(intake)statements.push(ledgerStatement(db,'UPDATE '+(intake.booth?'sharepass_booth_queue':'sharepass_intakes')+
       ' SET confirmed=1 WHERE workspace=? AND token=?',owner,intake.token));
-    if(row||needsActiveBooth||allowReuse&&result.collection_code)statements.push(ledgerStatement(db,'DELETE FROM sharepass_ledger_guard WHERE ok=1'));
+    statements.push(ledgerStatement(db,'DELETE FROM sharepass_ledger_guard WHERE ok=1'));
     try{await db.batch(statements);return json(result);}
     catch(exception){
       if(!/CHECK constraint failed: ok|UNIQUE constraint failed: (?:sharepass_ledger_(?:codes|requests|deposits)\.|index 'sharepass_ledger_packet_id')/i.test(String(exception)+' '+String(exception.cause||'')))throw exception;
@@ -342,7 +344,7 @@ async function recoverCodeRefresh(db,staff,requestId,packet){
   const stored=JSON.parse(previous.request),deposit=JSON.parse(previous.deposit);
   const [path,body]=JSON.parse(stored.fingerprint);
   if(path!=='/api/codes/refresh'||body.request_id!==requestId||body.packet_id!==packet||
-    body.event_id!==EVENT||body.booth_id!==(staff.booth_id||'B1')||body.operator!==staff.operator||
+    body.event_id!==EVENT||body.operator!==staff.operator||
     deposit.id!==stored.result.deposit.id||deposit.packet_id!==packet||deposit.event_id!==body.event_id||deposit.booth_id!==body.booth_id){
     return error('Recover the saved refresh from its original staff session and booth.',404,false);
   }

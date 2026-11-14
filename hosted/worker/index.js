@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'39',
+  'X-SharePass-Version':'40',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -104,10 +104,11 @@ async function access(value,env,id){
   if(admin){
     await env.DB.prepare('INSERT OR IGNORE INTO sharepass_staff(email,user_id) VALUES(?,?)').bind(email,id).run();
   }
-  const membership=await env.DB.prepare('SELECT user_id,display_name FROM sharepass_staff WHERE email=?').bind(email).first();
+  const membership=await env.DB.prepare("SELECT user_id,display_name,coalesce((SELECT theme FROM sharepass_code_policy WHERE owner=sharepass_staff.user_id AND event='sharepass-register-reset'),'0') AS register_reset_at FROM sharepass_staff WHERE email=?").bind(email).first();
   if(!membership||(membership.user_id&&membership.user_id!==id))return null;
   const owner=admin?membership:await env.DB.prepare('SELECT user_id FROM sharepass_staff WHERE email=?').bind(ownerEmail).first();
-  return owner?.user_id?{email,admin,workspace:owner.user_id,name:membership.display_name,operator:id}:null;
+  if(!admin&&owner?.user_id&&(await registerResetState(env.DB,owner.user_id)).memberships?.includes(membership.user_id))return null;
+  return owner?.user_id?{email,admin,workspace:owner.user_id,name:membership.display_name,operator:id,register_reset_at:membership.register_reset_at}:null;
 }
 export default {async fetch(request,env,ctx){
   const url=new URL(request.url),path=url.pathname;
@@ -154,6 +155,7 @@ export default {async fetch(request,env,ctx){
     }
     if(request.method==='GET'&&(path==='/'||path==='/index.html'))return page('/opening.html');
     if(request.method==='GET'&&path==='/pickup')return page('/pickup.html');
+    if(request.method==='GET'&&path==='/deposit')return page('/intake.html','SharePass');
     if(path==='/.well-known/assetlinks.json'&&request.method==='GET'){
       return json([{
         relation:['delegate_permission/common.handle_all_urls'],
@@ -195,6 +197,8 @@ export default {async fetch(request,env,ctx){
     if(path.startsWith('/api/')){
       if(request.headers.get('Sec-Fetch-Site')==='cross-site')return error('Cross-site access is blocked.',403);
       if(path==='/api/public/android-release')return await androidReleaseWebhook(request,env);
+      if(path==='/api/public/deposit'||path==='/api/public/deposit/alerts')return env.DB?
+        await publicDesk(request,env,ctx,url.origin,url.searchParams.get('ticket'),path.endsWith('/alerts')):error('The shared database is unavailable.',503,false);
       if(path==='/api/device/connect'&&request.method==='POST'){
         const origin=request.headers.get('Origin');
         if(origin&&origin!==url.origin)return error('Cross-origin changes are blocked.',403);
@@ -236,7 +240,7 @@ export default {async fetch(request,env,ctx){
         }
         if(deviceToken&&!configured){
           const paired=await mobileSession(env.DB,deviceToken);
-          if(!paired)return error('Ask the desktop administrator for a new setup code.',401);
+          if(!paired)return await staffReconnectionRequired(env,deviceToken);
           if(path==='/api/mobile/logout'&&request.method==='POST'){
             await env.DB.prepare('UPDATE sharepass_mobile_sessions SET revoked=1 WHERE digest=?').bind(paired.digest).run();
             return json({signed_out:true});
@@ -244,7 +248,7 @@ export default {async fetch(request,env,ctx){
           owner=paired.user_id;
           email=paired.email;
         }
-        if(browserToken&&!configured&&!owner)return error('Enter a new staff setup code.',401);
+        if(browserToken&&!configured&&!owner)return await staffReconnectionRequired(env,browserToken);
       }
       if(path==='/api/push/register'||path==='/api/push/unregister'){
         if(!deviceToken||!configured)return error('Use a paired SharePass device.',401);
@@ -263,8 +267,7 @@ export default {async fetch(request,env,ctx){
       if(request.method==='GET'&&path==='/api/context'){
         if(configured)await recordDeviceSeen(env.DB,configured);
         const poster=await boothPosterDetails(env.DB,staff,url.origin);
-        const booth=await boothConfiguration(env.DB,staff.workspace,staff.booth_id||'B1');
-        const enriched={...context,booth_archived:!!booth?.archived,...(poster?{booth_url:poster.url}:{})};
+        const enriched={...context,booth_archived:false,...(poster?{booth_url:poster.url,deposit_url:poster.url}:{})};
         return json(staff.admin?{...enriched,pickup_code_reuse_enabled:allowCodeReuse}:enriched);
       }
       if(request.method==='POST'&&!deviceToken&&request.headers.get('Origin')!==url.origin)return error('Cross-origin changes are blocked.',403);
@@ -279,6 +282,11 @@ export default {async fetch(request,env,ctx){
       if(path==='/api/admin/setup'){
         if(!staff.admin||deviceToken)return error('Page not found.',404);
         return await adminSetup(request,env.DB,staff.workspace,url.origin);
+      }
+      if(path==='/api/admin/backup'||path==='/api/admin/reset'){
+        if(!staff.admin||deviceToken||configured)return error('Page not found.',404);
+        if(path.endsWith('/backup'))return request.method==='GET'?await registerBackup(env.DB):error('Page not found.',404);
+        return request.method==='POST'?await resetRegister(request,env.DB,staff):error('Page not found.',404);
       }
       if(path==='/api/admin/report'){
         if(request.method!=='GET'||!staff.admin||deviceToken)return error('Page not found.',404);
@@ -314,7 +322,7 @@ export default {async fetch(request,env,ctx){
         if(!boothIdPattern.test(booth))return error('Choose the packet’s booth.',400);
         const refreshed=await mutate(env.DB,staff.workspace,path,{
           event_id:EVENT,booth_id:booth,operator:staff.operator,request_id:input.request_id,collection_code:code,packet_id:packet,location,...options
-        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+        },true,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse,false,staff.name);
         return await guestReceiptResult(await refreshedReceiptContacts(env.DB,{...staff,booth_id:booth},refreshed,url.origin),env,ctx,staff);
       }
       if(request.method==='POST'&&path==='/api/profile'){
@@ -375,11 +383,11 @@ export default {async fetch(request,env,ctx){
         await ensureLedger(env.DB,staff.workspace);
         const row=await ledgerDepositByCode(env.DB,staff.workspace,code);
         const candidate=row&&JSON.parse(row.payload);
-        const deposit=candidate?.booth_id===(staff.booth_id||'B1')&&candidate.packet_id===packet?candidate:null;
+        const deposit=candidate?.packet_id===packet?candidate:null;
         if(!deposit)return error('The collection code and physical packet label must match.',404);
         const refreshed=await mutate(env.DB,staff.workspace,path,{event_id:EVENT,booth_id:staff.booth_id||'B1',operator:staff.operator,
           request_id:input.request_id,collection_code:code,packet_id:packet,location:deposit.location,valid_minutes:1440},
-          staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse);
+          staff.admin,false,false,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse,false,staff.name);
         return await guestReceiptResult(await refreshedReceiptContacts(env.DB,staff,refreshed,url.origin),env,ctx,staff);
       }
       if(path==='/api/intakes'&&request.method==='POST')return await startIntake(env.DB,staff,url.origin);
@@ -390,8 +398,8 @@ export default {async fetch(request,env,ctx){
       }
       if(request.method==='GET'&&path==='/api/state'){
         await ensureLedger(env.DB,staff.workspace);
-        const pending=await ledgerStatement(env.DB,"SELECT d.payload AS deposit,c.payload AS collection FROM sharepass_ledger_collections c JOIN sharepass_ledger_deposits d ON d.owner=c.owner AND d.id=c.deposit_id WHERE c.owner=? AND c.booth=? AND c.pending=1 AND (? OR c.payload->>'created_by'=? )",
-          staff.workspace,staff.booth_id||'B1',Number(staff.admin),staff.operator).all();
+        const pending=await ledgerStatement(env.DB,"SELECT d.payload AS deposit,c.payload AS collection FROM sharepass_ledger_collections c JOIN sharepass_ledger_deposits d ON d.owner=c.owner AND d.id=c.deposit_id WHERE c.owner=? AND c.pending=1 AND (? OR c.payload->>'created_by'=? )",
+          staff.workspace,Number(staff.admin),staff.operator).all();
         const model=ledgerModel();
         return json({deposits:pending.results.map(row=>{
           model.collections=[JSON.parse(row.collection)];
@@ -402,7 +410,7 @@ export default {async fetch(request,env,ctx){
       const body=validate(await bodyJson(request),path,staff.operator,staff.booth_id||'B1');
       if(!body||/^(?:booth|intake)-/i.test(body.request_id||''))return error('Review the required packet details and quantities.',400);
       const legacy=!!deviceToken&&!request.headers.has('X-SharePass-Client');
-      const result=await mutate(env.DB,staff.workspace,path,body,staff.admin,false,legacy,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse,!!deviceToken);
+      const result=await mutate(env.DB,staff.workspace,path,body,staff.admin,false,legacy,env.SHAREPASS_CODE_THEME||'',null,allowCodeReuse,!!deviceToken,staff.name,staff);
       return /\/(release|handover)$/.test(path)?await guestReceiptResult(result,env,ctx,staff):result;
     }
     const asset=request.method==='GET'&&!path.endsWith('.html')&&decodeAsset(path);
