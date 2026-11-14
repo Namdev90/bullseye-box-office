@@ -7,6 +7,13 @@
         <item name="android:windowBackground">#030304</item>
         <item name="android:statusBarColor">#030304</item>
         <item name="android:navigationBarColor">#030304</item>
+        <item name="android:alertDialogTheme">@style/SharePassDialog</item>
     </style>
     <style name="AppTheme" parent="SharePassBase"/>
+    <style name="SharePassDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/sharepass_dialog</item>
+        <item name="android:colorAccent">#FF526D</item>
+        <item name="android:textColorPrimary">#F4F4F6</item>
+        <item name="android:textColorSecondary">#B5B7C0</item>
+    </style>
 </resources>

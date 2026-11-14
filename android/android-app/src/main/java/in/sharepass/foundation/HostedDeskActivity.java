@@ -60,6 +60,7 @@ public final class HostedDeskActivity extends Activity {
     private boolean speechReady;
     private JSONObject context;
     private LinearLayout content;
+    private LinearLayout deskNavigation;
     private DeskWindow viewport;
     private AppUpdates updates;
     private TextView status;
@@ -274,8 +275,9 @@ public final class HostedDeskActivity extends Activity {
         queueRows = null;
         historyRows = null;
         content = new LinearLayout(this);
+        deskNavigation=null;
         content.setOrientation(LinearLayout.VERTICAL);
-        int sidePadding = dp(14);
+        int sidePadding = dp(16);
         content.setPadding(sidePadding, dp(12), sidePadding, dp(24));
         scroll.addView(content);
         if (viewport == null) {
@@ -287,7 +289,8 @@ public final class HostedDeskActivity extends Activity {
         header.setOrientation(LinearLayout.VERTICAL);
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        if (goBack != null) {
+        toolbar.setPadding(dp(16),dp(4),dp(16),dp(10));
+        if (goBack != null&&!"desk".equals(name)) {
             Button previous = new Button(this);
             previous.setText("‹");
             previous.setContentDescription("Back");
@@ -315,11 +318,14 @@ public final class HostedDeskActivity extends Activity {
             Button account = new Button(this);
             account.setText("↪");
             account.setContentDescription("Log out");
-            DeskSurface.button(account, false);
+            DeskSurface.roundButton(account);
             account.setOnClickListener(view -> logout());
             Button refresh=new Button(this);refresh.setText("↻");refresh.setContentDescription("Refresh SharePass");DeskSurface.roundButton(refresh);
-            refresh.setOnClickListener(view -> refreshQueueNow());toolbar.addView(refresh,new LinearLayout.LayoutParams(dp(48),dp(48)));
-            toolbar.addView(account, new LinearLayout.LayoutParams(-2, -2));
+            refresh.setOnClickListener(view -> refreshQueueNow());toolbar.addView(refresh,toolbarBounds());
+            toolbar.addView(account,toolbarBounds());
+            staffMessageButton=new Button(this);DeskSurface.roundButton(staffMessageButton);
+            staffMessageButton.setOnClickListener(view->showStaffMessage(true));toolbar.addView(staffMessageButton,toolbarBounds());
+            updateStaffMessageButton();
         }
         if (!"opening".equals(name)) {
             Button help = new Button(this);
@@ -329,7 +335,7 @@ public final class HostedDeskActivity extends Activity {
             help.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(title)
                 .setMessage(helpText(title, name)).setPositiveButton("Got it", null)
                 .setNeutralButton("Notifications",(dialog,which)->openAlertSettings()).show());
-            toolbar.addView(help, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            toolbar.addView(help,toolbarBounds());
         }
         header.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
         header.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -349,9 +355,11 @@ public final class HostedDeskActivity extends Activity {
         BrandArtwork brand = new BrandArtwork(this, true);
         LinearLayout frame=new LinearLayout(this);frame.setOrientation(LinearLayout.VERTICAL);
         frame.addView(brand,new LinearLayout.LayoutParams(-1,dp(64)));
-        frame.addView(header);frame.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));viewport.show(frame,680);
+        frame.addView(header);
+        if("desk".equals(name)){deskNavigation=new LinearLayout(this);deskNavigation.setPadding(dp(16),dp(8),dp(16),dp(8));frame.addView(deskNavigation);}
+        frame.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));viewport.show(frame,680);
         TextView heading = line(title, 30, true);
-        heading.setTypeface(Typeface.create("sans-serif-black", Typeface.NORMAL));
+        heading.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
         if (!name.equals("share-qr") && !name.equals("opening") && Build.VERSION.SDK_INT >= 26
                 && android.animation.ValueAnimator.areAnimatorsEnabled()) {
@@ -362,6 +370,16 @@ public final class HostedDeskActivity extends Activity {
         status = line("", 15, false);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         status.setVisibility(View.GONE);
+        if(!"desk".equals(name)&&!"opening".equals(name)&&!"scanner".equals(name)&&!"share-qr".equals(name))beginCard();
+    }
+    private LinearLayout.LayoutParams toolbarBounds(){
+        LinearLayout.LayoutParams bounds=new LinearLayout.LayoutParams(dp(44),dp(48));bounds.leftMargin=dp(6);return bounds;
+    }
+    private void beginCard(){
+        LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(DeskSurface.panel(this));card.setPadding(dp(16),dp(12),dp(16),dp(16));
+        LinearLayout.LayoutParams bounds=new LinearLayout.LayoutParams(-1,-2);bounds.topMargin=dp(12);
+        content.addView(card,bounds);content=card;
     }
     private static String helpText(String title, String screen) {
         return switch (title) {
@@ -512,7 +530,6 @@ public final class HostedDeskActivity extends Activity {
         button("Scan setup QR", () -> scanQr(true), false);
         button("Paste setup link", this::pairingLink, false);
         button("Admin login", this::openAdminAccount, false);
-        requestSetupPermissions();
     }
     private void pairingLink() {
         page("Connect with a QR link", "pair-link", this::login);
@@ -572,7 +589,7 @@ public final class HostedDeskActivity extends Activity {
     private void desk() {
         recipients.clear();
         sharingCode = null;
-        page("Pass desk", "desk", this::finish);
+        page(deskPane==2?"History":"Pass desk", "desk", this::finish);
         if (client.hasPending()) {
             button("Recover last action", () -> run(client::recover, this::stockResult), true);
             return;
@@ -584,26 +601,42 @@ public final class HostedDeskActivity extends Activity {
             button("Resume handover", () -> handover(client.handover()), true);
             return;
         }
-        LinearLayout tabs = new LinearLayout(this);
+        GridLayout tabs=new GridLayout(this);tabs.setColumnCount(3);
         for (int index = 0; index < 3; index++) {
             final int selected = index;
             Button tab = new Button(this);
             tab.setText(new String[]{"Deposit", "Collect", "History"}[index]);
+            tab.setSingleLine(true);
             tab.setSelected(deskPane == index);
             DeskSurface.button(tab, false);
-            tabs.addView(tab, new LinearLayout.LayoutParams(0, -2, 1));
+            tabs.addView(tab,tabBounds(index,3));
             tab.setOnClickListener(view -> switchDeskPane(selected));
         }
-        content.addView(tabs);
+        tabs.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
+            float labelWidth=0;for(int i=0;i<tabs.getChildCount();i++){Button tab=(Button)tabs.getChildAt(i);labelWidth=Math.max(labelWidth,tab.getPaint().measureText(tab.getText().toString()));}
+            int columns=DeskGeometry.keypadColumns(right-left+dp(8),(int)Math.ceil(labelWidth)+dp(32),3);
+            if(tabs.getColumnCount()==columns)return;
+            tabs.setColumnCount(GridLayout.UNDEFINED);
+            for(int i=0;i<tabs.getChildCount();i++)tabs.getChildAt(i).setLayoutParams(tabBounds(i,columns));
+            tabs.setColumnCount(columns);
+        });
+        deskNavigation.addView(tabs,new LinearLayout.LayoutParams(-1,-2));
         addStaffMessageButton();
         if (deskPane == 1) {
-            line("Collect passes", 23, true);
+            beginCard();
+            line("Collect passes", 20, true);
             collectionEntry(deskCode);
         } else if (deskPane == 2) {
-            line("History", 23, true);
             line("Recent deposits and handovers for this booth.", 16, false);
-            button(historyOnlyPending?"Show all deposits":"Show pending handovers",()->{historyOnlyPending=!historyOnlyPending;desk();},false);
-            button("Refresh history",()->{historySnapshot=null;desk();},false);
+            LinearLayout filters=new LinearLayout(this);
+            boolean largeFilters=getResources().getConfiguration().fontScale>1.3f;
+            for(boolean pendingOnly:new boolean[]{false,true}){
+                Button filter=new Button(this);filter.setText(pendingOnly?"Pending":largeFilters?"All":"All deposits");filter.setContentDescription(pendingOnly?"Show pending handovers":"Show all deposits");DeskSurface.button(filter,false);filter.setSelected(historyOnlyPending==pendingOnly);
+                filter.setOnClickListener(view->{if(!busy&&historyOnlyPending!=pendingOnly){historyOnlyPending=pendingOnly;desk();}});
+                LinearLayout.LayoutParams bounds=new LinearLayout.LayoutParams(0,-2,largeFilters?(pendingOnly?1.4f:.6f):1);bounds.rightMargin=dp(8);filters.addView(filter,bounds);
+            }
+            Button refresh=new Button(this);refresh.setText("↻");refresh.setContentDescription("Refresh history");DeskSurface.roundButton(refresh);
+            refresh.setOnClickListener(view->{if(!busy){historySnapshot=null;desk();}});filters.addView(refresh,new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(filters);
             historyRows = new LinearLayout(this);
             historyRows.setOrientation(LinearLayout.VERTICAL);
             content.addView(historyRows);
@@ -611,6 +644,12 @@ public final class HostedDeskActivity extends Activity {
             loadHistory("");
         } else showDepositPanel();
         showStaffMessage(false);
+    }
+    private GridLayout.LayoutParams tabBounds(int index,int columns){
+        int span=index==2?columns-index%columns:1;
+        GridLayout.LayoutParams bounds=new GridLayout.LayoutParams();bounds.rowSpec=GridLayout.spec(index/columns);
+        bounds.columnSpec=GridLayout.spec(index%columns,span,1f);bounds.width=0;bounds.height=-2;
+        if(index%columns+span<columns)bounds.rightMargin=dp(8);if(index/columns<2/columns)bounds.bottomMargin=dp(8);return bounds;
     }
     private void switchDeskPane(int pane) {
         if (busy || deskPane == pane || pane < 0 || pane > 2) return;
@@ -626,8 +665,9 @@ public final class HostedDeskActivity extends Activity {
             .getString(context.optString("session_key"), "");
     }
     private void showDepositPanel() {
-        line("Deposit passes", 23, true);
-        line("Scan the form. Your submitted details appear below.", 16, false);
+        beginCard();
+        line("Deposit passes", 20, true);
+        line("Let the depositor scan and enter their details.",16,false);
         LinearLayout depositView = content;
         int qrPosition = depositView.getChildCount();
         String cached = cachedBoothUrl();
@@ -640,7 +680,7 @@ public final class HostedDeskActivity extends Activity {
         Button copy = new Button(this), whatsapp = new Button(this);
         copy.setText("Copy link"); whatsapp.setText("WhatsApp");
         DeskSurface.button(copy, false); DeskSurface.button(whatsapp, false);
-        share.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams copyBounds=new LinearLayout.LayoutParams(0,-2,1);copyBounds.rightMargin=dp(8);share.addView(copy,copyBounds);
         share.addView(whatsapp, new LinearLayout.LayoutParams(0, -2, 1));
         content.addView(share);
         copy.setOnClickListener(view -> {
@@ -745,12 +785,13 @@ public final class HostedDeskActivity extends Activity {
         String id = deposit.optString("id");
         if (id.isEmpty() || !historySeenIds.add(id)) return;
         LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(DeskSurface.panel(this)); card.setPadding(dp(12), dp(8), dp(12), dp(8));
+        card.setBackground(DeskSurface.panel(this)); card.setPadding(dp(16), dp(12), dp(16), dp(16));
         LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2); bounds.topMargin = dp(10);
         rows.addView(card, bounds);
-        TextView detail = new TextView(this); detail.setTextColor(DeskSurface.INK); detail.setTextSize(17);
-        detail.setText(deposit.optString("depositor_label", "Deposit")
-            + "\nRemaining · " + balance(deposit.optJSONObject("remaining")));
+        TextView person=new TextView(this);String personName=deposit.optString("depositor_label").trim();person.setText(personName.isEmpty()?"Deposit":personName);
+        person.setTextColor(DeskSurface.INK);person.setTextSize(20);person.setTypeface(Typeface.DEFAULT,Typeface.BOLD);card.addView(person);
+        TextView detail = new TextView(this); detail.setTextColor(DeskSurface.MUTED); detail.setTextSize(16);detail.setPadding(0,dp(8),0,dp(8));
+        detail.setText("Remaining · " + balance(deposit.optJSONObject("remaining")));
         card.addView(detail);
         JSONObject pending = deposit.optJSONObject("pending_collection");
         if (pending == null && deposit.optBoolean("handover_pending")) {
@@ -763,7 +804,8 @@ public final class HostedDeskActivity extends Activity {
             Button resume = new Button(this); resume.setText("Resume handover"); DeskSurface.button(resume, true); card.addView(resume);
             resume.setOnClickListener(view -> run(() -> { client.resumeHandover(deposit, pending); return client.handover(); }, this::handover));
         }
-        Button open=new Button(this);open.setText("Open receipt");DeskSurface.button(open,false);card.addView(open);
+        LinearLayout actions=new LinearLayout(this);LinearLayout.LayoutParams actionRow=new LinearLayout.LayoutParams(-1,-2);actionRow.topMargin=dp(8);card.addView(actions,actionRow);
+        Button open=new Button(this);open.setText("Open receipt");DeskSurface.button(open,false);actions.addView(open,new LinearLayout.LayoutParams(0,-2,1));
         open.setOnClickListener(view->run(()->client.openReceipt(deposit.optString("id")),result->{
             JSONObject current=result.getJSONObject("deposit"),unfinished=current.optJSONObject("pending_collection");
             if(current.optBoolean("handover_pending")){
@@ -773,7 +815,7 @@ public final class HostedDeskActivity extends Activity {
             else stockResult(result.put("action_path","/api/collections/history/handover"));
         }));
         if(pending==null&&!deposit.optBoolean("handover_pending")&&hasAvailable(deposit.optJSONObject("remaining"))){
-            Button collect=new Button(this);collect.setText("Collect passes");DeskSurface.button(collect,false);card.addView(collect);
+            Button collect=new Button(this);collect.setText("Collect passes");DeskSurface.button(collect,true);LinearLayout.LayoutParams collectBounds=new LinearLayout.LayoutParams(0,-2,1);collectBounds.leftMargin=dp(8);actions.addView(collect,collectBounds);
             collect.setOnClickListener(view->run(()->client.openReceipt(deposit.optString("id")),result->verifyPickup(result.getString("collection_code"),result.getJSONObject("deposit").getString("packet_id"))));
         }
     }
@@ -903,14 +945,14 @@ public final class HostedDeskActivity extends Activity {
         });
     }
     private void addStaffMessageButton() {
-        staffMessageButton = button("Staff messages", () -> showStaffMessage(true), false);
         updateStaffMessageButton();
     }
 
     private void updateStaffMessageButton() {
         if (staffMessageButton == null) return;
         staffMessageButton.setVisibility(staffMessages.length() == 0 ? View.GONE : View.VISIBLE);
-        staffMessageButton.setText("Staff messages (" + staffMessages.length() + ")");
+        staffMessageButton.setText("✉ "+staffMessages.length());
+        staffMessageButton.setTextSize(16);staffMessageButton.setContentDescription("Staff messages ("+staffMessages.length()+")");
     }
 
     private boolean staffMessagesAllowed() {
@@ -972,7 +1014,7 @@ public final class HostedDeskActivity extends Activity {
         if (message == null) { note("This staff message is no longer pending."); return; }
         seenStaffMessages.add(id);
         String[] replies = {"done", "working", "help"};
-        presentStaffDialog(new AlertDialog.Builder(this).setTitle("Message from admin\n\n" + message.optString("message"))
+        presentStaffDialog(new AlertDialog.Builder(this).setCustomTitle(staffMessageTitle(message.optString("message")))
             .setItems(new String[]{"Done", "Working on it", "Need help"}, (dialog, choice) -> {
                 if (dialog != staffMessageDialog || !staffMessagesAllowed() || !session.equals(client.token())) return;
                 if (pendingStaffMessage(id) == null) {
@@ -986,6 +1028,14 @@ public final class HostedDeskActivity extends Activity {
                         scheduleQueue(0);
                     });
             }).setNegativeButton("Later", null).create());
+    }
+    private View staffMessageTitle(String message){
+        LinearLayout title=new LinearLayout(this);title.setOrientation(LinearLayout.VERTICAL);title.setPadding(dp(24),dp(20),dp(24),dp(8));
+        TextView caption=new TextView(this);caption.setText("Message from admin");caption.setTextSize(20);caption.setTextColor(DeskSurface.INK);caption.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+        if(Build.VERSION.SDK_INT>=28)caption.setAccessibilityHeading(true);title.addView(caption);
+        TextView body=new TextView(this);body.setText(message);body.setTextSize(18);body.setTextColor(DeskSurface.INK);body.setPadding(0,dp(12),0,dp(8));
+        body.setMaxHeight(Math.max(dp(100),Math.min(dp(240),viewport.paneHeight()/3)));body.setVerticalScrollBarEnabled(true);
+        body.setMovementMethod(android.text.method.ScrollingMovementMethod.getInstance());body.setFocusable(true);title.addView(body);return title;
     }
     private static boolean validQueueToken(String token) { return token.matches("[a-f0-9-]{36}"); }
     private boolean notificationsAllowed() {
@@ -1014,8 +1064,6 @@ public final class HostedDeskActivity extends Activity {
         android.content.SharedPreferences preferences = getSharedPreferences("sharepass-permissions", MODE_PRIVATE);
         if (preferences.getBoolean("requested", false)) return;
         ArrayList<String> permissions = new ArrayList<>();
-        if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
-            permissions.add(android.Manifest.permission.CAMERA);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             permissions.add(android.Manifest.permission.POST_NOTIFICATIONS);
         preferences.edit().putBoolean("requested", true).apply();
@@ -1027,7 +1075,7 @@ public final class HostedDeskActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request == CAMERA_SCAN) {
             if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) scanQr(scanningSetup);
-            else note("Camera access is off. You can enter the code or paste the setup link.");
+            else note(scanningSetup?"Camera access is off. Enter the setup code or paste its link.":"Camera access is off. Enter the collection code or use the current receipt link.");
         }
         if (request == QueueNotifications.NOTICE_ID || request == SETUP_PERMISSIONS) {
             if (client != null && context != null && !client.token().isEmpty()) {
@@ -1124,15 +1172,17 @@ public final class HostedDeskActivity extends Activity {
             JSONObject draft = queueDrafts.optJSONObject(i);
             if (draft == null || !validQueueToken(draft.optString("token"))) continue;
             String token = draft.optString("token");
-            Button item = new Button(this);
-            item.setText("Review deposit · " + draft.optString("name", "Customer") + " · " + draft.optString("queue_ref")
-                + "\n" + balance(draft.optJSONObject("quantities")));
-            DeskSurface.button(item, false);
-            item.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+            LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.VERTICAL);item.setBackground(DeskSurface.panel(this));item.setPadding(dp(12),dp(12),dp(12),dp(12));
+            LinearLayout title=new LinearLayout(this);title.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView name=new TextView(this);name.setText(draft.optString("name","Customer"));name.setTextSize(18);name.setTextColor(DeskSurface.INK);name.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+            title.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+            Button review=new Button(this);review.setText("Review");review.setContentDescription("Review deposit for "+draft.optString("name","Customer"));DeskSurface.button(review,true);
+            LinearLayout.LayoutParams reviewBounds=new LinearLayout.LayoutParams(-2,-2);reviewBounds.leftMargin=dp(8);title.addView(review,reviewBounds);item.addView(title);
+            TextView counts=new TextView(this);counts.setText(balance(draft.optJSONObject("quantities")));counts.setTextSize(16);counts.setTextColor(DeskSurface.MUTED);counts.setPadding(0,dp(8),0,0);item.addView(counts);
             LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2);
             size.topMargin = dp(10);
             queueRows.addView(item, size);
-            item.setOnClickListener(view -> run(() -> client.request("/api/queue/" + token, null), value -> queueReview(token, value)));
+            review.setOnClickListener(view -> run(() -> client.request("/api/queue/" + token, null), value -> queueReview(token, value)));
         }
     }
     private void queueReview(String token, JSONObject draft) throws Exception {
@@ -1229,13 +1279,14 @@ public final class HostedDeskActivity extends Activity {
         scheduleIntake(1000);
     }
     private void showQr(String value, String label) throws Exception {
-        qr = QrPreview.create(this, value, label, () -> "desk".equals(screen) ? Math.max(dp(160),Math.min(viewport.paneHeight()-dp(350),dp(420))) : viewport.paneHeight());
+        qr = QrPreview.create(this, value, label, () -> "desk".equals(screen) ? Math.max(dp(160),Math.min(viewport.paneHeight()-dp(440),dp(420))) : viewport.paneHeight());
         content.addView(qr, qrBounds());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private LinearLayout.LayoutParams qrBounds() {
         LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, -2);
         bounds.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        bounds.topMargin=dp(12);bounds.bottomMargin=dp(12);
         return bounds;
     }
     private void scheduleIntake(long delay) {
@@ -1394,7 +1445,11 @@ public final class HostedDeskActivity extends Activity {
     }
     private void collectionEntry(String initial) {
         line("Enter the 4 digits on the pickup receipt.", 16, false);
-        EditText input = field("Collection code", InputType.TYPE_CLASS_NUMBER, 4);
+        LinearLayout entry=new LinearLayout(this);entry.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView caption=new TextView(this);caption.setText("Code");caption.setTextSize(15);caption.setTextColor(DeskSurface.INK);caption.setTypeface(Typeface.DEFAULT,Typeface.BOLD);entry.addView(caption,new LinearLayout.LayoutParams(0,-2,1));
+        TextView alternative=new TextView(this);alternative.setText("or");alternative.setTextSize(16);alternative.setTextColor(DeskSurface.MUTED);alternative.setPadding(dp(8),0,dp(8),0);entry.addView(alternative);
+        Button scan=new Button(this);scan.setText("Scan QR");scan.setContentDescription("Scan pickup QR");DeskSurface.button(scan,false);scan.setOnClickListener(view->{if(!busy)scanQr(false);});entry.addView(scan);content.addView(entry);
+        EditText input=textInput(InputType.TYPE_CLASS_NUMBER,4);input.setContentDescription("Collection code");caption.setLabelFor(input.getId());content.addView(input);
         input.setText(initial);
         input.setTextSize(26);
         input.setShowSoftInputOnFocus(false);
@@ -1407,8 +1462,6 @@ public final class HostedDeskActivity extends Activity {
         };
         autoAdvance(input, value -> value.matches("[0-9]{4}"), find);
         drawKeypad(input);
-        line("or",16,false);
-        button("Scan pickup QR", () -> scanQr(false), false);
         retryLookup = button("Retry lookup", find, false);
         retryLookup.setVisibility(initial.matches("[0-9]{4}") ? View.VISIBLE : View.GONE);
     }
@@ -1430,15 +1483,15 @@ public final class HostedDeskActivity extends Activity {
 
     private void pickupReference(String code) {
         page("Check the pickup receipt", "pickup-reference", () -> desk(code));
-        line("Enter the pickup reference shown on the collector’s current receipt or WhatsApp message.", 17, false);
-        EditText reference = field("Pickup reference", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 12);
-        reference.setHint("PKT-1234ABCD");
+        line("Paste the current receipt link or scan its QR. The four-digit code alone cannot identify this deposit.",17,false);
+        EditText reference=field("Current receipt link",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI,1024);
+        reference.setHint("Paste the link from the collector’s receipt");
         Runnable check = () -> {
-            String value = reference.getText().toString().trim().toUpperCase(Locale.ROOT);
-            if (!value.matches("PKT-[A-F0-9]{8}")) { reference.setError("Enter the pickup reference"); return; }
-            verifyPickup(code, value);
+            try{PickupScan.Details receipt=PickupScan.receiptForCode(reference.getText().toString(),code,HostedRegisterClient.ORIGIN);verifyPickup(code,receipt.reference());}
+            catch(IllegalArgumentException invalid){reference.setError("Paste a current receipt link for code "+code+".");}
         };
         button("Find passes", check, true);
+        button("Scan current receipt QR",()->scanQr(false),false);
     }
     private void drawKeypad(EditText input) {
         String keys = "1234567890";
@@ -1477,6 +1530,7 @@ public final class HostedDeskActivity extends Activity {
         bounds.columnSpec = GridLayout.spec(slot % columns, 1f);
         bounds.width = 0;
         bounds.height = dp(50);
+        bounds.setMargins(dp(3),dp(4),dp(3),dp(4));
         return bounds;
     }
     private Button keypadButton(String key, String label, Runnable action) {
@@ -1484,6 +1538,7 @@ public final class HostedDeskActivity extends Activity {
         button.setText(key);
         button.setContentDescription(label);
         DeskSurface.button(button,false);
+        button.setTextSize(24);
         button.setOnClickListener(view -> {if(!busy)action.run();});
         return button;
     }
@@ -1492,21 +1547,31 @@ public final class HostedDeskActivity extends Activity {
         if(result.isNull("claim_token")){note("Use the booth shown on the receipt.");return;}
         JSONObject available=deposit.getJSONObject("remaining");
         page("Hand over passes","prepare",()->desk(code));
-        line("Depositor · "+deposit.optString("depositor_label","Not provided"),21,true);
+        String depositor=deposit.optString("depositor_label").trim();line("Depositor · "+(depositor.isEmpty()?"Name not recorded":depositor),21,true);
         String location=deposit.optString("location");
         if(!location.startsWith("Packet ")&&!location.startsWith("PKT-"))line(location,17,false);
         int[] selected=new int[KEYS.length];TextView[] values=new TextView[KEYS.length];
         for(int i=0;i<KEYS.length;i++){
             final int index=i,maximum=available.optInt(KEYS[i]);if(maximum==0)continue;
             LinearLayout row=new LinearLayout(this);row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-            TextView label=new TextView(this);label.setText(LABELS[i]+" · "+maximum+" available");label.setTextColor(DeskSurface.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
-            TextView count=new TextView(this);count.setText("0");count.setTextColor(DeskSurface.INK);count.setGravity(android.view.Gravity.CENTER);count.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);values[i]=count;
-            row.addView(stepButton("−","Decrease "+LABELS[i],()->setQuantity(selected,index,Math.max(0,selected[index]-1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));
-            row.addView(count,new LinearLayout.LayoutParams(dp(36),-2));
-            row.addView(stepButton("+","Increase "+LABELS[i],()->setQuantity(selected,index,Math.min(maximum,selected[index]+1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));content.addView(row);
+            LinearLayout controls=new LinearLayout(this);controls.setGravity(android.view.Gravity.END|android.view.Gravity.CENTER_VERTICAL);
+            TextView label=new TextView(this);label.setText(LABELS[i]+" · "+maximum+" available");label.setTextSize(16);label.setTextColor(DeskSurface.INK);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
+            TextView count=new TextView(this);count.setText("0");count.setTextSize(22);count.setTypeface(Typeface.MONOSPACE,Typeface.BOLD);count.setTextColor(DeskSurface.INK);count.setGravity(android.view.Gravity.CENTER);count.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);values[i]=count;
+            controls.addView(stepButton("−","Decrease "+LABELS[i],()->setQuantity(selected,index,Math.max(0,selected[index]-1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));
+            int countWidth=Math.max(dp(48),(int)Math.ceil(count.getPaint().measureText(String.valueOf(maximum)))+dp(12));
+            controls.addView(count,new LinearLayout.LayoutParams(countWidth,-2));
+            controls.addView(stepButton("+","Increase "+LABELS[i],()->setQuantity(selected,index,Math.min(maximum,selected[index]+1),count)),new LinearLayout.LayoutParams(dp(48),dp(48)));row.addView(controls);
+            row.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom)->{
+                float labelWidth=Math.max(label.getPaint().measureText(LABELS[index]),label.getPaint().measureText(maximum+" available"));
+                boolean stacked=right-left<Math.ceil(labelWidth)+dp(104)+countWidth;
+                int orientation=stacked?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL;if(row.getOrientation()==orientation)return;
+                row.setOrientation(orientation);label.setLayoutParams(new LinearLayout.LayoutParams(stacked?-1:0,-2,stacked?0:1));
+                LinearLayout.LayoutParams bounds=new LinearLayout.LayoutParams(stacked?-1:-2,-2);if(stacked)bounds.topMargin=dp(8);controls.setLayoutParams(bounds);
+            });
+            LinearLayout.LayoutParams rowBounds=new LinearLayout.LayoutParams(-1,-2);rowBounds.topMargin=dp(8);content.addView(row,rowBounds);
         }
         button("Select all available",()->{for(int i=0;i<KEYS.length;i++)if(values[i]!=null)setQuantity(selected,i,available.optInt(KEYS[i]),values[i]);},false);
-        CheckBox confirmed=new CheckBox(this);confirmed.setText("I confirmed the depositor’s name and handed over these passes.");confirmed.setTextColor(DeskSurface.INK);confirmed.setMinHeight(dp(48));content.addView(confirmed);
+        CheckBox confirmed=new CheckBox(this);confirmed.setText("I confirmed the depositor’s name and handed over these passes.");confirmed.setTextSize(16);confirmed.setTextColor(DeskSurface.INK);confirmed.setMinHeight(dp(48));content.addView(confirmed);
         Button finish=button("Confirm handover",()->{
             try{JSONObject amounts=readQuantities(selected);run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",
                 new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts),true),this::stockResult);}
@@ -1759,7 +1824,6 @@ public final class HostedDeskActivity extends Activity {
         page("WhatsApp · " + label, "share-qr", () -> sharingPerson(receipt, index));
         try {
             line(receipt.getString("collection_code"), 36, true);
-            line("Pickup reference · " + receipt.getJSONObject("deposit").getString("packet_id"), 17, false);
             showQr(WhatsAppDraft.url(recipient.phone, depositMessage(receipt, recipient)), "WhatsApp message QR for " + label);
         } catch (Exception error) { note(error.getMessage()); }
     }

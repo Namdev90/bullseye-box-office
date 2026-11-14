@@ -53,8 +53,7 @@ final class DeskSurface {
 
     private static Drawable buttonFace(Context context, boolean primary, int edge, boolean pressed) {
         if (!primary) {
-            int face = pressed ? 0xffb6bac3 : 0xffe3e5ea;
-            return plate(context, new int[]{face, face}, 12, edge);
+            return plate(context, pressed ? new int[]{0xffc1c4cd,0xffafb3bf} : new int[]{0xfff1f2f5,0xffc5c7cf}, 12, edge);
         }
         int[] colors = pressed ? new int[]{0xffb30929, 0xff83061d} : new int[]{0xfff12647, 0xffbd0c2a};
         LayerDrawable material = new LayerDrawable(new Drawable[]{
@@ -69,32 +68,35 @@ final class DeskSurface {
         Context context = button.getContext();
         int edge = primary ? 0xff8a0921 : 0xff8d929c;
         StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled},plate(context,new int[]{0xff292b31,0xff24262c},12,0xff41434b));
         states.addState(new int[]{android.R.attr.state_pressed}, buttonFace(context, primary, edge, true));
         states.addState(new int[]{android.R.attr.state_focused}, buttonFace(context, primary, ACCENT, false));
         if (!primary) states.addState(new int[]{android.R.attr.state_selected},
-            plate(context, new int[]{0xfffafbfc, 0xffc8cbd3}, 12, ACCENT));
+            buttonFace(context,true,0xffff4261,false));
         states.addState(new int[0], buttonFace(context, primary, edge, false));
         button.setBackgroundTintList(null);
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(primary ? 0x33fff0d9 : 0x1f871e35), states, null));
         button.setAllCaps(false);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        button.setTextColor(primary ? PAPER : 0xff17181c);
+        button.setTextColor(new ColorStateList(new int[][]{{-android.R.attr.state_enabled},{android.R.attr.state_selected},{}},
+            new int[]{0xff91949f,PAPER,primary?PAPER:0xff17181c}));
         button.setTextSize(16);
         button.setGravity(Gravity.CENTER);
         button.setMinHeight(dp(context, primary ? 54 : 48));
+        button.setMinWidth(0);button.setMinimumWidth(0);
         button.setPadding(dp(context, 12), dp(context, primary ? 10 : 8), dp(context, 12), dp(context, primary ? 13 : 8));
     }
 
     static void roundButton(Button button) {
         Context context = button.getContext();
         StateListDrawable states = new StateListDrawable();
-        int[] face = {0xffe9ebf0, 0xffbec3cd};
-        states.addState(new int[]{android.R.attr.state_focused}, plate(context, face, 24, ACCENT));
-        states.addState(new int[0], plate(context, face, 24, 0xff8d929c));
+        int[] face = {0xfff1f2f5, 0xffc5c7cf};
+        states.addState(new int[]{android.R.attr.state_focused}, plate(context, face, 12, ACCENT));
+        states.addState(new int[0], plate(context, face, 12, 0xff8d929c));
         button.setBackgroundTintList(null);
         button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x1f871e35), states, null));
         button.setTextColor(0xff17181c);
-        button.setTextSize(18);
+        button.setTextSize(22);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         button.setGravity(Gravity.CENTER);
         button.setMinWidth(0);

@@ -24,14 +24,14 @@ test('Java method extraction preserves lambdas, comments, braces and quoted char
 test('JVM fixture generation uses current production methods and needs no Java installation', async () => {
   const {sourceHarnesses, extractJavaMethod} = await harness;
   const fixtures = sourceHarnesses();
-  assert.deepEqual(fixtures.map(f => f.name), ['DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
+  assert.deepEqual(fixtures.map(f => f.name), ['QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
   for (const fixture of fixtures) assert(!fixture.source.includes('/* PRODUCTION_METHODS */'));
   const desk = read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
-  assert(fixtures[4].source.includes(extractJavaMethod(desk, 'private void showStaffMessage(boolean manual)')));
+  assert(fixtures.find(f=>f.name==='StaffMessageInboxTest').source.includes(extractJavaMethod(desk, 'private void showStaffMessage(boolean manual)')));
   const updates = read('android-app/src/main/java/in/sharepass/foundation/AppUpdates.java');
   const window = read('android-app/src/main/java/in/sharepass/foundation/DeskWindow.java');
-  assert(fixtures[1].source.includes(extractJavaMethod(updates, 'private void install(UpdatePolicy.Release release, File file)')));
-  assert(fixtures[2].source.includes(extractJavaMethod(window, 'private DeskGeometry.Area insets(int height)')));
+  assert(fixtures.find(f=>f.name==='AppUpdatesFocusTest').source.includes(extractJavaMethod(updates, 'private void install(UpdatePolicy.Release release, File file)')));
+  assert(fixtures.find(f=>f.name==='DeskWindowInsetsTest').source.includes(extractJavaMethod(window, 'private DeskGeometry.Area insets(int height)')));
 });
 
 test('opening layout remains scrollable and Activity lifecycle forwards update events', async () => {
@@ -43,7 +43,8 @@ test('opening layout remains scrollable and Activity lifecycle forwards update e
   assert.match(opening, /new ScrollView\(this\)/);
   assert.match(opening, /scroll\.setFillViewport\(true\)/);
   assert.match(opening, /scroll\.addView\(stage\)/);
-  assert.match(opening, /showSurface\(scroll,\s*560\)/);
+  assert.match(opening, /opening\.addView\(scroll/);
+  assert.match(opening, /showSurface\(opening,\s*560\)/);
   assert.match(opening, /DeskGeometry\.openingArtHeight\(/);
   assert.match(extractJavaMethod(source, 'protected void onPause()'), /updates\.stop\(\)/);
   assert.match(extractJavaMethod(source, 'protected void onResume()'), /updates\.start\(\)/);
