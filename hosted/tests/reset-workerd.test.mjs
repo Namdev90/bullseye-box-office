@@ -43,6 +43,8 @@ test('Workerd exports and restores complete long rows; reset preserves owner set
   await db.prepare('INSERT INTO sharepass_configured_booths(workspace,id,name,location,poster_token) VALUES(?,?,?,?,?)').bind('foreign-owner','B1','Foreign legacy storage','Elsewhere',crypto.randomUUID()).run();
   await db.prepare('INSERT INTO sharepass_configured_staff(workspace,id,booth_id,name) VALUES(?,?,?,?)').bind('foreign-owner','foreign-staff','B1','Foreign staff').run();
   await db.prepare('INSERT INTO sharepass_configured_devices(workspace,id,staff_id,label,invite,setup_code,invite_expires) VALUES(?,?,?,?,?,?,?)').bind('foreign-owner','foreign-device','foreign-staff','Foreign phone',crypto.randomUUID(),'',Date.now()+60000).run();
+  const foreignToken='F'.repeat(43),foreignDigest=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(foreignToken))).toString('hex');
+  await db.prepare('UPDATE sharepass_configured_devices SET digest=?,session_expires=0 WHERE id=?').bind(foreignDigest,'foreign-device').run();
   const ownDevice=(await db.prepare('SELECT id FROM sharepass_configured_devices WHERE workspace=? LIMIT 1').bind('owner').first()).id;
   for(const device of [ownDevice,'foreign-device'])await db.prepare('INSERT INTO sharepass_android_release_deliveries(version_code,device_id,delivered_at) VALUES(?,?,?)').bind(31,device,Date.now()).run();
   const backup=await call('/api/admin/backup');assert.equal(backup.status,200);
@@ -68,6 +70,8 @@ test('Workerd exports and restores complete long rows; reset preserves owner set
   assert.equal((await call('/api/admin/reset',reset,undefined,'https://foreign.example')).status,403);
   const resetResult=await call('/api/admin/reset',reset);assert.equal(resetResult.status,200);
   const disconnected=await call('/api/context',undefined,asha.token);assert.equal(disconnected.status,401);assert.equal(disconnected.body.register_reset_at,resetResult.body.reset_at);
+  const foreignExpired=await call('/api/context',undefined,foreignToken);assert.equal(foreignExpired.status,401);assert.equal(foreignExpired.body.register_reset_at,0);
+  const unknown=await call('/api/context',undefined,'Z'.repeat(43));assert.equal(unknown.status,401);assert.equal(unknown.body.register_reset_at,0);
   for(const [name,column] of [['sharepass_ledger_deposits','owner'],['sharepass_ledger_codes','owner'],['sharepass_ledger_requests','owner'],['sharepass_configured_staff','workspace'],['sharepass_configured_devices','workspace'],['sharepass_staff_prompts','workspace']])assert.equal((await db.prepare('SELECT count(*) AS n FROM '+name+' WHERE '+column+'=?').bind('owner').first()).n,0);
   assert.equal((await db.prepare('SELECT id FROM sharepass_configured_devices WHERE id=?').bind('foreign-device').first())?.id,'foreign-device');
   assert.equal((await db.prepare('SELECT count(*) AS n FROM sharepass_android_release_deliveries WHERE device_id=?').bind(ownDevice).first()).n,0);

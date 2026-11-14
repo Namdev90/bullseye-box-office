@@ -86,10 +86,17 @@ async function registerResetState(db,owner){
   const row=await db.prepare('SELECT theme,overrides FROM sharepass_code_policy WHERE owner=? AND event=?').bind(owner,RESET_STATE_EVENT).first();
   return row?{at:Number(row.theme)||0,...JSON.parse(row.overrides)}:{at:0,codes:[],requests:[],tickets:[]};
 }
-async function staffReconnectionRequired(env){
+async function staffReconnectionRequired(env,verifier){
+  const digest=await verifierDigest(verifier);
+  const retained=digest?await env.DB.prepare(`SELECT workspace FROM sharepass_configured_devices WHERE digest=?
+    UNION ALL SELECT m.user_id AS workspace FROM sharepass_mobile_sessions m WHERE digest=? AND (
+      EXISTS(SELECT 1 FROM sharepass_ledger_ready WHERE owner=m.user_id) OR
+      EXISTS(SELECT 1 FROM sharepass_workspaces WHERE owner_id=m.user_id) OR
+      EXISTS(SELECT 1 FROM sharepass_owner_passwords WHERE owner_id=m.user_id)) LIMIT 1`).bind(digest,digest).first():null;
   const owner=await env.DB.prepare('SELECT user_id FROM sharepass_staff WHERE email=?').bind(emailAddress(env.SHAREPASS_OWNER_EMAIL)).first();
-  const reset=owner?.user_id?await registerResetState(env.DB,owner.user_id):{at:0};
-  const response=json({error:'Ask the administrator for a new staff setup code.',notExecuted:true,register_reset_at:reset.at},401);
+  const reset=retained?await registerResetState(env.DB,retained.workspace):owner?.user_id?await registerResetState(env.DB,owner.user_id):{at:0};
+  const resetAt=retained||(reset.device_digests||[]).includes(digest)?reset.at:0;
+  const response=json({error:'Ask the administrator for a new staff setup code.',notExecuted:true,register_reset_at:resetAt},401);
   response.headers.set('Set-Cookie',staffCookieHeader('',0));return response;
 }
 async function registerBackup(db){
@@ -106,17 +113,23 @@ async function resetRegister(request,db,staff){
   if(body?.confirmation!=='RESET SHAREPASS'||body?.delete_staff!==true||!staffPromptId(body?.request_id))return error('Confirm the full register and staff reset.',400);
   const before=await registerResetState(db,staff.workspace);
   if(before.request_id===body.request_id)return json({reset:true,reset_at:before.at,replayed:true});
-  const [codes,requests,tickets,memberships]=await db.batch([
+  const foreignIdentities=`SELECT owner AS id FROM sharepass_ledger_ready WHERE owner<>?
+    UNION SELECT owner_id FROM sharepass_workspaces WHERE owner_id<>?
+    UNION SELECT owner_id FROM sharepass_owner_passwords WHERE owner_id<>?
+    UNION SELECT id FROM sharepass_configured_staff WHERE workspace<>?`;
+  const [codes,requests,tickets,memberships,deviceDigests]=await db.batch([
     db.prepare('SELECT code FROM sharepass_ledger_codes WHERE owner=?').bind(staff.workspace),
     db.prepare('SELECT id FROM sharepass_ledger_requests WHERE owner=?').bind(staff.workspace),
     db.prepare('SELECT token FROM sharepass_booth_queue WHERE workspace=?').bind(staff.workspace),
-    db.prepare('SELECT user_id FROM sharepass_staff WHERE user_id IS NOT NULL AND user_id<>?').bind(staff.workspace)
+    db.prepare('SELECT user_id FROM sharepass_staff WHERE user_id IS NOT NULL AND user_id<>?').bind(staff.workspace),
+    db.prepare('SELECT digest FROM sharepass_configured_devices WHERE workspace=? AND digest IS NOT NULL UNION SELECT digest FROM sharepass_mobile_sessions WHERE user_id IN (SELECT user_id FROM sharepass_staff WHERE user_id NOT IN ('+foreignIdentities+'))').bind(staff.workspace,staff.workspace,staff.workspace,staff.workspace,staff.workspace)
   ]);
   const at=Math.max(Date.now(),before.at+1),guard={request_id:body.request_id,
     codes:[...new Set([...(before.codes||[]),...codes.results.map(row=>row.code)])],
     requests:[...new Set([...(before.requests||[]),...requests.results.map(row=>row.id)])],
     tickets:[...new Set([...(before.tickets||[]),...tickets.results.map(row=>row.token)])],
-    memberships:[...new Set([...(before.memberships||[]),...memberships.results.map(row=>row.user_id)])]};
+    memberships:[...new Set([...(before.memberships||[]),...memberships.results.map(row=>row.user_id)])],
+    device_digests:[...new Set([...(before.device_digests||[]),...deviceDigests.results.map(row=>row.digest)])]};
   const statements=[db.prepare(`INSERT INTO sharepass_ledger_guard(ok) VALUES(coalesce((SELECT theme FROM sharepass_code_policy WHERE owner=? AND event=?),'0')=?)`).bind(staff.workspace,RESET_STATE_EVENT,String(before.at))];
   // Only non-identifying replay/code guards survive; deleted customer records cannot be resurrected.
   statements.push(db.prepare('INSERT INTO sharepass_code_policy(owner,event,theme,overrides) VALUES(?,?,?,?) ON CONFLICT(owner,event) DO UPDATE SET theme=excluded.theme,overrides=excluded.overrides').bind(staff.workspace,RESET_STATE_EVENT,String(at),JSON.stringify(guard)));
@@ -125,10 +138,6 @@ async function resetRegister(request,db,staff){
     ...['deposits','codes','collections','requests','claims','failures','audit'].map(name=>['sharepass_ledger_'+name,'owner']),
     ['sharepass_workspaces','owner_id'],...['intakes','booth_queue','receipt_push','staff_prompt_recipients','staff_prompts','web_push','configured_devices','configured_staff','configured_booths','booth_posters'].map(name=>['sharepass_'+name,'workspace'])
   ])statements.push(db.prepare('DELETE FROM '+table+' WHERE '+column+'=?').bind(staff.workspace));
-  const foreignIdentities=`SELECT owner AS id FROM sharepass_ledger_ready WHERE owner<>?
-    UNION SELECT owner_id FROM sharepass_workspaces WHERE owner_id<>?
-    UNION SELECT owner_id FROM sharepass_owner_passwords WHERE owner_id<>?
-    UNION SELECT id FROM sharepass_configured_staff WHERE workspace<>?`;
   statements.push(db.prepare('DELETE FROM sharepass_mobile_sessions WHERE user_id IN (SELECT user_id FROM sharepass_staff WHERE user_id NOT IN ('+foreignIdentities+'))').bind(staff.workspace,staff.workspace,staff.workspace,staff.workspace));
   statements.push(db.prepare('DELETE FROM sharepass_staff WHERE user_id IS NULL OR (user_id<>? AND user_id NOT IN ('+foreignIdentities+'))').bind(staff.workspace,staff.workspace,staff.workspace,staff.workspace,staff.workspace));
   statements.push(db.prepare('INSERT OR IGNORE INTO sharepass_ledger_ready(owner) VALUES(?)').bind(staff.workspace));

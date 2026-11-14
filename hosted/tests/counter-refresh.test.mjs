@@ -37,19 +37,19 @@ function fixture(env={}){
 // Execute the complete counter script and its actual event handlers. This is a
 // DOM/transport model, not browser rendering or device acceptance.
 async function page(f,{storage=new Map(),options={},intercept,context}={}){
-  const nodes=new Map(),calls=[],testHolds=new Map(),events=new Map(),historyEntries=[];
+  const nodes=new Map(),calls=[],testHolds=new Map(),events=new Map(),historyEntries=[],navigations=[];
   const history={state:null,pushState(state){this.state=state;historyEntries.push(state);},replaceState(state){this.state=state;historyEntries[historyEntries.length?historyEntries.length-1:0]=state;}};
   class Node{
     constructor(id){this.id=id;this.value='';this.hidden=false;this.children=[];this.textContent='';this.required=false;this.readOnly=false;this.selectedOptions=[{textContent:'1 day'}];this.classList={add(){},toggle(){}};this.fields=new Map();this.elements=new Proxy({},{get:(_,key)=>{if(!this.fields.has(key))this.fields.set(key,new Node(id+'-'+key));return this.fields.get(key);}});}
-    addEventListener(){} focus(){} requestSubmit(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
+    addEventListener(){} focus(){} requestSubmit(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.textContent='';this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
   }
   const ids=new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
   const node=id=>{assert(ids.has(id),'Actual counter markup must contain #'+id);if(!nodes.has(id))nodes.set(id,new Node(id));return nodes.get(id);};
   const sectionIds=[...html.matchAll(/<section id="([^"]+)"/g)].map(m=>m[1]);
   const document={getElementById:node,querySelector:()=>null,querySelectorAll:selector=>selector==='main>section'?sectionIds.map(node):[],createElement:tag=>new Node(tag),addEventListener(){}};
-  const stored={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
+  const stored={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key),get length(){return storage.size;},key:index=>[...storage.keys()][index]};
   const sandbox={document,testHolds,history,window:{sharePassHold:(button,options)=>{testHolds.set(button.id,options);return {cancel(){},setLabel(){}};},SharePassDrafts:{clear(){},composeLink:()=>new Node('link'),renderDeposit(){}},addEventListener(name,callback){events.set(name,callback);}},navigator:{},crypto,AbortSignal,URL,
-    sessionStorage:stored,location:{origin:'https://fixture.example',assign(){}},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},
+    sessionStorage:stored,location:{origin:'https://fixture.example',assign:path=>navigations.push(path)},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},
     DemoStore:class{passTypes=[{id:'normal',label:'Normal'},{id:'vip',label:'VIP'},{id:'vvip',label:'VVIP'}];},
     sharePassSteps:()=>({show(){}}),sharePassAutoAdvance(){},fetch:async(path,init={})=>{
       const body=init.body?JSON.parse(init.body):undefined;
@@ -64,9 +64,35 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
   await settle();
   const click=async id=>{const result=node(id).onclick();await result;await settle();};
   const submit=async()=>{await node('refresh-code-form').onsubmit({preventDefault(){}});await settle();};
-  return {api,node,calls,storage,stored,click,submit,settle,history,historyEntries,back:state=>events.get('popstate')({state})};
+  return {api,node,calls,storage,stored,click,submit,settle,history,historyEntries,navigations,back:state=>events.get('popstate')({state})};
 }
 const journal=p=>JSON.parse([...p.storage.values()][0]||'null');
+
+test('only a newer authenticated reset rejection clears private tab state; ordinary permission failures retain recovery',async()=>{
+ for(const [status,epoch,cleared] of [[401,undefined,false],[401,10,false],[403,20,false],[401,20,true]]){
+  const f=fixture();try{
+   const context={...(await f.call('/api/context')).body,register_reset_at:10};
+   const p=await page(f,{context,intercept:(path,body,normal)=>path==='/api/verify'?Response.json({error:'Reconnect staff.',notExecuted:true,...(epoch?{register_reset_at:epoch}:{})},{status}):normal()});
+   const data=await receipt(f);p.api.showReceipt(data);p.api.seedRecovery({path:'/api/deposits/old/release',body:{request_id:'saved-old-intent'}});
+   p.storage.set('sharepass-receipt:old','private-ticket');p.storage.set('sharepass-intake:old','private-intake');p.storage.set('sharepass-sound','off');
+   await assert.rejects(p.api.request('/api/verify',{collection_code:'0000'}));
+   assert.equal(p.api.state().receipt===undefined,cleared);assert.equal(p.api.state().recovery===undefined,cleared);
+   assert.equal(p.storage.has('sharepass-pending:'+context.session_key),!cleared);assert.equal(p.storage.has('sharepass-receipt:old'),!cleared);assert.equal(p.storage.has('sharepass-intake:old'),!cleared);
+   assert.equal(p.storage.get('sharepass-sound'),'off');assert.deepEqual(p.navigations,cleared?['/disconnect']:[]);
+   if(cleared){assert.equal(p.node('saved-code').textContent,'');assert.equal(p.node('history-list').children.length,0);}
+  }finally{f.close();}
+ }
+});
+
+test('a successful reply from before a confirmed reset cannot restore an old receipt',async()=>{
+ const f=fixture();try{
+  let resolve;const delayed=new Promise(done=>resolve=done),context={...(await f.call('/api/context')).body,register_reset_at:10};
+  const p=await page(f,{context,intercept:(path,body,normal)=>path==='/api/verify'?(body.collection_code==='0000'?delayed:Response.json({error:'Register reset.',register_reset_at:20},{status:401})):normal()});
+  const old=assert.rejects(p.api.request('/api/verify',{collection_code:'0000'}),/reset/);
+  await assert.rejects(p.api.request('/api/verify',{collection_code:'0001'}));resolve(Response.json({collection_code:'0007'}));await old;
+  assert.equal(p.api.state().receipt,undefined);assert.deepEqual(p.navigations,['/disconnect']);
+ }finally{f.close();}
+});
 
 test('production navigation handles browser Back without replaying custody or restoring a stale transfer screen',async()=>{
  const f=fixture();try{

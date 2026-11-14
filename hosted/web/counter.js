@@ -15,6 +15,8 @@ let previousQueueTokens;
 let historyLoaded=false;
 let resumeHold,resumeHeld=false;
 let navigatingBack=false;
+let registerResetAt=0;
+try{const saved=Number(sessionStorage.getItem('sharepass-register-reset'));if(Number.isSafeInteger(saved)&&saved>0)registerResetAt=saved;}catch{}
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
@@ -137,7 +139,7 @@ async function loadHistory(more=false){
   if(!more&&historyLoaded){renderHistory();return;}
   historyLoading=true;
   const current=staff;
-  byId('history-status').textContent='Loading booth history…';
+  byId('history-status').textContent='Loading staff history…';
   try{
     const result=register?register.state(scope.event_id):await fetchJson('/api/history?limit=100'+
       (more&&historyCursor?'&cursor='+encodeURIComponent(historyCursor):''));
@@ -194,7 +196,7 @@ function renderHistory(){
     return row;
   }));
   byId('history-status').textContent=entries.length?entries.length+' '+(historyFilter==='pending'?'pending handovers':'deposits')+' shown.':
-    historyFilter==='pending'?'No pending handovers at this booth.':'No deposits at this booth yet.';
+    historyFilter==='pending'?'No pending handovers.':'No deposits yet.';
   byId('history-more').hidden=!historyCursor;
 }
 
@@ -258,10 +260,33 @@ byId('select-all-passes').onclick=()=>{
   for(const field of byId('collect-counts').querySelectorAll('input'))field.value=field.max;
 };
 
+function forgetResetRegister(at){
+  if(!Number.isSafeInteger(at)||at<=0||at<=registerResetAt)return false;
+  registerResetAt=at;
+  try{
+    for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(/^sharepass-(?:pending|intake|receipt|staff-reply|admin-reply):/.test(key))sessionStorage.removeItem(key);}
+    sessionStorage.setItem('sharepass-register-reset',String(at));
+  }catch{}
+  resumeHold?.cancel();draft.clear();clearTimeout(queuePollTimer);clearTimeout(timer);
+  receipt=match=pending=recovery=intakeToken=queueToken=undefined;
+  historyData=[];historyPending=[];historyCursor=null;historyLoaded=false;historyLoading=false;
+  staffMessages=[];openStaffMessage=undefined;staffMessageCursor=undefined;seenStaffMessages.clear();uncertainStaffReplies.clear();
+  queueSignature=undefined;previousQueueTokens=undefined;intakeView++;queueView++;viewRevision++;refreshSequence++;view='loading';
+  for(const form of document.querySelectorAll('main form'))form.reset();
+  for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
+  for(const id of ['history-list','queue-list','recovery','depositor-receipt','pickup-update-draft','prepared-depositor-update','share-content','collector-names','saved-code','saved-packet','saved-expiry','handover-people','balance','reserved-people','handover-summary','pickup-customer','slot','queue-name','queue-contact','queue-counts','queue-recipient-list','intake-name','intake-counts'])byId(id).replaceChildren();
+  for(const section of document.querySelectorAll('main>section'))section.hidden=section.id!=='loading';
+  byId('desk-tabs').hidden=true;byId('menu').open=false;
+  byId('access-note').textContent='This register was reset. Connect with a new staff setup code.';
+  location.assign('/disconnect');return true;
+}
+
 async function fetchJson(path,body,signal){
+  const resetAt=registerResetAt;
   const response=await fetch(path,{cache:'no-store',signal,...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
   const result=await response.json();
   if(!response.ok){
+    if(response.status===401)forgetResetRegister(result.register_reset_at);
     const error=new Error(result.error||'The shared register is unavailable.');
     error.notExecuted=result.notExecuted===true;
     error.status=response.status;
@@ -269,6 +294,7 @@ async function fetchJson(path,body,signal){
     error.pickupReferenceRequired=result.pickup_reference_required===true;
     throw error;
   }
+  if(resetAt!==registerResetAt)throw new Error('The register was reset. Reconnect before handling passes.');
   return result;
 }
 
@@ -504,7 +530,7 @@ byId('queue-alerts').onclick=async()=>{
     }
     subscription||=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
     await fetchJson('/api/web-push',{endpoint:subscription.endpoint});
-    status.textContent='Booth notifications are on.';
+    status.textContent='Staff notifications are on.';
     reportBrowserStatus();
   }catch{status.textContent='Browser alerts could not be enabled. Use Refresh / reconnect.';}
 };
@@ -592,7 +618,7 @@ function downloadPosterQr(){
   const url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)],{type:'image/svg+xml'}));
   const anchor=document.createElement('a');
   anchor.href=url;
-  anchor.download='SharePass-booth-QR.svg';
+  anchor.download='SharePass-deposit-QR.svg';
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -1119,6 +1145,7 @@ for(const [id,action] of [['deposit-form',saveDeposit],['lookup-form',findPasses
   });
 }
 function ready(context){
+  if(Number.isSafeInteger(context.register_reset_at)&&context.register_reset_at>registerResetAt){registerResetAt=context.register_reset_at;try{sessionStorage.setItem('sharepass-register-reset',String(registerResetAt));}catch{}}
   historyLoaded=false;
   if(byId('staff-message').open)byId('staff-message').close();
   staffMessages=[];
@@ -1133,7 +1160,7 @@ function ready(context){
   boothQrUrl='';byId('desk-deposit-qr').replaceChildren();
   byId('copy-deposit-link').disabled=true;byId('share-deposit-link').hidden=true;
   byId('admin-link').hidden=!staff.admin;
-  if(staff.booth_label)byId('desk').querySelector('.eyebrow').textContent='SharePass · '+staff.booth_label;
+  byId('desk').querySelector('.eyebrow').textContent=staff.staff_label?'Staff · '+staff.staff_label:'SharePass staff';
   if(staff.internal)byId('signout-link').href='/disconnect';
   else if(staff.owner_password_session)byId('signout-link').onclick=event=>{
     event.preventDefault();

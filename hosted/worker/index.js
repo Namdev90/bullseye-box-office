@@ -240,7 +240,7 @@ export default {async fetch(request,env,ctx){
         }
         if(deviceToken&&!configured){
           const paired=await mobileSession(env.DB,deviceToken);
-          if(!paired)return await staffReconnectionRequired(env);
+          if(!paired)return await staffReconnectionRequired(env,deviceToken);
           if(path==='/api/mobile/logout'&&request.method==='POST'){
             await env.DB.prepare('UPDATE sharepass_mobile_sessions SET revoked=1 WHERE digest=?').bind(paired.digest).run();
             return json({signed_out:true});
@@ -248,7 +248,7 @@ export default {async fetch(request,env,ctx){
           owner=paired.user_id;
           email=paired.email;
         }
-        if(browserToken&&!configured&&!owner)return await staffReconnectionRequired(env);
+        if(browserToken&&!configured&&!owner)return await staffReconnectionRequired(env,browserToken);
       }
       if(path==='/api/push/register'||path==='/api/push/unregister'){
         if(!deviceToken||!configured)return error('Use a paired SharePass device.',401);
