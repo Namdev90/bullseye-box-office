@@ -2,7 +2,7 @@ const EVENT='training-event-001';
 const security={
   'Cache-Control':'no-store',
   'X-Content-Type-Options':'nosniff',
-  'X-SharePass-Version':'38',
+  'X-SharePass-Version':'39',
   'Referrer-Policy':'no-referrer',
 };
 function json(value,status=200){return Response.json(value,{status,headers:security});}
@@ -67,6 +67,10 @@ function validate(body,path,operator,booth='B1'){
   }
   if(typeof body.request_id!=='string'||!/^[a-zA-Z0-9-]{8,100}$/.test(body.request_id))return null;
   const common={...scope,operator,request_id:body.request_id};
+  if((path.endsWith('/release')||path.endsWith('/handover'))&&body.collector_label!==undefined){
+    if(typeof body.collector_label!=='string'||body.collector_label.trim().length>80||/[\u0000-\u001f\u007f]/.test(body.collector_label))return null;
+    common.collector_label=body.collector_label.trim();
+  }
   if(path.endsWith('/updates')){
     const packet=setupText(body.packet_id,40).toUpperCase();
     if(!/^PKT-[A-F0-9]{8}$/.test(packet)||!['none','whatsapp','sms','email'].includes(body.channel))return null;

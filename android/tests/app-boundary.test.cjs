@@ -149,12 +149,14 @@ test('native stock workflows preserve physical verification before confirmation'
  assert(desk.includes('wizard.text("Shelf or slot"'));
  const prepare=desk.slice(desk.indexOf('private void prepare('),desk.indexOf('private void pendingList('));
  assert(prepare.includes('depositor_label'));
- assert(prepare.includes('confirmed.setOnCheckedChangeListener'));
- assert(prepare.includes('finish.setEnabled(false)'));
+ assert(!prepare.includes('confirmed.setOnCheckedChangeListener'));
+ assert(prepare.includes('new HoldButton(finish,handler'));
+ assert(prepare.includes('Choose or enter the collector’s name.'));
  assert(prepare.includes('.put("packet_id",deposit.getString("packet_id"))'));
  assert(prepare.includes('.put("claim_token",result.getString("claim_token"))'));
  assert(prepare.includes('.put("version",deposit.getInt("version"))'));
- assert(prepare.includes('"quantities",amounts),true)'));
+ assert(prepare.includes('.put("collector_label",who)'));
+ assert(prepare.includes('"/release",body,true)'));
  assert(prepare.includes('.put("handover_confirmed", true)'));
  assert(desk.includes('button("Select all available"'));
  assert(desk.includes('name.setAutofillHints(View.AUTOFILL_HINT_NAME)'));

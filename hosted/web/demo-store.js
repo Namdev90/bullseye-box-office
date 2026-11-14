@@ -176,11 +176,11 @@ class DemoStore {
     return {deposit:this.publicDeposit(d),collection:this.clone(c),...(d.update_contact?{depositor_update:this.pickupUpdate(d,c)}:{})};
   }
   pickupUpdate(d,c){
-    const {channel,address,name}=d.update_contact;
+    const {channel,address}=d.update_contact,name=d.update_contact.name||d.depositor_label||'';
     const describe=q=>this.passTypes.filter(type=>q[type.id]>0).map(type=>q[type.id]+' '+type.label).join(' + ');
     const remaining=describe(d.remaining);
-    return {channel,address,subject:'SharePass pickup update',message:
-      'Hi'+(name?' '+name:'')+'! A pickup from your SharePass deposit is complete. We handed over '+describe(c.quantities)+
+    return {channel,address,name,collector_name:c.collector_label||'',subject:'SharePass pickup update',message:
+      'Hi'+(name?' '+name:'')+'! A pickup from your SharePass deposit is complete. We handed over '+describe(c.quantities)+(c.collector_label?' to '+c.collector_label:'')+
       '. '+(remaining?'Still available: '+remaining+'.':'All passes in this deposit have now been collected.')};
   }
   setUpdates(id,b){

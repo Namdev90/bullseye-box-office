@@ -44,3 +44,12 @@ test('current receipt offers the authenticated named WhatsApp update directly wi
   runInNewContext(render+'\nshowReceipt(input);',{byId,input,register:false,show(){},sharePassPhone:()=>false,window:{},draft:{composeLink:(details,label)=>({details,label,classList:{add(){}}})}});
   assert.equal(links[0].details.name,'Taylor Example');
 });
+
+test('confirmed handover shows both roles and names the depositor message button',()=>{
+  const source=readFileSync('web/counter.js','utf8'),render=source.slice(source.indexOf('function showBalance('),source.indexOf('\nconst updatesForm='));
+  const nodes=new Map(),links=[];const byId=id=>{if(!nodes.has(id))nodes.set(id,{replaceChildren(){},append(value){links.push(value);}});return nodes.get(id);};
+  const result={deposit:{depositor_label:'',remaining:{normal:1}},collection:{collector_label:'Riya'},depositor_update:{channel:'whatsapp',address:'12025550110',name:'Taylor Example',message:'Hi Taylor Example! We handed over 2 Normal to Riya.'}};
+  runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> '1 Normal',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
+  assert.match(nodes.get('handover-people').textContent,/Depositor: Taylor Example · Collector: Riya/);
+  assert.equal(links[0].name,'Taylor Example');assert.match(links[0].message,/to Riya/);
+});

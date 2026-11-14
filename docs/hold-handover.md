@@ -1,0 +1,11 @@
+# Two-second handover and actual collector names
+
+The pickup screen uses one deliberate hold action instead of a checkbox followed by Confirm. Staff select quantities and explicitly choose/enter the actual collector. Holding for two seconds attests that the depositor/receipt was matched and these passes were physically handed to that collector. Touch release/movement, changed intent, focus loss, backgrounding and navigation cancel an unfinished hold. Keyboard Space/Enter has the same timing; assistive activation provides a cancellable two-second equivalent without another checkbox or screen.
+
+The progress fill means only that the input gesture is progressing. It never means stock or handover is confirmed. On completion the existing journal saves the confirmed intent before either request. Release and handover retain their existing authoritative validation, request IDs, frozen quantities and recovery. Already-saved confirmed operations recover without asking staff to deliver passes again. Old clients/older pending records remain valid when a collector was not recorded.
+
+`collector_label` already exists in collection/audit JSON; the Worker now validates and passes that optional field through rather than discarding it. New clients require a nonempty name. Lookup can offer names from the matching confirmed intake, scoped by workspace/deposit/booth, without exposing contact numbers or auto-selecting a person. A name is an annotation/physical check, not an authorization credential or per-person stock balance.
+
+Confirmed partial/final drafts greet the depositor by their saved name and say who received the recorded quantities. WhatsApp actions name their target depositor; the completion view shows both roles. Original planned shares are not decremented by guessing who collected, and current group stock remains authoritative. Pending releases produce no completed-handover message.
+
+No schema migration, provider, dependency or new custody API is introduced. Checks cover hold timing/cancellation, short taps, keyboard/assistive input, role labels, invalid names, permission scope, duplicate requests and recovery with the original collector intent. Physical touch/assistive behavior and audible output remain handset acceptance tasks.

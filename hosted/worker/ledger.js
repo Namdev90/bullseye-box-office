@@ -147,7 +147,7 @@ async function currentDepositReceipt(db,staff,id){
     .map(type=>deposit.remaining[type.id]+' '+type.label).join(' + ');
   return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
     recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
-    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,message:'Hi'+((update.name||contact.name)?' '+(update.name||contact.name):'')+'! SharePass deposit update. '+
+    ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:update.name||contact.name||deposit.depositor_label||'',message:'Hi'+((update.name||contact.name||deposit.depositor_label)?' '+(update.name||contact.name||deposit.depositor_label):'')+'! SharePass deposit update. '+
       (remaining?'Still available: '+remaining+'.':'All passes in this deposit have been collected.')}}:{})});
 }
 
@@ -184,7 +184,11 @@ async function ledgerVerify(db,owner,body,legacy,model){
     ledgerStatement(db,'INSERT INTO sharepass_ledger_claims(owner,token,expires,payload) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM sharepass_ledger_deposits WHERE owner=? AND id=? AND revision=?)',
       owner,result.claim_token,claim.expires,ledgerJson(claim),owner,row.id,row.revision)
   ]);
-  return writes[1].meta.changes===1?json(result):error('The balance changed. Verify the code again.',409);
+  if(writes[1].meta.changes!==1)return error('The balance changed. Verify the code again.',409);
+  const contact=await ledgerStatement(db,`SELECT q.payload FROM sharepass_booth_queue q JOIN sharepass_ledger_requests r
+    ON r.owner=q.workspace AND r.id='booth-'||q.token WHERE r.owner=? AND r.deposit_id=? AND q.booth_id=? AND q.confirmed=1 LIMIT 1`,owner,row.id,body.booth_id).first();
+  const people=contact?JSON.parse(contact.payload).recipients:null,collectors=Array.isArray(people)?people:[];
+  return json({...result,collectors:[...new Set(collectors.map(person=>person?.name).filter(name=>typeof name==='string'&&name.trim()&&name.length<=80&&!/[\u0000-\u001f\u007f]/.test(name)).map(name=>name.trim()))].slice(0,20)});
 }
 
 async function mutate(db,owner,path,body,admin,replayOnly=false,legacy=false,theme='',intake=null,allowReuse=false,reconcileHandover=false){

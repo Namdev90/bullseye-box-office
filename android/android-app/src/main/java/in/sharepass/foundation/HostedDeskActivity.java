@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Predicate;
 
 public final class HostedDeskActivity extends Activity {
+    private HoldButton handoverHold;
     private static final String[] KEYS = {"normal", "vip", "vvip", "mip"};
     private static final String[] LABELS = {"Normal", "VIP", "VVIP", "MIP"};
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -212,6 +213,7 @@ public final class HostedDeskActivity extends Activity {
         scheduleQueue(0);
     }
     @Override protected void onPause() {
+        if(handoverHold!=null)handoverHold.cancel();
         DeskSounds.stop();
         foreground = false;
         if(feedbackToast!=null)feedbackToast.cancel();
@@ -227,6 +229,7 @@ public final class HostedDeskActivity extends Activity {
     }
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
+        if(!focused&&handoverHold!=null)handoverHold.cancel();
         if (updates == null) return;
         updates.focusChanged(focused);
         if (focused) updates.offerSetup();
@@ -255,6 +258,7 @@ public final class HostedDeskActivity extends Activity {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
     private void page(String title, String name, Runnable goBack) {
+        if(handoverHold!=null){handoverHold.cancel();handoverHold=null;}
         if (deskInput != null) deskCode = deskInput.getText().toString();
         View focused = getCurrentFocus();
         if (focused instanceof EditText) {
@@ -1367,11 +1371,13 @@ public final class HostedDeskActivity extends Activity {
         if (path.endsWith("/release")) handover(result);
         else if (path.endsWith("/handover")) {
             page("Passes handed over", "done", this::desk);
+            line("Depositor · "+firstNonEmpty(result.optJSONObject("depositor_update")==null?"":result.getJSONObject("depositor_update").optString("name"),result.getJSONObject("deposit").optString("depositor_label"),"Name not recorded"),17,true);
+            line("Collector · "+firstNonEmpty(result.getJSONObject("collection").optString("collector_label"),"Name not recorded"),17,true);
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
                 line(hasAvailable(result.getJSONObject("deposit").getJSONObject("remaining"))?"Depositor update":"Final depositor update",16,true);
-                messageButton(result.getJSONObject("deposit").optString("depositor_label"), () -> compose(
+                messageButton(firstNonEmpty(update.optString("name"),result.getJSONObject("deposit").optString("depositor_label")), () -> compose(
                     update.optString("address"), update.optString("message")));
             }
             button("Done", this::desk, true);
@@ -1568,6 +1574,15 @@ public final class HostedDeskActivity extends Activity {
         String depositor=deposit.optString("depositor_label").trim();line("Depositor · "+(depositor.isEmpty()?"Name not recorded":depositor),21,true);
         String location=deposit.optString("location");
         if(!location.startsWith("Packet ")&&!location.startsWith("PKT-"))line(location,17,false);
+        EditText collector=field("Collector name",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS,80);
+        collector.setHint("Who is collecting these passes now?");
+        JSONArray names=result.optJSONArray("collectors");
+        if(names!=null&&names.length()>0){
+            String[] choices=new String[names.length()+1];for(int i=0;i<names.length();i++)choices[i]=names.optString(i);choices[names.length()]="Enter another name";
+            button("Choose a recorded collector",()->new AlertDialog.Builder(this).setTitle("Who is collecting now?").setItems(choices,(dialog,index)->{
+                if(index<names.length())collector.setText(choices[index]);else{collector.setText("");collector.requestFocus();getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(collector,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);}
+            }).show(),false);
+        }
         int[] selected=new int[KEYS.length];TextView[] values=new TextView[KEYS.length];
         for(int i=0;i<KEYS.length;i++){
             final int index=i,maximum=available.optInt(KEYS[i]);if(maximum==0)continue;
@@ -1589,13 +1604,24 @@ public final class HostedDeskActivity extends Activity {
             LinearLayout.LayoutParams rowBounds=new LinearLayout.LayoutParams(-1,-2);rowBounds.topMargin=dp(8);content.addView(row,rowBounds);
         }
         button("Select all available",()->{for(int i=0;i<KEYS.length;i++)if(values[i]!=null)setQuantity(selected,i,available.optInt(KEYS[i]),values[i]);},false);
-        CheckBox confirmed=new CheckBox(this);confirmed.setText("I confirmed the depositor’s name and handed over these passes.");confirmed.setTextSize(16);confirmed.setTextColor(DeskSurface.INK);confirmed.setMinHeight(dp(48));content.addView(confirmed);
-        Button finish=button("Confirm handover",()->{
-            try{JSONObject amounts=readQuantities(selected);run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",
-                new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts),true),this::stockResult);}
+        line("Hold for two seconds to confirm you matched the depositor and handed these passes to the named collector. Release or move away to cancel.",16,false);
+        Button finish=button("Hold 2 seconds to confirm handover",()->{},true);
+        handoverHold=new HoldButton(finish,handler,()->{
+            if(busy||!foreground)throw new IllegalStateException("Wait for the current action to finish.");
+            String who=collector.getText().toString().trim();
+            if(who.isEmpty()||who.length()>80||who.matches("(?s).*[\\x00-\\x1f\\x7f].*"))throw new IllegalArgumentException("Choose or enter the collector’s name.");
+            try{return who+"\n"+readQuantities(selected).toString();}catch(Exception invalid){throw new IllegalArgumentException(invalid.getMessage());}
+        },()->{
+            try{JSONObject amounts=readQuantities(selected);String who=collector.getText().toString().trim();
+                JSONObject body=new JSONObject().put("packet_id",deposit.getString("packet_id")).put("claim_token",result.getString("claim_token")).put("version",deposit.getInt("version")).put("quantities",amounts).put("collector_label",who);
+                run(()->client.stockChange("/api/deposits/"+deposit.getString("id")+"/release",body,true),this::stockResult);}
             catch(Exception error){note(error.getMessage());}
-        },true);
-        finish.setEnabled(false);confirmed.setOnCheckedChangeListener((button,checked)->finish.setEnabled(checked));
+        },this::note);
+        collector.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence value,int start,int count,int after){}
+            public void onTextChanged(CharSequence value,int start,int before,int count){if(handoverHold!=null)handoverHold.cancel();String who=value.toString().trim();finish.setText(who.isEmpty()?"Hold 2 seconds to confirm handover":"Hold 2 seconds — hand over to "+who);}
+            public void afterTextChanged(Editable value){}
+        });
     }
     private void speakDigits(String value){
         android.view.accessibility.AccessibilityManager access=getSystemService(android.view.accessibility.AccessibilityManager.class);
@@ -1613,8 +1639,10 @@ public final class HostedDeskActivity extends Activity {
         quantities.setBackground(DeskSurface.panel(this));
         quantities.setPadding(dp(14), dp(12), dp(14), dp(12));
         line("Confirm only after the collector has the passes. If they already received them, confirm without handing them over again.", 17, false);
-        button("Confirm handover", () -> run(() -> client.stockChange("/api/collections/" + collection.getString("id") + "/handover",
-            new JSONObject().put("version", collection.getInt("version")).put("handover_confirmed", true)), this::stockResult), true);
+        line("Collector · "+firstNonEmpty(collection.optString("collector_label"),"Name not recorded on this older handover"),17,true);
+        Button finish=button("Hold 2 seconds to confirm handover",()->{},true);
+        handoverHold=new HoldButton(finish,handler,()->{if(busy||!foreground)throw new IllegalStateException("Wait for the current action.");return collection.toString();},()->run(() -> client.stockChange("/api/collections/" + collection.getString("id") + "/handover",
+            new JSONObject().put("version", collection.getInt("version")).put("handover_confirmed", true)), this::stockResult),this::note);
     }
     private void pendingList(JSONObject result) throws Exception {
         JSONArray pending = result.getJSONArray("deposits");

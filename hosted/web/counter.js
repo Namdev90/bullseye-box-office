@@ -13,11 +13,12 @@ let staffMessageCursor;
 let deskMode="deposit",boothQrUrl="",queuePollTimer,historyData=[],historyFilter="all",historyCursor,historyLoading=false,historyPending=[];
 let previousQueueTokens;
 let historyLoaded=false;
+let handoverHold,resumeHold,handoverHeld=false,resumeHeld=false;
 const passTypes = freshRegister().passTypes;
 const draft = window.SharePassDrafts;
 const categories = counts=>Object.hasOwn(counts||{},'mip')?[...passTypes,{id:'mip',label:'MIP'}]:passTypes;
 const balance = counts => categories(counts).filter(({id})=>counts[id]).map(({id,label})=>counts[id]+' '+label).join(' · ') || 'No passes remaining';
-const wizards=Object.fromEntries(['queue-review','intake-review','deposit','collect'].map(id=>{
+const wizards=Object.fromEntries(['queue-review','intake-review','deposit'].map(id=>{
   const form=byId(id+'-form');
   return [id,sharePassSteps(form,{validate(page){
     byId('error').textContent='';
@@ -35,6 +36,7 @@ const wizards=Object.fromEntries(['queue-review','intake-review','deposit','coll
 }));
 
 function show(id){
+  handoverHold?.cancel();resumeHold?.cancel();handoverHeld=resumeHeld=false;
   viewRevision++;
   if(id!=='desk'&&byId('staff-message').open)byId('staff-message').close();
   if(view==='intake'){
@@ -221,6 +223,27 @@ const inlineLookup=byId('desk-code-form');
 inlineLookup.onsubmit=event=>{event.preventDefault();perform(()=>findPasses(inlineLookup.elements.code.value));};
 const pickupForm=byId('collect-form');
 const lookupForm=byId('lookup-form');
+function collectorName(){
+  const name=pickupForm.elements.collector_label.value.trim();
+  if(!name||name.length>80||/[\u0000-\u001f\u007f]/.test(name))throw new Error('Choose or enter the name of the person collecting these passes.');
+  return name;
+}
+function handoverReady(){
+  if(busy||recovery||!match)return false;
+  if(pickupForm.reportValidity&&!pickupForm.reportValidity())return false;
+  collectorName();const quantities=readCounts(pickupForm);
+  if(!Object.values(quantities).some(value=>Number.isInteger(value)&&value>0))throw new Error('Choose at least one pass.');
+  return true;
+}
+handoverHold=window.sharePassHold(byId('hold-handover'),{
+  ready:handoverReady,signature:()=>JSON.stringify([collectorName(),readCounts(pickupForm),match?.claim_token]),
+  confirm:()=>{handoverHeld=true;pickupForm.requestSubmit();},status:byId('handover-hold-status')
+});
+resumeHold=window.sharePassHold(byId('confirm'),{
+  ready:()=>!busy&&!recovery&&!!pending,signature:()=>JSON.stringify(pending),
+  confirm:()=>{resumeHeld=true;perform(demoAction(confirm));},status:byId('resume-hold-status')
+});
+pickupForm.addEventListener('input',()=>{handoverHold.cancel();handoverHeld=false;handoverHold.setLabel('Hold 2 seconds'+(pickupForm.elements.collector_label.value.trim()?' — hand over to '+pickupForm.elements.collector_label.value.trim():' to confirm handover'));});
 byId('select-all-passes').onclick=()=>{
   for(const field of byId('collect-counts').querySelectorAll('input'))field.value=field.max;
 };
@@ -785,6 +808,8 @@ async function findPasses(code=lookupForm.elements.code.value){
   }
   if(!match.claim_token) throw new Error('This packet is stored at another counter.');
   byId('collect-form').reset();
+  byId('collector-names').replaceChildren(...(match.collectors||[]).map(name=>{const option=document.createElement('option');option.value=name;return option;}));
+  byId('handover-hold-status').textContent='';handoverHold.setLabel('Hold 2 seconds to confirm handover');
   byId('pickup-location').hidden=false;
   byId('slot').textContent = /^Packet |^PKT-/.test(pickupLocation(match.deposit))?'':pickupLocation(match.deposit);
   byId('pickup-customer').textContent=match.deposit.depositor_label||'Group pickup';
@@ -795,9 +820,10 @@ async function findPasses(code=lookupForm.elements.code.value){
 
 async function reserve(){
   const form = byId('collect-form');
-  if(!form.elements.name_confirmed.checked)throw new Error('Confirm the depositor’s name and physical handover.');
+  if(!handoverHeld)throw new Error('Hold the handover button for two seconds after checking the depositor and collector.');
+  handoverHeld=false;
   const path='/api/deposits/'+match.deposit.id+'/release',body={
-    packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form)
+    packet_id:match.deposit.packet_id,claim_token:match.claim_token,version:match.deposit.version,quantities:readCounts(form),collector_label:collectorName()
   };
   if(register)return finishDirectHandover(await request(path,body));
   if(recovery)throw new Error('Recover the last action first.');
@@ -816,7 +842,7 @@ async function reserve(){
 
 async function finishDirectHandover(result){
   const collection=result.collection;
-  if(register){pending=collection;return confirm();}
+  if(register){pending=collection;resumeHeld=true;return confirm();}
   const action={path:'/api/collections/'+collection.id+'/handover',body:{version:collection.version,handover_confirmed:true,request_id:crypto.randomUUID()}};
   setRecovery(action);showBalance(await submit(action));
   window.sharePassToast?.('Handover confirmed.');
@@ -824,21 +850,24 @@ async function finishDirectHandover(result){
 
 function showHandover(result){
   pending = result.collection;
-  byId('handover-summary').textContent = balance(pending.quantities)+' · '+pickupLocation(result.deposit);
+  byId('handover-summary').textContent = balance(pending.quantities)+' · '+pickupLocation(result.deposit)+(pending.collector_label?' · Collector: '+pending.collector_label:' · Collector name not recorded on this older handover.');
   show('handover');
 }
 
 async function confirm(){
+  if(!resumeHeld)throw new Error('Hold the handover button for two seconds to confirm this recorded handover.');
+  resumeHeld=false;
   showBalance(await request('/api/collections/'+pending.id+'/handover',{version:pending.version,handover_confirmed:true}));
   window.sharePassToast?.('Handover confirmed.');
 }
 
 function showBalance(result){
+  byId('handover-people').textContent='Depositor: '+(result.depositor_update?.name||result.deposit.depositor_label||'Name not recorded')+' · Collector: '+(result.collection?.collector_label||'Name not recorded');
   byId('balance').textContent = balance(result.deposit.remaining);
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();
   if(result.depositor_update?.channel==='whatsapp'&&sharePassPhone(result.depositor_update.address)){
-    compose.append(draft.composeLink({...result.depositor_update,name:result.deposit.depositor_label||result.depositor_update.name},Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
+    compose.append(draft.composeLink({...result.depositor_update,name:result.depositor_update.name||result.deposit.depositor_label},Object.values(result.deposit.remaining).some(Boolean)?'Depositor update':'Final depositor update'));
   }
   show('done');
 }
@@ -897,10 +926,9 @@ const steps = [
   ()=>{document.querySelector('.qr-scan')?.close();openLookup();byId('lookup-form').elements.code.value = receipt.collection_code;},
   findPasses,
   ()=>{byId('collect-form').elements.packet.value=receipt.deposit.packet_id;},
-  ()=>wizards.collect.show(0),
+  ()=>{show('collect');byId('collect-form').elements.collector_label.value='Riya';},
   ()=>setCounts('collect',{normal:2,vip:1}),
-  reserve,
-  confirm
+  ()=>{if(register)handoverHeld=true;return reserve();}
 ];
 
 function schedule(){
@@ -1053,7 +1081,6 @@ byId('poster-open').onclick = ()=>perform(openBoothPoster);
 byId('poster-print').onclick = ()=>window.print();
 byId('poster-download').onclick = downloadPosterQr;
 byId('queue-review-form').onsubmit = event=>{event.preventDefault();perform(confirmQueueDraft);};
-byId('confirm').onclick = () => perform(demoAction(confirm));
 byId('check-intake').onclick=()=>{if(intakeToken)perform(()=>pollIntake(intakeView));};
 byId('intake-manual').onclick = () => manualIntake();
 byId('intake-correct').onclick = () => manualIntake(intakeCounts);

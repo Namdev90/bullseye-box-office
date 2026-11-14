@@ -37,17 +37,17 @@ function fixture(env={}){
 // Execute the complete counter script and its actual event handlers. This is a
 // DOM/transport model, not browser rendering or device acceptance.
 async function page(f,{storage=new Map(),options={},intercept,context}={}){
-  const nodes=new Map(),calls=[];
+  const nodes=new Map(),calls=[],testHolds=new Map();
   class Node{
     constructor(id){this.id=id;this.value='';this.hidden=false;this.children=[];this.textContent='';this.required=false;this.readOnly=false;this.selectedOptions=[{textContent:'1 day'}];this.classList={add(){},toggle(){}};this.fields=new Map();this.elements=new Proxy({},{get:(_,key)=>{if(!this.fields.has(key))this.fields.set(key,new Node(id+'-'+key));return this.fields.get(key);}});}
-    addEventListener(){} focus(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
+    addEventListener(){} focus(){} requestSubmit(){} append(...children){this.children.push(...children);} replaceChildren(...children){this.children=children;} querySelector(){return new Node('child');} querySelectorAll(){return [];} reset(){for(const n of this.fields.values())n.value='';}
   }
   const ids=new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
   const node=id=>{assert(ids.has(id),'Actual counter markup must contain #'+id);if(!nodes.has(id))nodes.set(id,new Node(id));return nodes.get(id);};
   const sectionIds=[...html.matchAll(/<section id="([^"]+)"/g)].map(m=>m[1]);
   const document={getElementById:node,querySelector:()=>null,querySelectorAll:selector=>selector==='main>section'?sectionIds.map(node):[],createElement:tag=>new Node(tag),addEventListener(){}};
   const stored={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
-  const sandbox={document,window:{SharePassDrafts:{clear(){},composeLink:()=>new Node('link'),renderDeposit(){}},addEventListener(){}},navigator:{},crypto,AbortSignal,URL,
+  const sandbox={document,testHolds,window:{sharePassHold:(button,options)=>{testHolds.set(button.id,options);return {cancel(){},setLabel(){}};},SharePassDrafts:{clear(){},composeLink:()=>new Node('link'),renderDeposit(){}},addEventListener(){}},navigator:{},crypto,AbortSignal,URL,
     sessionStorage:stored,location:{origin:'https://fixture.example',assign(){}},getComputedStyle:()=>({getPropertyValue:()=>''}),setTimeout:()=>0,clearTimeout(){},
     DemoStore:class{passTypes=[{id:'normal',label:'Normal'},{id:'vip',label:'VIP'},{id:'vvip',label:'VVIP'}];},
     sharePassSteps:()=>({show(){}}),sharePassAutoAdvance(){},fetch:async(path,init={})=>{
@@ -57,7 +57,7 @@ async function page(f,{storage=new Map(),options={},intercept,context}={}){
       const normal=()=>f.send(path,body,options);
       return intercept?intercept(path,body,normal):normal();
     }};
-  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,reserve,preparePickup:value=>{match=value;},state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
+  runInNewContext(source+'\nglobalThis.testCounter={showReceipt,show,openRefresh,recover,request,runRefresh,ready,reserve,armHandover:()=>testHolds.get("hold-handover").confirm(),preparePickup:value=>{match=value;byId("collect-form").elements.collector_label.value="Riya";},state:()=>({receipt,recovery,view,busy}),setStorage:value=>{sessionStorage=value;}};',sandbox,{filename:'counter.js'});
   const api=sandbox.testCounter;
   async function settle(){for(let i=0;i<100;i++){await Promise.resolve();if(!api.state().busy&&api.state().view!=='loading'){await Promise.resolve();return;}}throw Error('Counter did not settle');}
   await settle();
@@ -78,11 +78,12 @@ test('one-button handover recovers either lost reply without another release or 
         return response;
       }});
       p.api.preparePickup(claim);
-      const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+      const form=p.node('collect-form');p.api.armHandover();
       form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
       await assert.rejects(p.api.reserve());assert(journal(p));
       await p.api.recover();assert.equal(p.api.state().view,'done');assert.equal(journal(p),null);
       assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,1);
+      assert.equal(JSON.parse(f.sqlite.prepare('SELECT payload FROM sharepass_ledger_collections').get().payload).collector_label,'Riya');
       assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").get().n,1);
       for(const suffix of ['/release','/handover']){
         const ids=p.calls.filter(call=>call.path.endsWith(suffix)).map(call=>call.body.request_id);
@@ -95,10 +96,10 @@ test('one-button handover recovers either lost reply without another release or 
 test('handover waits for name confirmation and preserves intent if the second journal write fails',async()=>{
   const f=fixture();try{
     const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body,p=await page(f);
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=false;
+    p.api.preparePickup(claim);const form=p.node('collect-form');
     form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
     await assert.rejects(p.api.reserve(),/depositor/);assert.equal(journal(p),null);
-    form.elements.name_confirmed.checked=true;
+    p.api.armHandover();
     p.api.setStorage({...p.stored,setItem(key,value){if(JSON.parse(value).path.endsWith('/handover'))throw new Error('Synthetic journal failure');return p.stored.setItem(key,value);}});
     await assert.rejects(p.api.reserve(),/Recover/);assert.equal(journal(p).finalize,true);
     p.api.setStorage(p.stored);await p.api.recover();assert.equal(journal(p),null);
@@ -110,7 +111,7 @@ test('a definitively unexecuted expired-claim recovery releases its journal with
   const f=fixture();try{
     const data=await receipt(f),claim=(await f.call('/api/verify',{collection_code:data.collection_code})).body;let lost=true;
     const p=await page(f,{intercept:async(path,body,normal)=>{if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Request never reached server');}return normal();}});
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+    p.api.preparePickup(claim);const form=p.node('collect-form');p.api.armHandover();
     form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
     await assert.rejects(p.api.reserve());assert(journal(p));
     const row=f.sqlite.prepare('SELECT payload FROM sharepass_ledger_claims WHERE token=?').get(claim.claim_token);
@@ -128,7 +129,7 @@ test('expired authentication cannot discard a committed pickup while its respons
       if(unauthorized&&path.endsWith('/release'))return Response.json({error:'Reconnect the original staff account.',notExecuted:true},{status:401});
       const response=await normal();if(lost&&path.endsWith('/release')){lost=false;throw new TypeError('Committed reply lost');}return response;
     }});
-    p.api.preparePickup(claim);const form=p.node('collect-form');form.elements.name_confirmed.checked=true;
+    p.api.preparePickup(claim);const form=p.node('collect-form');p.api.armHandover();
     form.querySelectorAll=()=>[{name:'normal',valueAsNumber:1},{name:'vip',valueAsNumber:0},{name:'vvip',valueAsNumber:0}];
     await assert.rejects(p.api.reserve());const original=journal(p);unauthorized=true;
     await assert.rejects(p.api.recover(),/Reconnect/);assert.deepEqual(journal(p),original);
