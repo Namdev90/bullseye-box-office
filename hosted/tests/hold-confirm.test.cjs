@@ -3,6 +3,11 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {readFileSync}=require('node:fs');
 const {runInNewContext}=require('node:vm');
+test('collector input belongs to pickup, never to code recovery, with one hold action and no checkbox',()=>{
+  const html=readFileSync('web/counter.html','utf8'),form=id=>new RegExp('<form id="'+id+'">([\\s\\S]*?)<\\/form>').exec(html)[1];
+  assert.match(form('collect-form'),/name="collector_label"[^>]*required/);assert(!form('collect-form').includes('name_confirmed'));
+  assert.equal((form('collect-form').match(/id="hold-handover"/g)||[]).length,1);assert(!form('refresh-code-form').includes('collector_label'));
+});
 function fixture(){
   let now=0,next=0,confirmed=0,state='Riya:2',ready=true;const tasks=new Map(),events={},pageEvents={};
   const button={textContent:'Hold 2 seconds to confirm',disabled:false,isConnected:true,listeners:{},classList:{add(){},remove(){}},

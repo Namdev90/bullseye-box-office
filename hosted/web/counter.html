@@ -149,8 +149,6 @@
       <form id="refresh-code-form">
         <p>The previous refresh was interrupted. Recover the same request before changing any passes.</p>
         <input name="packet" type="hidden">
-        <label class="field">Collector name <input name="collector_label" id="collector-name" list="collector-names" autocomplete="off" maxlength="80" required aria-describedby="collector-hint"></label>
-        <datalist id="collector-names"></datalist><p id="collector-hint">Choose a recorded name or enter who is collecting now.</p>
         <label class="field" id="refresh-original-code" hidden>Original collection code before the interrupted refresh
           <input name="code" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" autocomplete="off" spellcheck="false">
         </label>
@@ -170,6 +168,8 @@
       <fieldset data-wizard-page><legend>Review this pickup</legend>
         <div class="location" id="pickup-location"><p>Pickup details</p><strong id="slot"></strong><p id="pickup-customer"></p></div>
         <input name="packet" type="hidden">
+        <label class="field">Collector name <input name="collector_label" id="collector-name" list="collector-names" autocomplete="off" maxlength="80" required aria-describedby="collector-hint"></label>
+        <datalist id="collector-names"></datalist><p id="collector-hint">Choose a recorded name or enter who is collecting now.</p>
         <p>Choose the passes you are handing over now.</p><div id="collect-counts"></div><button type="button" id="select-all-passes">Select all available</button>
         <p id="handover-hold-hint">Hold for two seconds to confirm you matched the depositor and handed these passes to the named collector. Release to cancel.</p>
         <p class="hold-assistive" id="hold-keyboard-hint">Hold Space or Enter for two seconds. Assistive activation starts a two-second countdown; activate again to cancel.</p>
