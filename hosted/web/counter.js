@@ -735,8 +735,9 @@ function showReceipt(result,privateIntake=false){
   byId('pickup-updates-open').hidden=Boolean(register);
   byId('refresh-saved-code').hidden=Boolean(register);
   byId('depositor-receipt').replaceChildren();
-  if(receipt.depositor_receipt){
-    const link=draft.composeLink({...receipt.depositor_receipt,name:receipt.depositor_name},'Send receipt to depositor');
+  const depositorMessage=receipt.depositor_receipt||(receipt.depositor_update?.channel==='whatsapp'?receipt.depositor_update:null);
+  if(depositorMessage){
+    const link=draft.composeLink({...depositorMessage,name:receipt.depositor_name||receipt.deposit.depositor_label},receipt.depositor_receipt?'Send receipt to depositor':'Depositor update');
     link.classList.add('whatsapp-action');
     byId('depositor-receipt').append(link);
   }

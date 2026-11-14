@@ -334,7 +334,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'37');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'38');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -342,7 +342,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js?v=37-'));
+  assert((await signed.text()).includes('src="/counter.js?v=38-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });

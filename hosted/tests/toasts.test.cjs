@@ -30,3 +30,17 @@ test('viewing current or completed history receipts does not announce a new cust
     window:{sharePassToast:message=>toasts.push(message)},byId,input,register:false,show(){},balance:()=>'',sharePassPhone:()=>false});
   assert.deepEqual(toasts,[]);assert.equal(byId('saved-code').textContent,'0007');
 });
+
+test('current receipt offers the authenticated named WhatsApp update directly without announcing a new deposit',()=>{
+  const source=readFileSync('web/counter.js','utf8');
+  const render=source.slice(source.indexOf('function showReceipt('),source.indexOf('\nfunction openShare('));
+  const elements=new Map(),links=[],toasts=[];
+  const byId=id=>{if(!elements.has(id))elements.set(id,{replaceChildren(){},append(link){links.push(link);}});return elements.get(id);};
+  const input={collection_code:'0007',depositor_name:'Taylor Example',deposit:{depositor_label:'Taylor Example'},depositor_update:{channel:'whatsapp',address:'12025550123',message:'Still available: 4 Normal.'}};
+  runInNewContext(render+'\nshowReceipt(input);',{byId,input,register:false,show(){},sharePassPhone:()=>false,
+    window:{sharePassToast:text=>toasts.push(text)},draft:{composeLink:(details,label)=>({details,label,classList:{add(){}}})}});
+  assert.equal(links.length,1);assert.equal(links[0].details.name,'Taylor Example');assert.equal(links[0].details.address,'12025550123');assert.equal(links[0].label,'Depositor update');assert.equal(toasts.length,0);
+  delete input.depositor_name;links.length=0;
+  runInNewContext(render+'\nshowReceipt(input);',{byId,input,register:false,show(){},sharePassPhone:()=>false,window:{},draft:{composeLink:(details,label)=>({details,label,classList:{add(){}}})}});
+  assert.equal(links[0].details.name,'Taylor Example');
+});
