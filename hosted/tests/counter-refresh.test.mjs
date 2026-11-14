@@ -303,7 +303,7 @@ test('expired session rejection retains an uncertain journal, and another staff 
   }finally{f.close();}
 });
 
-test('recovery endpoint is exact-operation and staff/booth/workspace scoped, read-only, and rejects stale replacements',async()=>{
+test('recovery endpoint is exact-operation and original-staff/workspace scoped, read-only, and rejects stale replacements',async()=>{
   const f=fixture();try{
     const original=await f.pair('Original','A'),peer=await f.pair('Peer','B');
     const data=await receipt(f,original.options),body={request_id:crypto.randomUUID(),packet_id:data.deposit.packet_id,collection_code:data.collection_code};
@@ -320,7 +320,7 @@ test('recovery endpoint is exact-operation and staff/booth/workspace scoped, rea
     const staffId=original.context.session_key;
     const booth=(await f.call('/api/admin/setup',{action:'booth',name:'Other booth',location:'Elsewhere'})).body.booths.find(b=>b.name==='Other booth');
     f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run(booth.id,staffId);
-    assert.equal((await f.call(recoverPath,saved,original.options)).status,404);
+    assert.equal((await f.call(recoverPath,saved,original.options)).status,200);
     f.sqlite.prepare('UPDATE sharepass_configured_staff SET booth_id=? WHERE id=?').run('B1',staffId);
     f.sqlite.prepare('INSERT INTO sharepass_configured_booths(workspace,id,name,location,poster_token) VALUES(?,?,?,?,?)').run('other-workspace','B1','Other workspace','Elsewhere',crypto.randomUUID());
     f.sqlite.prepare('UPDATE sharepass_configured_devices SET workspace=? WHERE id=?').run('other-workspace',original.id);

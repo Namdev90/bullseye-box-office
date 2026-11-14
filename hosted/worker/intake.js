@@ -13,14 +13,12 @@ function intakeFields(body){
 
 async function startIntake(db,staff,origin){
   const booth=staff.booth_id||'B1';
-  if((await boothConfiguration(db,staff.workspace,booth))?.archived)return error('This booth is archived and is not accepting new deposits.',409);
   const now=Date.now(),token=crypto.randomUUID(),expires_at=now+INTAKE_LIFETIME_MS;
   await db.prepare('DELETE FROM sharepass_intakes WHERE expires_at<=?').bind(now-INTAKE_RETRY_MS).run();
   const created=await db.prepare(`INSERT INTO sharepass_intakes(token,workspace,operator,expires_at)
     SELECT ?,?,?,? WHERE (SELECT count(*) FROM sharepass_intakes WHERE workspace=? AND operator=? AND confirmed=0 AND expires_at>?)<12
-      AND NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1)`)
-    .bind(token,staff.workspace,staff.operator,expires_at,staff.workspace,staff.operator,now,staff.workspace,booth).run();
-  if(created.meta.changes!==1&&(await boothConfiguration(db,staff.workspace,booth))?.archived)return error('This booth is archived and is not accepting new deposits.',409);
+`)
+    .bind(token,staff.workspace,staff.operator,expires_at,staff.workspace,staff.operator,now).run();
   return created.meta.changes===1?json({token,url:origin+'/intake/'+token,expires_at})
     :error('Too many deposit QR codes are waiting. Finish an open deposit or wait for its QR to expire.',429);
 }
@@ -34,19 +32,17 @@ async function publicIntake(request,db,token,origin){
   const row=await db.prepare(lookup).bind(token,now).first();
   if(!row)return intakeUnavailable();
   const expires_at=row.expires_at;
-  if(request.method==='GET')return json({status:row.confirmed?'confirmed':row.payload?'submitted':row.archived?'closed':'waiting',expires_at});
+  if(request.method==='GET')return json({status:row.confirmed?'confirmed':row.payload?'submitted':'waiting',expires_at});
   if(request.method!=='POST')return error('Page not found.',404);
   const fields=intakeFields(await bodyJson(request));
   if(!fields)return error('Check your name and enter at least one pass.',400);
   const payload=JSON.stringify(fields);
-  const saved=await db.prepare(`UPDATE sharepass_intakes SET payload=? WHERE token=? AND expires_at>? AND payload IS NULL AND confirmed=0
-    AND NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1)`)
-    .bind(payload,token,now,row.workspace,row.booth_id).run();
+  const saved=await db.prepare('UPDATE sharepass_intakes SET payload=? WHERE token=? AND expires_at>? AND payload IS NULL AND confirmed=0')
+    .bind(payload,token,now).run();
   if(saved.meta.changes===1)return json({status:'submitted',expires_at});
   const latest=await db.prepare(lookup).bind(token,Date.now()).first();
   if(!latest)return intakeUnavailable();
   if(latest.confirmed)return json({status:'confirmed',expires_at});
-  if(latest.archived&&!latest.payload)return error('This booth is archived and is not accepting new deposits.',409);
   return latest.payload===payload?json({status:'submitted',expires_at}):error('This form has already been submitted. Ask staff if you need to make a change.',409);
 }
 
@@ -69,7 +65,7 @@ async function staffIntake(request,db,staff,token,confirm,theme,allowCodeReuse){
   if(!body)return error('Enter the shelf and confirm that you physically received the passes.',400);
   body.depositor_label=manual?'':fields.name;
   // The register’s idempotency key is fixed per intake, so concurrent confirmation creates one deposit.
-  const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{token,submitted:!!fields},allowCodeReuse);
+  const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{token,submitted:!!fields},allowCodeReuse,false,staff.name,staff);
   if(result.ok&&(await result.clone().json()).replayed){
     try{await db.prepare('UPDATE sharepass_intakes SET confirmed=1 WHERE token=?').bind(token).run();}
     catch{/* The deposit receipt is already committed. */}

@@ -11,13 +11,13 @@ async function withLiveReceipt(action){
     const cache=await caches.open(cacheName);
     const receipt=await (await cache.match(scope))?.json();
     const path=receipt?.path;
-    const match=typeof path==='string'&&path.match(/^\/booth\/([a-f0-9-]{36})#receipt=([a-f0-9-]{36})$/);
+    const match=typeof path==='string'&&path.match(/^\/(?:booth\/([a-f0-9-]{36})|deposit)#receipt=([a-f0-9-]{36})$/);
     if(!match)return;
     const subscription=await self.registration.pushManager.getSubscription();
     if(!subscription||self.Notification?.permission!=='granted')return;
     let result;
     try{
-      const response=await fetch('/api/public/booth/'+match[1]+'/alerts',{
+      const response=await fetch((match[1]?'/api/public/booth/'+match[1]:'/api/public/deposit')+'/alerts',{
         method:'POST',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000),
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({action:'status',ticket:match[2],endpoint:subscription.endpoint})

@@ -38,11 +38,13 @@
         <p id="customer-ready" class="customer-ready" role="status" hidden>✓ Ready to send</p>
       </details>
       </fieldset>
-      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to booth</button></div>
+      <div class="wizard-nav"><button id="send-customer" class="primary" data-wizard-next>Send to staff</button></div>
       <p class="intake-hint">Confirmation appears here automatically. Allow notifications when asked to receive a receipt alert.</p>
     </form>
     <section id="customer-receipt" class="stack" hidden aria-label="Deposit receipt">
       <p id="receipt-state" role="status"></p>
+      <div id="confirmation-wait" class="confirmation-wait" hidden><span class="waiting-spinner" aria-hidden="true"></span><p>Please wait while staff check and confirm your passes. Your code and collector message will appear here automatically.</p></div>
+      <p id="receipt-people" class="receipt-people"></p>
       <div id="receipt-share" class="stack"></div>
       <p class="quiet-status" id="receipt-sync-status" role="status">Checking for staff confirmation automatically…</p>
       <button id="check-receipt" type="button" hidden>Refresh receipt</button>
@@ -65,5 +67,6 @@
 </template>
 <script defer src="/phone.js"></script><script defer src="/steps.js"></script>
 <script defer src="/share-drafts.js"></script>
+<script defer src="/vendor/sharepass-qr.js"></script>
 <script defer src="/intake.js"></script>
 </body></html>

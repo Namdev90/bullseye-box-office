@@ -247,9 +247,6 @@ public final class HostedDeskActivity extends Activity {
     @SuppressWarnings("deprecation") @Override public void onBackPressed() { goBack(); }
     private void goBack() { if (!busy && back != null) back.run(); }
 
-    private String boothLabel() {
-        return context == null || context.isNull("booth_label") ? "" : context.optString("booth_label").trim();
-    }
     private int dp(int value) { return DeskSurface.dp(this, value); }
     private void releaseQr() {
         if (qr == null) return;
@@ -305,9 +302,8 @@ public final class HostedDeskActivity extends Activity {
             toolbar.addView(previous, new LinearLayout.LayoutParams(dp(48), dp(48)));
         }
         TextView label = new TextView(this);
-        String booth = boothLabel();
         String staffName=context==null?"":context.optString("staff_label","");
-        label.setText(booth.isEmpty()?"SharePass":booth+(staffName.isEmpty()?"":" · "+staffName));
+        label.setText(staffName.isEmpty()?"SharePass":"Staff · "+staffName);
         label.setTextColor(DeskSurface.MUTED);
         label.setTextSize(12);
         label.setMaxLines(2);
@@ -392,9 +388,9 @@ public final class HostedDeskActivity extends Activity {
         return switch (title) {
             case "Connect this phone", "Connect with a QR link", "Use this setup QR" ->
                 "Ask your supervisor for a new setup code or QR if yours has expired or already been used.";
-            case "Pass desk" -> "Open the booth queue for waiting deposits, or look up a collection code under Collect passes.";
-            case "Booth poster QR" -> "Print this QR once for your booth. People can scan it and enter their details while they wait.";
-            case "Booth queue", "Check customer name" -> "Match the waiting person's name and queue reference before checking their passes.";
+            case "Pass desk" -> "Open waiting deposits, or look up a collection code under Collect passes.";
+            case "Deposit QR" -> "This permanent QR is the same in the app and website. People can scan it and enter their details while they wait.";
+            case "Waiting deposits", "Check customer name" -> "Match the waiting person's name and queue reference before checking their passes.";
             case "Check pass counts", "Check available passes" -> "Compare the counts for each type with the passes in front of you.";
             case "Shelf or slot", "Find the packet" -> "Use the physical shelf or slot label so staff can find the right packet.";
             case "Custom code (optional)" -> "Use four digits. Leave it blank to let SharePass choose an available code.";
@@ -640,7 +636,7 @@ public final class HostedDeskActivity extends Activity {
             line("Collect passes", 20, true);
             collectionEntry(deskCode);
         } else if (deskPane == 2) {
-            line("Recent deposits and handovers for this booth.", 16, false);
+            line("Recent deposits and handovers in this register.", 16, false);
             LinearLayout filters=new LinearLayout(this);
             boolean largeFilters=getResources().getConfiguration().fontScale>1.3f;
             for(boolean pendingOnly:new boolean[]{false,true}){
@@ -670,25 +666,17 @@ public final class HostedDeskActivity extends Activity {
         deskPane = pane;
         desk();
     }
-    private String cachedBoothUrl() {
-        if (context == null) return "";
-        String supplied = context.optString("booth_url");
-        if (!supplied.isEmpty()) return supplied;
-        return getSharedPreferences("sharepass-booth-qr", MODE_PRIVATE)
-            .getString(context.optString("session_key"), "");
-    }
+    private String cachedBoothUrl() { return HostedRegisterClient.ORIGIN + "/deposit"; }
     private void showDepositPanel() {
         beginCard();
         line("Deposit passes", 20, true);
         line("Let the depositor scan and enter their details.",16,false);
-        LinearLayout depositView = content;
-        int qrPosition = depositView.getChildCount();
         String cached = cachedBoothUrl();
         if (!cached.isEmpty()) {
             try { showQr(boothPosterUrl(new JSONObject().put("url", cached)), "Customer deposit form QR"); }
-            catch (Exception invalid) { /* Fetch the authorized link again below. */ }
+            catch (Exception invalid) { /* The fixed link remains available through Copy link. */ }
         }
-        if (qr == null) line("Preparing this booth’s QR…", 15, false);
+        if (qr == null) line("The QR could not display. Use Copy link.", 15, false);
         LinearLayout share = new LinearLayout(this);
         Button copy = new Button(this), whatsapp = new Button(this);
         copy.setText("Copy link"); whatsapp.setText("WhatsApp");
@@ -698,7 +686,7 @@ public final class HostedDeskActivity extends Activity {
         content.addView(share);
         copy.setOnClickListener(view -> {
             String url = cachedBoothUrl();
-            if (url.isEmpty()) { note("The booth link is still loading."); return; }
+            if (url.isEmpty()) { note("The deposit link is unavailable."); return; }
             getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("SharePass deposit form", url));
             note("Deposit link copied.");
         });
@@ -709,39 +697,13 @@ public final class HostedDeskActivity extends Activity {
         content.addView(queueRows);
         queueSnapshot = "";
         renderQueueRows();
-        if(!cached.isEmpty()){scheduleQueue(0);return;}
-        String session = client.token();
-        polling.execute(() -> {
-            try {
-                String url = boothPosterUrl(client.request("/api/booth", null));
-                runOnUiThread(() -> {
-                    if (isDestroyed() || context == null || !session.equals(client.token())) return;
-                    getSharedPreferences("sharepass-booth-qr", MODE_PRIVATE).edit()
-                        .putString(context.optString("session_key"), url).apply();
-                    try { context.put("booth_url", url); } catch (Exception ignored) { }
-                    if (content != depositView || deskPane != 0 || !"desk".equals(screen) || qr != null && url.equals(cached)) return;
-                    try {
-                        releaseQr();
-                        View placeholder = depositView.getChildAt(qrPosition);
-                        if (placeholder instanceof TextView && !(placeholder instanceof Button)) depositView.removeView(placeholder);
-                        showQr(url, "Customer deposit form QR");
-                        depositView.removeView(qr);
-                        depositView.addView(qr, qrPosition, qrBounds());
-                    } catch (Exception invalid) { note("The deposit QR could not display. Use Copy link."); }
-                });
-            } catch (Exception unavailable) {
-                runOnUiThread(() -> {
-                    if (content == depositView && cached.isEmpty()) note("Connect to load this booth’s QR once. It is then available immediately.");
-                });
-            }
-        });
         scheduleQueue(0);
     }
     private void shareBoothLink() {
         String url = cachedBoothUrl();
-        if (url.isEmpty()) { note("The booth link is still loading."); return; }
+        if (url.isEmpty()) { note("The deposit link is unavailable."); return; }
         Intent draft = new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage("com.whatsapp")
-            .putExtra(Intent.EXTRA_TEXT, "SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to booth staff. A collection code is issued after staff check and approve the deposit.\n\n" + url);
+            .putExtra(Intent.EXTRA_TEXT, "SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to staff. A collection code is issued after staff check and approve the deposit.\n\n" + url);
         try { startActivity(draft); }
         catch (android.content.ActivityNotFoundException unavailable) {
             draft.setPackage(null);
@@ -765,7 +727,7 @@ public final class HostedDeskActivity extends Activity {
                     rows.removeView(loading);
                     JSONArray deposits = result.optJSONArray("deposits");
                     if ((deposits == null || deposits.length() == 0) && cursor.isEmpty()) {
-                        loading.setText("No deposits yet for this booth."); rows.addView(loading);
+                        loading.setText("No deposits yet in this register."); rows.addView(loading);
                     }
                     JSONArray pendingHandovers = result.optJSONArray("pending_handovers");
                     if (cursor.isEmpty() && pendingHandovers != null && pendingHandovers.length() > 0) {
@@ -874,7 +836,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private String queueLabel() {
         int count = queueDrafts.length();
-        return count == 0 ? "Booth queue" : "Booth queue · " + count + " waiting";
+        return count == 0 ? "Waiting deposits" : "Waiting deposits · " + count + " waiting";
     }
     private void clearQueue() {
         context = null;
@@ -933,7 +895,7 @@ public final class HostedDeskActivity extends Activity {
                     if (queueBaseline && newCount > 0) {
                         String summary=QueueSummary.body(arrivals,null);
                         QueueNotifications.show(this,newCount,summary);
-                        note(summary+" · Waiting for booth review.");
+                        note(summary+" · Waiting for staff review.");
                     }
                     if (waiting.isEmpty()) QueueNotifications.cancel(this);
                     queueBaseline = true;
@@ -1101,7 +1063,7 @@ public final class HostedDeskActivity extends Activity {
                 scheduleQueue(0);
                 reportDeviceStatus();
             }
-            if (request == QueueNotifications.NOTICE_ID) note(notificationsAllowed() ? "Booth alerts are on." : "Booth alerts are off. The queue still updates here.");
+            if (request == QueueNotifications.NOTICE_ID) note(notificationsAllowed() ? "Staff alerts are on." : "Staff alerts are off. The queue still updates here.");
         }
     }
     private void reportDeviceStatus() {
@@ -1154,18 +1116,18 @@ public final class HostedDeskActivity extends Activity {
         String url = result.getString("url");
         Uri uri = Uri.parse(url);
         if (!"https".equals(uri.getScheme()) || !Uri.parse(HostedRegisterClient.ORIGIN).getEncodedAuthority().equals(uri.getEncodedAuthority())) {
-            throw new IOException("The booth link was invalid.");
+            throw new IOException("The deposit link was invalid.");
         }
         return url;
     }
     private void boothPoster(JSONObject result) throws Exception {
         String url = boothPosterUrl(result);
-        page("Booth poster QR", "booth-poster", this::desk);
+        page("Deposit QR", "booth-poster", this::desk);
         line("Print this once and place it where people can scan it before they reach the counter.", 17, false);
-        showQr(url, "Reusable booth registration QR");
-        button("Copy booth link", () -> {
-            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("SharePass booth", url));
-            note("Booth link copied.");
+        showQr(url, "Permanent SharePass deposit QR");
+        button("Copy deposit link", () -> {
+            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("SharePass deposit", url));
+            note("Deposit link copied.");
         }, false);
     }
     private void queue() {
@@ -1376,6 +1338,7 @@ public final class HostedDeskActivity extends Activity {
             JSONObject completed=result.optJSONObject("collection");if(completed==null)completed=result.optJSONObject("last_collection");
             line("Depositor · "+firstNonEmpty(result.getJSONObject("deposit").optString("depositor_label"),"Name not recorded"),17,true);
             line((path.equals("/api/collections/history/handover")?"Last collector · ":"Collector · ")+firstNonEmpty(completed==null?"":completed.optString("collector_label"),"Name not recorded"),17,true);
+            if(completed!=null&&!completed.optString("handed_over_by_name").isEmpty())line("Handed over by · "+completed.optString("handed_over_by_name"),16,false);
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {
@@ -1413,7 +1376,8 @@ public final class HostedDeskActivity extends Activity {
             content.addView(row);
         }
         JSONObject deposit = result.optJSONObject("deposit");
-        line(result.optString("depositor_name",deposit.optString("depositor_label")),17,false);
+        line("Depositor · "+result.optString("depositor_name",deposit.optString("depositor_label")),17,false);
+        if(!deposit.optString("received_by_name").isEmpty())line("Received by · "+deposit.optString("received_by_name"),16,false);
         if (deposit.optLong("code_expires_at") > 0) {
             String time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
                 .format(new java.util.Date(deposit.optLong("code_expires_at")));
@@ -1571,7 +1535,7 @@ public final class HostedDeskActivity extends Activity {
     }
     private void prepare(JSONObject result, String code) throws Exception {
         JSONObject deposit=result.getJSONObject("deposit");
-        if(result.isNull("claim_token")){note("Use the booth shown on the receipt.");return;}
+        if(result.isNull("claim_token")){note("Ask staff to check the current receipt.");return;}
         JSONObject available=deposit.getJSONObject("remaining");
         page("Prepare pickup","prepare",()->desk(code));
         String depositor=deposit.optString("depositor_label").trim();line("Depositor · "+(depositor.isEmpty()?"Name not recorded":depositor),21,true);
@@ -1850,8 +1814,8 @@ public final class HostedDeskActivity extends Activity {
             if (!(recipient.quantities instanceof JSONObject)) throw new IllegalArgumentException("Review the recipient’s planned share");
             allocation = draftCounts((JSONObject) recipient.quantities);
         }
-        return WhatsAppDraft.message(receipt.getString("collection_code"), "", context.optString("booth_label","Box office"),
-            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation,HostedRegisterClient.ORIGIN,receipt.getJSONObject("deposit").optLong("code_expires_at"));
+        return WhatsAppDraft.message(receipt.getString("collection_code"), "", "SharePass staff",
+            context.optString("pickup_location"), counts, recipient.name, receipt.getJSONObject("deposit").optString("packet_id"), allocation,HostedRegisterClient.ORIGIN,receipt.getJSONObject("deposit").optLong("code_expires_at"),receipt.getJSONObject("deposit").optString("depositor_label"),receipt.getJSONObject("deposit").optString("received_by_name"));
     }
     private static Map<String,Object> draftCounts(JSONObject quantities) {
         Map<String,Object> counts = new LinkedHashMap<>();

@@ -2,9 +2,7 @@
 const byId=id=>document.getElementById(id);
 const setupStatus=byId('setup-status');
 const nav=[...document.querySelectorAll('[data-panel]')];
-const boothList=byId('booth-list');
 const deviceList=byId('device-list');
-const boothForm=byId('booth-form');
 const inviteForm=byId('invite-form');
 const reissueForm=byId('reissue-form');
 const invite=byId('setup-invite');
@@ -12,11 +10,10 @@ const inviteCode=byId('invite-code');
 const inviteQr=byId('invite-qr');
 const toggleInvite=byId('toggle-invite');
 const reissueStatus=byId('reissue-status');
-const openBooth=byId('open-booth-form');
 const openInvite=byId('open-invite-form');
 const refreshDevices=byId('refresh-devices');
 let busy=false, reissueAttempt;
-let messageBooths=new Map(), messageAttempt, sendingMessage=false;
+let setupPeople=[], messageBooths=new Map(), messageAttempt, sendingMessage=false;
 const adminDeferred=new Set(),adminReplying=new Set();
 const messageForm=byId('staff-message-form');
 
@@ -40,47 +37,26 @@ function item(title,detail){
 }
 
 function renderSetup(data){
-  const boothNames=new Map(data.booths.map(booth=>[booth.id,booth.name]));
-  messageBooths=new Map([...boothNames,["all","All"]]);
-  const booth=messageForm.elements.booth_id;
-  const selected=booth.value;
-  booth.replaceChildren(new Option('All','all'),...data.booths.filter(item=>!item.archived).map(item=>new Option(item.name,item.id)));
-  if(boothNames.has(selected))booth.value=selected;
-  const staffNames=new Map(data.staff.map(person=>[person.id,person.name]));
-  boothList.replaceChildren(...data.booths.map(booth=>{const row=item(booth.name,booth.archived?'Archived':booth.location||'Pickup location not set');if(!booth.archived){const remove=document.createElement('button');remove.type='button';remove.textContent='Delete booth';remove.onclick=()=>{if(confirm('Archive '+booth.name+'? Existing pickups and history will be retained.'))updateSetup({action:'archive-booth',booth_id:booth.id,confirmed:true},'Booth archived.');};row.append(remove);}return row;}));
+  setupPeople=data.staff;
+  messageBooths=new Map([['all','All staff'],...data.staff.map(person=>['staff:'+person.id,person.name])]);
+  const target=messageForm.elements.recipient_id,previous=target.value;
+  target.replaceChildren(new Option('All staff',''),...data.staff.map(person=>new Option(person.name,person.id)));
+  if(data.staff.some(person=>person.id===previous))target.value=previous;
+  byId('staff-names').replaceChildren(...data.staff.map(person=>new Option(person.name,person.name)));
   deviceList.replaceChildren(...data.devices.map(device=>{
     const status=device.active?(device.paired?'Connected':'Waiting for setup'):'Revoked';
-    const lastSeen=device.last_seen_at?new Date(device.last_seen_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'';
-    const app=device.platform==='web'?'Browser':device.app_version?'App '+device.app_version:'';
-    const latest=data.latest_android_release;
-    const needsUpdate=device.platform!=='web'&&Number.isSafeInteger(device.app_version_code)&&latest?.accepted_at>0&&device.app_version_code<latest.version_code;
-    const release=needsUpdate?'Update available · '+latest.version_name:'';
-    const notifications=device.notifications_enabled===true?'Notifications on':device.notifications_enabled===false?'Notifications off':'';
-    const row=item(device.staff_name||staffNames.get(device.staff_id)||device.label,[boothNames.get(device.booth_id),status,app,release,notifications,lastSeen?'Last seen '+lastSeen:''].filter(Boolean).join(' · '));
-    if(device.active){
-      const revoke=document.createElement('button');
-      revoke.type='button';
-      revoke.textContent='Revoke';
-      revoke.setAttribute('aria-label','Revoke '+device.label);
-      revoke.onclick=()=>updateSetup({action:'revoke',device_id:device.id},'Device revoked.');
-      row.append(revoke);
-    }
+    const latest=data.latest_android_release,needsUpdate=device.platform!=='web'&&latest?.accepted_at>0&&device.app_version_code<latest.version_code;
+    const row=item(device.staff_name||device.label,[device.label,status,device.app_version?'App '+device.app_version:'',needsUpdate?'Update available · '+latest.version_name:''].filter(Boolean).join(' · '));
+    if(device.active){const revoke=document.createElement('button');revoke.type='button';revoke.textContent='Revoke device';revoke.onclick=()=>updateSetup({action:'revoke',device_id:device.id},'Device revoked.');row.append(revoke);}
     return row;
   }));
-  if(!data.booths.length)boothList.append(item('No booths yet','Add the booth that will hold the passes.'));
-  if(!data.devices.length)deviceList.append(item('No devices yet','Set up a staff device to connect it to a booth.'));
-  for(const select of [inviteForm.elements.booth_id,reissueForm.elements.booth_id]){
-    const previous=select.value;
-    select.replaceChildren(...data.booths.filter(booth=>select===reissueForm.elements.booth_id||!booth.archived).map(booth=>{
-      const option=document.createElement('option');
-      option.value=booth.id;
-      option.textContent=booth.name;
-      return option;
-    }));
-    if([...select.options].some(option=>option.value===previous))select.value=previous;
-  }
-  openInvite.disabled=!data.booths.some(booth=>!booth.archived);
+  if(!data.devices.length)deviceList.append(item('No staff devices','Set up a staff member by name.'));
+  openInvite.disabled=false;
 }
+inviteForm.elements.staff_name.addEventListener('input',()=>{
+  const matches=setupPeople.filter(person=>person.name===inviteForm.elements.staff_name.value.trim());
+  inviteForm.elements.staff_id.value=matches.length===1?matches[0].id:'';
+});
 
 async function updateSetup(body,message){
   if(busy)return;
@@ -114,7 +90,7 @@ async function loadStaffMessages(body){
     const {messages,inbox=[]}=await request('/api/admin/staff-messages',body);
     const labels={done:'Done',working:'Working on it',help:'Need help'};
     byId('staff-messages-list').replaceChildren(...messages.map(message=>item(
-      message.message, (messageBooths.get(message.booth_id)||message.booth_id)+' · '+
+      message.message, (messageBooths.get(message.booth_id)||'Staff')+' · '+
       (message.responses?message.responses.map(person=>person.name+': '+(labels[person.reply]||'Waiting')).join(' · '):
         message.reply?labels[message.reply]+' · '+message.replied_by:message.expires_at<=Date.now()?'Expired':'Waiting for reply'))));
     const personal=byId('personal-message-inbox');personal.replaceChildren();
@@ -159,10 +135,10 @@ messageForm.onsubmit=async event=>{
   event.preventDefault();
   if(sendingMessage)return;
   const data=Object.fromEntries(new FormData(messageForm));
-  const message=data.message.trim(),booth_id=data.booth_id;
+  const message=data.message.trim(),booth_id=data.recipient_id?"staff:"+data.recipient_id:"all";
   if(!message)return;
-  if(messageAttempt?.message!==message||messageAttempt.booth_id!==booth_id){
-    messageAttempt={id:crypto.randomUUID(),message,booth_id,per_person:true};
+  if(messageAttempt?.message!==message||(messageAttempt.recipient_id?"staff:"+messageAttempt.recipient_id:"all")!==booth_id){
+    messageAttempt={id:crypto.randomUUID(),message,booth_id:"all",recipient_id:data.recipient_id||undefined,per_person:true};
   }
   sendingMessage=true;
   enableAdminAlerts().catch(()=>{});
@@ -214,26 +190,11 @@ function wizard(form,finish,cancel){
   return show;
 }
 
-function showBoothForm(show){
-  boothForm.hidden=!show;
-  boothList.hidden=openBooth.hidden=show;
-  if(!show)openBooth.focus();
-}
-
 function showInviteForm(show){
   inviteForm.hidden=!show;
   deviceList.hidden=openInvite.hidden=refreshDevices.hidden=show;
   if(!show)openInvite.focus();
 }
-
-const boothStep=wizard(boothForm,async fields=>{
-  if(await updateSetup({action:'booth',...fields},'Booth created.')){
-    boothForm.reset();
-    showBoothForm(false);
-  }
-},()=>showBoothForm(false));
-
-openBooth.onclick=()=>{showBoothForm(true);boothStep(0);};
 
 function clearInvitation(){
   invite.hidden=true;
@@ -354,14 +315,14 @@ async function loadReport(){
   reportStatus.textContent='';
   try{
     const data=await request('/api/admin/report');
-    reportSnapshot=data.booths;byId('download-report').disabled=false;
+    reportSnapshot=data.staff;byId('download-report').disabled=false;
     const storage=data.storage;
     if(Number.isSafeInteger(storage?.used_bytes)){
       const used=new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(storage.used_bytes/1000000);
       reportStorage.textContent='Database storage: '+used+' MB used of the '+storage.limit_bytes/1000000000+' GB deposit limit.'
         +(storage.at_limit?' New deposits are paused. Existing pickups can continue.':'');
     }else reportStorage.textContent='Database storage measurement is unavailable.';
-    reportRows.replaceChildren(...data.booths.map(booth=>{
+    reportRows.replaceChildren(...data.staff.map(booth=>{
       const row=document.createElement('tr');
       const name=document.createElement('th');
       name.scope='row';
@@ -374,7 +335,7 @@ async function loadReport(){
       }
       return row;
     }));
-    if(!data.booths.length)reportStatus.textContent='No booth totals yet.';
+    if(!data.staff.length)reportStatus.textContent='No staff activity yet.';
   }catch(error){reportStatus.textContent=error.message;}
   finally{reportBusy=false;}
 }
@@ -399,12 +360,12 @@ addEventListener('hashchange',()=>accountPanel(true));
 byId('refresh-report').onclick=loadReport;
 function reportCsv(rows){
   const cell=value=>'"'+String(typeof value==='string'&&/^\s*[=+\-@\t\r]/.test(value)?"'"+value:value).replaceAll('"','""')+'"';
-  return [['Booth','Deposits','Received','Available','Pending','Handed over'],...rows.map(row=>[row.name,row.deposits,row.received,row.available,row.pending,row.handed_over])]
+  return [['Staff','Deposits','Received','Available','Pending','Handed over'],...rows.map(row=>[row.name,row.deposits,row.received,row.available,row.pending,row.handed_over])]
     .map(row=>row.map(cell).join(',')).join('\r\n')+'\r\n';
 }
 byId('download-report').onclick=()=>{
   const url=URL.createObjectURL(new Blob([reportCsv(reportSnapshot)],{type:'text/csv;charset=utf-8'}));
-  const link=document.createElement('a');link.href=url;link.download='SharePass-booth-report.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const link=document.createElement('a');link.href=url;link.download='SharePass-staff-report.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 async function enableAdminAlerts(){
   if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))return;
@@ -429,3 +390,14 @@ async function enableAdminAlerts(){
 navigator.serviceWorker?.addEventListener('message',event=>{if(event.data?.type==='sharepass-queue'&&!sendingMessage)loadStaffMessages();});
 if('Notification' in window&&Notification.permission==='granted')enableAdminAlerts().catch(()=>{});
 accountPanel();
+
+let resetAttempt;
+byId('reset-register-form').onsubmit=async event=>{
+  event.preventDefault();const form=event.currentTarget,button=form.querySelector('button'),status=byId('reset-register-status');
+  if(form.elements.confirmation.value!=='RESET SHAREPASS'){status.textContent='Type RESET SHAREPASS exactly.';return;}
+  if(!confirm('Permanently delete all transactions, staff accounts and device pairings? Any passes still held must be entered again.'))return;
+  resetAttempt??=crypto.randomUUID();button.disabled=true;
+  try{await request('/api/admin/reset',{request_id:resetAttempt,confirmation:'RESET SHAREPASS',delete_staff:true});status.textContent='Register cleared. Staff accounts and device pairings removed. Administrator access and settings kept.';resetAttempt=undefined;form.reset();await updateSetup();}
+  catch(error){status.textContent=error.message+' Retry uses the same reset request.';}
+  finally{button.disabled=false;}
+};

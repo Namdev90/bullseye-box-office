@@ -15,11 +15,14 @@ async function adminStaffPrompts(request,env,ctx,staff){
   if(request.method==='POST'){
     const body=await bodyJson(request);
     const message=typeof body?.message==='string'?body.message.trim():'';
-    const booth=typeof body?.booth_id==='string'?body.booth_id:'';
     const personal=body?.per_person===true;
+    const recipient=typeof body?.recipient_id==='string'?body.recipient_id:'';
+    if(body?.recipient_id!==undefined&&(typeof body.recipient_id!=='string'||recipient.length>256||/[\u0000-\u001f\u007f]/.test(recipient)))return error('Choose a current staff member.',400);
+    const booth=recipient?'staff:'+recipient:typeof body?.booth_id==='string'?body.booth_id:personal?'all':'';
+    const selection=recipient?'all':booth;
     if(!staffPromptId(body?.id)||!message||message.length>300||/[\u0000-\u001f\u007f]/.test(message)
-      ||!(personal&&booth==='all')&&(!boothIdPattern.test(booth)||!await boothConfiguration(db,staff.workspace,booth))){
-      return error('Choose a booth and enter a message of 1 to 300 characters.',400);
+      ||!(personal&&(booth==='all'||recipient))&&(!boothIdPattern.test(booth)||!await boothConfiguration(db,staff.workspace,booth))){
+      return error('Choose staff and enter a message of 1 to 300 characters.',400);
     }
     const now=Date.now();
     if(personal){
@@ -27,12 +30,13 @@ async function adminStaffPrompts(request,env,ctx,staff){
       if(previous&&(previous.booth_id!==booth||previous.message!==message||!previous.per_person))return error('This message ID was already used.',409);
       if(!previous){
         const people=await db.prepare(`SELECT s.id AS recipient,s.name,s.booth_id FROM sharepass_configured_staff s
-          WHERE s.workspace=? AND (?='all' OR s.booth_id=?) AND EXISTS(SELECT 1 FROM sharepass_configured_devices d
+          WHERE s.workspace=? AND (?='all' OR s.booth_id=?) AND (?='' OR s.id=?) AND EXISTS(SELECT 1 FROM sharepass_configured_devices d
             WHERE d.staff_id=s.id AND d.workspace=s.workspace AND d.active=1 AND d.digest IS NOT NULL AND d.session_expires>?)
           UNION SELECT user_id AS recipient,coalesce(display_name,'Staff') AS name,'B1' AS booth_id FROM sharepass_staff
-            WHERE user_id IS NOT NULL AND (?='all' OR ?='B1')`)
-          .bind(staff.workspace,booth,booth,now,booth,booth).all();
+            WHERE user_id IS NOT NULL AND (?='all' OR ?='B1') AND (?='' OR user_id=?)`)
+          .bind(staff.workspace,selection,selection,recipient,recipient,now,selection,selection,recipient,recipient).all();
         const recipients=new Map(people.results.map(person=>[person.recipient,person]));
+        if(recipient&&!recipients.has(recipient))return error('Choose a connected staff member from this register.',400);
         if(booth==='all')recipients.set(staff.operator,{recipient:staff.operator,name:staff.name||'Administrator',booth_id:staff.booth_id||'B1'});
         const statements=[db.prepare(`INSERT INTO sharepass_staff_prompts(workspace,id,booth_id,message,created_at,expires_at,per_person)
           VALUES(?,?,?,?,?,?,1)`).bind(staff.workspace,body.id,booth,message,now,now+86400000)];
@@ -45,7 +49,7 @@ async function adminStaffPrompts(request,env,ctx,staff){
           if(!saved||saved.booth_id!==booth||saved.message!==message||!saved.per_person)return error('This message ID was already used.',409);
           return adminStaffPrompts(new Request(request.url),env,ctx,staff);
         }
-        for(const target of new Set([...recipients.values()].map(person=>person.booth_id)))await scheduleBoothPush(env,ctx,staff.workspace,target,true);
+        await scheduleBoothPush(env,ctx,staff.workspace,booth,true);
       }
       return adminStaffPrompts(new Request(request.url),env,ctx,staff);
     }

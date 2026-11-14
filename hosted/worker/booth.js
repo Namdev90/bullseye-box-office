@@ -1,4 +1,4 @@
-const BOOTH_LABEL='Box office';
+const BOOTH_LABEL='SharePass staff';
 const QUEUE_LIFETIME_MS=2*60*60*1000;
 const QUEUE_RECOVERY_MS=24*60*60*1000;
 
@@ -44,14 +44,7 @@ function separateCollectorPhones(contact,recipients){
 }
 
 async function boothPosterDetails(db,staff,origin){
-  const workspace=staff.workspace,booth=staff.booth_id||'B1';
-  if(booth!=='B1'){
-    const row=await boothConfiguration(db,workspace,booth);
-    return row?{url:origin+'/booth/'+row.poster_token,booth:row.name}:null;
-  }
-  await db.prepare('INSERT OR IGNORE INTO sharepass_booth_posters(workspace,token) VALUES(?,?)').bind(workspace,crypto.randomUUID()).run();
-  const row=await db.prepare('SELECT token FROM sharepass_booth_posters WHERE workspace=?').bind(workspace).first();
-  return {url:origin+'/booth/'+row.token,booth:BOOTH_LABEL};
+  return {url:origin+'/deposit',booth:BOOTH_LABEL};
 }
 
 async function boothPoster(db,staff,origin){
@@ -59,16 +52,26 @@ async function boothPoster(db,staff,origin){
   return details?json(details):boothMissing();
 }
 
-async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
+async function publicDesk(request,env,ctx,origin,ticket,alerts){
+  const owner=await env.DB.prepare('SELECT user_id FROM sharepass_staff WHERE email=?').bind(emailAddress(env.SHAREPASS_OWNER_EMAIL)).first();
+  if(!owner?.user_id)return error('The staff register is not ready. Please ask staff for help.',503,false);
+  return publicBooth(request,env,ctx,null,origin,ticket,alerts,owner.user_id);
+}
+
+async function publicBooth(request,env,ctx,token,origin,ticket,alerts,workspace){
   const db=env.DB;
-  const poster=await db.prepare('SELECT workspace,id AS booth_id,name,archived FROM sharepass_configured_booths WHERE poster_token=?').bind(token).first()
+  const poster=workspace?{workspace,booth_id:'B1',name:BOOTH_LABEL,archived:0}:await db.prepare('SELECT workspace,id AS booth_id,name,archived FROM sharepass_configured_booths WHERE poster_token=?').bind(token).first()
     ||await db.prepare("SELECT p.workspace,'B1' AS booth_id,'Box office' AS name,coalesce(b.archived,0) AS archived FROM sharepass_booth_posters p LEFT JOIN sharepass_configured_booths b ON b.workspace=p.workspace AND b.id='B1' WHERE p.token=?").bind(token).first();
   if(!poster)return boothMissing();
+  // Old QR links remain valid; legacy partitions no longer limit the shared desk.
+  poster.name=BOOTH_LABEL;poster.archived=0;poster.booth_id='B1';
+  const reset=await registerResetState(db,poster.workspace);
+  if(ticket&&(reset.tickets||[]).includes(ticket))return json({error:'This register was reset. Start a new deposit.',notExecuted:true,register_reset_at:reset.at},410);
   if(alerts)return guestReceiptSubscription(request,env,poster,origin);
   if(request.method==='GET'){
     if(ticket===null){
       const publicKey=webPushSettings(env)?.publicKey;
-      return json({booth:poster.name,archived:!!poster.archived,...(publicKey?{alerts_key:publicKey}:{})});
+      return json({booth:poster.name,archived:!!poster.archived,register_reset_at:reset.at,...(publicKey?{alerts_key:publicKey}:{})});
     }
     if(!intakeTokenPattern.test(ticket))return boothMissing();
     return boothReceipt(db,poster,ticket);
@@ -76,6 +79,7 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   if(request.method!=='POST')return boothMissing();
   if(request.headers.get('Origin')!==origin)return error('Cross-origin changes are blocked.',403);
   const input=await bodyJson(request);
+  if((reset.tickets||[]).includes(input?.request_id))return json({error:'This register was reset. Start a new deposit.',notExecuted:true,register_reset_at:reset.at},410);
   const contact=contactFields(input),quantities=passQuantities(input?.quantities);
   if(!contact?.name||!quantities||!Object.values(quantities).some(Boolean)||
       typeof input.request_id!=='string'||!intakeTokenPattern.test(input.request_id)||
@@ -95,13 +99,12 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
   const update=updatePreference(input.update_channel,contact);
   if(update===false)return error('Enter a valid address for your chosen pickup update channel.',400);
   const payload=JSON.stringify({...contact,quantities,recipients,...(update?{update}:{}),...(current?{intake_version:2}:{})});
-  const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=? AND booth_id=?')
-    .bind(input.request_id,poster.workspace,poster.booth_id).first();
+  const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=?')
+    .bind(input.request_id,poster.workspace).first();
   if(prior){
     if(prior.payload!==payload)return error('These details have already been sent. Tell staff if anything changed.',409);
     return current?boothReceipt(db,poster,input.request_id):json({status:'submitted',queue_ref:input.request_id.slice(-6).toUpperCase()});
   }
-  if(poster.archived)return error('This booth is archived and is not accepting new deposits.',409);
   const now=Date.now(),expires=now+QUEUE_LIFETIME_MS;
   // Confirmed receipts can outlive their intake. Wait for legacy import before pruning them.
   await db.prepare(`DELETE FROM sharepass_booth_queue AS q WHERE q.expires_at<=? AND (q.confirmed=0 OR (
@@ -115,13 +118,14 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
             SELECT 1 FROM json_each(d.payload,'$.remaining') amount WHERE amount.type='integer' AND amount.value>0)))
     )))`).bind(now-QUEUE_RECOVERY_MS,now).run();
   const inserted=await db.prepare(`INSERT OR IGNORE INTO sharepass_booth_queue(token,workspace,booth_id,submitted_at,expires_at,payload)
-    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>?)<120
-      AND NOT EXISTS(SELECT 1 FROM sharepass_configured_booths WHERE workspace=? AND id=? AND archived=1)`)
-    .bind(input.request_id,poster.workspace,poster.booth_id,now,expires,payload,poster.workspace,poster.booth_id,now,poster.workspace,poster.booth_id).run();
+    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM sharepass_booth_queue WHERE workspace=? AND confirmed=0 AND expires_at>?)<120
+      AND coalesce((SELECT theme FROM sharepass_code_policy WHERE owner=? AND event=?),'0')=?`)
+    .bind(input.request_id,poster.workspace,poster.booth_id,now,expires,payload,poster.workspace,now,poster.workspace,RESET_STATE_EVENT,String(reset.at)).run();
   if(inserted.meta.changes===0){
-    const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=? AND booth_id=?').bind(input.request_id,poster.workspace,poster.booth_id).first();
+    const prior=await db.prepare('SELECT payload FROM sharepass_booth_queue WHERE token=? AND workspace=?').bind(input.request_id,poster.workspace).first();
     if(!prior){
-      if((await boothConfiguration(db,poster.workspace,poster.booth_id))?.archived)return error('This booth is archived and is not accepting new deposits.',409);
+      const latest=await registerResetState(db,poster.workspace);
+      if(latest.at!==reset.at)return json({error:'This register was reset. Start a new deposit.',notExecuted:true,register_reset_at:latest.at},410);
       return error('The booth queue is full. Let the booth staff know.',429);
     }
     if(prior.payload!==payload)return error('These details have already been sent. Tell staff if anything changed.',409);
@@ -130,8 +134,8 @@ async function publicBooth(request,env,ctx,token,origin,ticket,alerts){
 }
 
 async function boothReceipt(db,poster,ticket){
-  const row=await db.prepare('SELECT payload,expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=?')
-    .bind(poster.workspace,poster.booth_id,ticket).first();
+  const row=await db.prepare('SELECT payload,expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND token=?')
+    .bind(poster.workspace,ticket).first();
   if(!row)return boothMissing();
   const fields=JSON.parse(row.payload);
   if(fields.intake_version!==2)return boothMissing();
@@ -139,13 +143,13 @@ async function boothReceipt(db,poster,ticket){
   if(!row.confirmed)return json({status:row.expires_at>Date.now()?'submitted':'closed',queue_ref,name:fields.name});
   const committed=await ledgerReceipt(db,poster.workspace,'booth-'+ticket);
   if(!committed)return json({status:row.expires_at>Date.now()?'submitted':'closed',queue_ref});
-  const deposit=committed.deposit.booth_id===poster.booth_id?committed.deposit:null;
+  const deposit=committed.deposit;
   if(deposit&&committed.pending)return json({status:'checking',queue_ref});
   if(!deposit||deposit.code_expires_at<=Date.now()||!Object.values(deposit.remaining).some(Boolean)){
     return json({status:'closed',queue_ref});
   }
   return json({status:'confirmed',queue_ref,booth:poster.name,collection_code:deposit.active_collection_code||committed.receipt.collection_code,
-    name:fields.name,collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,remaining:deposit.remaining,
+    name:fields.name,depositor_name:fields.name,staff_name:deposit.received_by_name||'',collection_reference:deposit.packet_id,code_expires_at:deposit.code_expires_at,remaining:deposit.remaining,
     recipients:fields.recipients.map(({name,phone,quantities})=>({name,phone,quantities}))});
 }
 
@@ -160,17 +164,17 @@ function queueFields(row,detail=false){
 
 async function queueList(db,staff){
   const rows=await db.prepare(`SELECT token,payload,submitted_at,expires_at FROM sharepass_booth_queue
-    WHERE workspace=? AND booth_id=? AND confirmed=0 AND expires_at>? ORDER BY submitted_at,token LIMIT 120`)
-    .bind(staff.workspace,staff.booth_id||'B1',Date.now()).all();
+    WHERE workspace=? AND confirmed=0 AND expires_at>? ORDER BY submitted_at,token LIMIT 120`)
+    .bind(staff.workspace,Date.now()).all();
   const messages=await pendingStaffPrompts(db,staff);
   return json({drafts:rows.results.map(row=>queueFields(row)),...(messages.length?{messages}:{})});
 }
 
 async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
-  const booth=staff.booth_id||'B1';
-  const row=await db.prepare('SELECT token,payload,submitted_at,expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND booth_id=? AND token=?')
-    .bind(staff.workspace,booth,token).first();
+  const row=await db.prepare('SELECT token,payload,booth_id,submitted_at,expires_at,confirmed FROM sharepass_booth_queue WHERE workspace=? AND token=?')
+    .bind(staff.workspace,token).first();
   if(!row)return boothMissing();
+  const booth=row.booth_id;
   const expired=row.expires_at<=Date.now(),fields=queueFields(row,true);
   if(!confirm){
     if(request.method!=='GET'||expired||row.confirmed)return boothMissing();
@@ -190,7 +194,7 @@ async function queueItem(request,db,staff,token,confirm,theme,allowCodeReuse){
     if(Object.hasOwn(recorded,'update_contact'))body.update_contact=recorded.update_contact;
   }else if(preference)body.update_contact=preference;
   else if(fields.intake_version===2&&sharePassPhone(fields.phone))body.update_contact={channel:'whatsapp',address:sharePassPhone(fields.phone),name:fields.name};
-  const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{booth:true,token},allowCodeReuse);
+  const result=await mutate(db,staff.workspace,'/api/deposits',body,staff.admin,expired,false,theme,{booth:true,token},allowCodeReuse,false,staff.name,staff);
   if(!result.ok)return result;
   if((await result.clone().json()).replayed)await db.prepare('UPDATE sharepass_booth_queue SET confirmed=1 WHERE workspace=? AND token=?').bind(staff.workspace,token).run();
   const recipients=fields.recipients.length?fields.recipients:
@@ -208,8 +212,8 @@ async function refreshedReceiptContacts(db,staff,response,origin){
   const row=await db.prepare(`SELECT q.payload,d.payload->'$.update_contact' AS update_contact FROM sharepass_booth_queue q
     JOIN sharepass_ledger_requests r ON r.owner=q.workspace AND r.id='booth-'||q.token
     JOIN sharepass_ledger_deposits d ON d.owner=r.owner AND d.id=r.deposit_id
-    WHERE q.workspace=? AND q.booth_id=? AND r.deposit_id=? AND q.confirmed=1 LIMIT 1`)
-    .bind(staff.workspace,staff.booth_id||'B1',result.deposit.id).first();
+    WHERE q.workspace=? AND r.deposit_id=? AND q.confirmed=1 LIMIT 1`)
+    .bind(staff.workspace,result.deposit.id).first();
   if(!row)return json(result);
   const fields=JSON.parse(row.payload),phone=sharePassPhone(fields.phone),preference=row.update_contact?JSON.parse(row.update_contact):null;
   return json({...result,receipt_purpose:'replacement',depositor_phone:phone||'',depositor_name:fields.name,

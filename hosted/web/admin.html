@@ -30,8 +30,7 @@
       <div id="account-administration" hidden>
       <h2 tabindex="-1">Administration</h2>
       <nav class="admin-nav" aria-label="Administration">
-        <button type="button" data-panel="booths" aria-pressed="true" aria-controls="booths">Booths</button>
-        <button type="button" data-panel="staff" aria-pressed="false" aria-controls="staff">Staff and devices</button>
+        <button type="button" data-panel="staff" aria-pressed="true" aria-controls="staff">Staff and devices</button>
         <button type="button" data-panel="staff-messages" aria-pressed="false" aria-controls="staff-messages">Staff messages</button>
         <button hidden type="button" data-panel="reissue" aria-pressed="false" aria-controls="reissue">Replace expired code</button>
         <button hidden type="button" data-panel="code-policy" aria-pressed="false" aria-controls="code-policy">Code catalogue</button>
@@ -41,7 +40,7 @@
         <h2 id="staff-messages-heading" tabindex="-1">Staff messages</h2>
         <p>Each person replies once; replies synchronize across their devices. Unanswered messages expire after 24 hours.</p>
         <form id="staff-message-form" class="admin-wizard">
-          <label class="field">Booth <select name="booth_id" required></select></label>
+          <label class="field">Message to <select name="recipient_id"><option value="">All staff</option></select></label>
           <label class="field">Message <input name="message" maxlength="300" required></label>
           <button class="primary" type="submit">Send message</button>
         </form>
@@ -49,28 +48,16 @@
         <p id="staff-messages-status" role="status"></p>
         <ul id="personal-message-inbox" class="admin-list"></ul><ul id="staff-messages-list" class="admin-list"></ul>
       </section>
-      <section class="admin-card" id="booths" aria-labelledby="booths-heading">
-        <h2 id="booths-heading" tabindex="-1">Booths</h2>
-        <ul id="booth-list" class="admin-list"></ul>
-        <button type="button" id="open-booth-form" class="primary">Add booth</button>
-        <form id="booth-form" class="admin-wizard" hidden novalidate>
-          <fieldset data-step><legend>Booth details</legend>
-            <label class="field">Booth name <input name="name" maxlength="80" required></label>
-            <label class="field">Pickup location <input name="location" maxlength="100" required></label>
-          </fieldset>
-          <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create booth</button></div>
-        </form>
-      </section>
-      <section class="admin-card" id="staff" aria-labelledby="staff-heading" hidden>
+      <section class="admin-card" id="staff" aria-labelledby="staff-heading">
         <h2 id="staff-heading" tabindex="-1">Staff and devices</h2>
 
         <button type="button" id="open-invite-form" class="primary" disabled>Set up a staff device</button>
         <button type="button" id="refresh-devices">Refresh devices</button><ul id="device-list" class="admin-list"></ul>
         <form id="invite-form" class="admin-wizard" hidden novalidate>
           <fieldset data-step><legend>Staff device details</legend>
-            <div class="field"><label for="invite-booth">Booth</label><select id="invite-booth" name="booth_id" required></select></div>
-            <label class="field">Staff name <input name="staff_name" maxlength="80" autocomplete="off" required></label>
-            <small id="designation-help">The device is named automatically using the staff name. Access is assigned by booth.</small>
+            <input name="staff_id" type="hidden"><datalist id="staff-names"></datalist>
+            <label class="field">Staff name <input name="staff_name" list="staff-names" maxlength="80" autocomplete="off" required></label>
+            <small id="designation-help">The device is named automatically using the staff name. Staff can handle any ticket in this register.</small>
           </fieldset>
           <div class="wizard-actions"><button type="button" data-back>Back</button><button type="submit" class="primary" data-next>Create setup QR</button></div>
         </form>
@@ -89,7 +76,6 @@
         <button class="info-trigger" type="button" aria-label="Before replacing a code" data-info="Find the physical packet and match its shelf and label before issuing a new code.">i</button>
         <form id="reissue-form" class="admin-wizard" novalidate>
           <fieldset data-step><legend>Match the physical packet</legend>
-            <div class="field"><label for="reissue-booth">Booth</label><select id="reissue-booth" name="booth_id" required></select></div>
             <label class="field">Expired code <input name="collection_code" maxlength="4" minlength="4" pattern="[0-9]{4}" required inputmode="numeric"></label>
             <label class="field">Shelf or slot <input name="location" maxlength="30" required></label>
             <label class="field">Physical packet label <input name="packet_id" placeholder="PKT-1234ABCD" maxlength="12" required autocapitalize="characters"></label>
@@ -133,13 +119,22 @@
       </section>
       </div>
       <section id="account-reports" class="admin-card" hidden>
-        <div class="report-heading"><h2 tabindex="-1">Booth reports</h2><button type="button" class="info-trigger" aria-label="About booth report totals" data-info="Available passes are ready for pickup. Pending passes have been reserved for a handover. Handed over means staff confirmed physical delivery.">i</button></div>
+        <div class="report-heading"><h2 tabindex="-1">Staff reports</h2><button type="button" class="info-trigger" aria-label="About staff report totals" data-info="Available passes are ready for pickup. Pending passes have been reserved for a handover. Handed over means staff confirmed physical delivery.">i</button></div>
         <p id="report-status" role="status"></p>
         <p id="report-storage"></p>
-        <div class="report-table" tabindex="0" role="region" aria-label="Booth totals, scroll horizontally if needed"><table><caption>Pass totals by booth</caption><thead><tr>
-          <th scope="col">Booth</th><th scope="col">Deposits</th><th scope="col">Received</th><th scope="col">Available</th><th scope="col">Pending</th><th scope="col">Handed over</th>
+        <div class="report-table" tabindex="0" role="region" aria-label="Staff totals, scroll horizontally if needed"><table><caption>Pass totals by receiving staff</caption><thead><tr>
+          <th scope="col">Staff</th><th scope="col">Deposits</th><th scope="col">Received</th><th scope="col">Available</th><th scope="col">Pending</th><th scope="col">Handed over</th>
         </tr></thead><tbody id="report-rows"></tbody></table></div>
         <button type="button" id="refresh-report">Refresh report</button><button type="button" id="download-report" disabled>Download report CSV</button>
+      </section>
+      <section class="admin-card" id="reset-register">
+        <h2>Register backup and reset</h2>
+        <a class="menu-link" id="download-backup" href="/api/admin/backup" download>Download complete register backup</a>
+        <p>A full reset removes all deposits, customer details, codes, waiting submissions, handovers, staff accounts, device pairings and staff notification subscriptions. Administrator access, artwork and settings are kept.</p>
+        <form id="reset-register-form">
+          <label class="field">Type RESET SHAREPASS to confirm<input name="confirmation" autocomplete="off" required></label>
+          <button type="submit" class="primary">Delete transactions, staff and pairings</button>
+        </form><p id="reset-register-status" role="status"></p>
       </section>
       </div>
     </main>

@@ -6,9 +6,10 @@ const reference=document.getElementById('customer-reference');
 const receipt=document.getElementById('customer-receipt');
 const receiptState=document.getElementById('receipt-state');
 const receiptShare=document.getElementById('receipt-share');
-const token=location.pathname.split('/').at(-1);
-const booth=location.pathname.startsWith('/booth/');
-const endpoint='/api/public/'+(booth?'booth/':'intake/')+encodeURIComponent(token);
+const shared=location.pathname==='/deposit';
+const token=shared?'shared':location.pathname.split('/').at(-1);
+const booth=shared||location.pathname.startsWith('/booth/');
+const endpoint=shared?'/api/public/deposit':'/api/public/'+(booth?'booth/':'intake/')+encodeURIComponent(token);
 const passTypes=[['normal','Normal'],['vip','VIP'],['vvip','VVIP'],...(booth?[['mip','MIP']]:[])];
 const quantities=Object.fromEntries(passTypes.map(([key])=>[key,0]));
 const passStep=document.getElementById('customer-pass-step');
@@ -22,7 +23,7 @@ function canContinue(){
   return Boolean(form.elements.name.value.trim())&&Object.values(quantities).some(Boolean)&&Boolean(sharePassPhone(guestPhone.value));
 }
 const phoneError='Enter a valid WhatsApp number. Include the country code for international numbers.';
-let requestId,submission,boothArchived=false;
+let requestId,submission,receiptPeople,boothArchived=false;
 let lastReceipt,lastCode;
 let receiptPollTimer,receiptChecking=false,receiptFailures=0;
 const alertButton=document.getElementById('receipt-alerts');
@@ -184,64 +185,45 @@ async function customerRequest(body,statusId){
   }:{})});
   if(!response.headers.get('Content-Type')?.startsWith('application/json'))throw new Error('Could not open the form. Reopen its QR or ask staff for a fresh one.');
   const result=await response.json();
-  if(!response.ok)throw Object.assign(new Error(result.error||'Ask staff for a fresh form QR.'),{status:response.status,notExecuted:result.notExecuted===true});
+  if(!response.ok)throw Object.assign(new Error(result.error||'Ask staff for a fresh form QR.'),{status:response.status,notExecuted:result.notExecuted===true,registerResetAt:result.register_reset_at||0});
   return result;
 }
 function showReceipt(result){
-  if(result.status!==lastReceipt||result.collection_code!==lastCode)window.sharePassToast?.(
-    result.status==='confirmed'?'Passes approved. Your code and WhatsApp buttons are ready.':
-    result.status==='submitted'?'Sent to booth. Waiting for confirmation.':result.status==='closed'?'Deposit closed.':'Receipt updated.');
-  form.hidden=false;
-  form.reset();recipientList.replaceChildren();form.hidden=true;
-  receipt.hidden=false;
+  const changed=result.status!==lastReceipt||result.collection_code!==lastCode;
+  if(changed)window.sharePassToast?.(result.status==='confirmed'?'Staff confirmed your passes. Your code and collector message are ready.':result.status==='submitted'?'Sent to staff. Waiting for confirmation.':'Receipt updated.');
+  window.SharePassDrafts?.clear();
+  form.reset();recipientList.replaceChildren();form.hidden=true;receipt.hidden=false;
   reference.hidden=!result.collection_code&&!result.name;
-  reference.textContent=result.collection_code?(result.name?result.name+' · ':'')+'Code '+result.collection_code:result.name||'';
+  reference.textContent=result.collection_code?'Collection code · '+result.collection_code:result.name||'';
+  document.getElementById('confirmation-wait').hidden=result.status!=='submitted';
+  document.getElementById('receipt-people').textContent=[result.depositor_name||result.name?'Depositor · '+(result.depositor_name||result.name):'',result.staff_name?'Received by · '+result.staff_name:''].filter(Boolean).join('\n');
   receiptShare.replaceChildren();
-  let draftFailures=0;
   if(result.status==='confirmed'&&result.collection_code){
     statusLine.textContent='✓ Passes received';
-    receiptState.textContent='Your passes are confirmed. Open WhatsApp to share the collection code.';
-    for(const person of result.recipients||[]){
-      try{
-      const draft=SharePassDrafts.depositDraft({phone:person.phone,name:Array.from(person.name).slice(0,40).join(''),code:result.collection_code,
-        reference:result.collection_reference,booth:result.booth,quantities:person.quantities||result.remaining,
-        scope:person.quantities?'planned':'group',expiresAt:result.code_expires_at});
-      const link=SharePassDrafts.composeLink({address:draft.recipient,message:draft.message,name:person.name},'Send code to '+person.name);
-      link.addEventListener('click',event=>{
-        event.preventDefault();
-        const ticket=requestId;
-        customerRequest(null,ticket).then(current=>{
-          if(ticket!==requestId||current.status!=='confirmed'||current.collection_code!==result.collection_code||current.collection_reference!==result.collection_reference)throw new Error('The receipt changed. Wait for its current status before sharing.');
-          const fresh=SharePassDrafts.depositDraft({phone:person.phone,name:Array.from(person.name).slice(0,40).join(''),code:current.collection_code,reference:current.collection_reference,
-            booth:current.booth,quantities:person.quantities||current.remaining,scope:person.quantities?'planned':'group',expiresAt:current.code_expires_at});
-          location.assign(fresh.url);
-        }).catch(error=>{errorLine.textContent=error.message;});
-      });
-      link.classList.add('whatsapp-action');receiptShare.append(link);
-      }catch{draftFailures++;}
-    }
+    receiptState.textContent='Your passes are confirmed. Message your collector below, or share the message with its QR image.';
   }else if(result.status==='submitted'){
-    statusLine.textContent='✓ Sent to booth';
-    receiptState.textContent='Waiting for booth confirmation. Your pickup code and WhatsApp buttons will appear here automatically after staff receive and approve your passes.';
-
+    statusLine.textContent='✓ Sent to staff';
+    receiptState.textContent='Waiting for staff confirmation';
   }else if(result.status==='checking'){
-    statusLine.textContent='Pickup in progress';
-    receiptState.textContent='The counter is confirming a handover.';
-  }else{
-    statusLine.textContent=result.status==='closed'?'This deposit is closed.':'Passes received';
-    receiptState.textContent='Ask the booth team if you need help.';
-  }
+    statusLine.textContent='Pickup in progress';receiptState.textContent='Staff are confirming a handover.';
+  }else{statusLine.textContent='This deposit is closed.';receiptState.textContent='Ask staff if you need help.';}
   lastReceipt=result.status;lastCode=result.collection_code;
-  if(draftFailures){
-    const warning=document.createElement('p');warning.textContent='Your deposit is confirmed. Some WhatsApp drafts could not be prepared; show this code or ask staff for help.';
-    receiptShare.append(warning);
-  }
   document.getElementById('check-receipt').hidden=true;
-  document.getElementById('receipt-sync-status').textContent=result.status==='submitted'?'Waiting for staff confirmation. This page updates automatically.':result.status==='closed'?'Deposit closed.':'Receipt updated automatically.';
+  document.getElementById('receipt-sync-status').textContent=result.status==='submitted'?'This page updates automatically after staff confirmation.':result.status==='closed'?'Deposit closed.':'Receipt updated automatically.';
   scheduleReceiptPoll();
-  if(alertKey&&requestId&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&'caches' in window){
-    prepareReceiptAlerts(requestId).catch(()=>{});
+  if(result.status==='confirmed'&&result.collection_code){
+    try{
+      receiptPeople??=result.recipients||[];
+      SharePassDrafts.renderDeposit(receiptShare,{code:result.collection_code,reference:result.collection_reference,booth:'SharePass staff',
+        quantities:result.remaining,expiresAt:result.code_expires_at,recipients:receiptPeople,depositorName:result.depositor_name||result.name,staffName:result.staff_name,
+        saveRecipients:people=>{receiptPeople=people;},refresh:async()=>{
+          const ticket=requestId,current=await customerRequest(null,ticket);
+          if(ticket!==requestId||current.status!=='confirmed'||current.collection_code!==result.collection_code||current.collection_reference!==result.collection_reference)throw new Error('The receipt changed. Wait for its current status before sharing.');
+          return {quantities:current.remaining,expiresAt:current.code_expires_at,depositorName:current.depositor_name||current.name,staffName:current.staff_name};
+        }});
+    }catch{errorLine.textContent='Your deposit is confirmed. The collector message could not be prepared; show your code or ask staff for help.';}
   }
+  if(alertKey&&requestId&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&'caches' in window)prepareReceiptAlerts(requestId).catch(()=>{});
 }
 // Best-effort maintenance is independent of the visible receipt. Never wait for
 // a busy receipt lock, infer revocation from local expiry, or mutate server consent.
@@ -266,7 +248,7 @@ async function cleanupReceiptAlerts(){
         let proof=await (await cache.match(scope))?.text();
         if(!proof)return;
         const stored=JSON.parse(proof),match=typeof stored.path==='string'&&
-          /^\/booth\/([a-f0-9-]{36})#receipt=([a-f0-9-]{36})$/.exec(stored.path);
+          /^\/(?:booth\/([a-f0-9-]{36})|deposit)#receipt=([a-f0-9-]{36})$/.exec(stored.path);
         if(!match||match[2]===requestId)return;
         const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(match[2]));
         const expected=location.origin+'/receipt-alerts/'+Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('')+'/';
@@ -284,7 +266,7 @@ async function cleanupReceiptAlerts(){
         const subscription=await registration?.pushManager.getSubscription();
         if(!subscription&&!pending)return;
         if(subscription){
-          const response=await fetch('/api/public/booth/'+match[1]+'/alerts',{
+          const response=await fetch((match[1]?'/api/public/booth/'+match[1]:'/api/public/deposit')+'/alerts',{
             method:'POST',credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000),
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({action:'status',ticket:match[2],endpoint:subscription.endpoint})
@@ -470,8 +452,10 @@ function scheduleReceiptPoll(){
   receiptPollTimer=setTimeout(checkReceipt,delay);
 }
 function forgetMissingReceipt(error){
-  if(error.status!==404||submission)return false;
-  requestId=undefined;
+  const reset=error.status===410&&error.registerResetAt>0;
+  if(!reset&&(error.status!==404||submission))return false;
+  if(reset)submission=undefined;
+  requestId=undefined;receiptPeople=undefined;
   try{sessionStorage.removeItem('sharepass-receipt:'+token);}catch{}
   receipt.hidden=true;form.hidden=boothArchived;
   statusLine.textContent=boothArchived?'This booth is archived. Ask staff about your previous deposit.':'Your previous receipt is unavailable. Ask staff about an existing deposit, or enter a new deposit below.';
@@ -538,6 +522,7 @@ form.onsubmit=async event=>{
       if(!alertsEnabled&&alertScope&&!alertButton.disabled)await alertButton.onclick();
     }).catch(()=>{});
   }catch(error){
+    if(forgetMissingReceipt(error))return;
     if(booth&&error.status===400&&error.notExecuted){
       // Validation rejected this payload before a queue entry could be created.
       submission=null;requestId=undefined;

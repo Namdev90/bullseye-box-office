@@ -64,7 +64,7 @@ function show(id){
   view = id;
   wizards[id]?.show(0,false);
   if(id === 'desk'){
-    byId('deposit-action').textContent=register?'New deposit':'Open printable booth QR';
+    byId('deposit-action').textContent=register?'New deposit':'Open printable deposit QR';
     setDeskMode(deskMode);
     byId('staff-message-open').hidden=Boolean(register)||!staffMessages.length;
     renderRecovery().catch(error=>{if(view==='desk')byId('error').textContent=error.message;});
@@ -538,10 +538,10 @@ function scheduleQueuePoll(){
 }
 function announceQueueArrival(arrivals){
   const summary=arrivals.slice(0,3).map(item=>(item.name||'Depositor')+' · '+balance(item.quantities)).join('; ')+(arrivals.length>3?' · +'+(arrivals.length-3)+' more':'');
-  window.sharePassToast?.(summary+' · Waiting for booth review.');
+  window.sharePassToast?.(summary+' · Waiting for staff review.');
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   navigator.serviceWorker?.getRegistration('/').then(registration=>registration?.showNotification('New SharePass deposit',{
-    body:summary+' · Waiting for booth review.',tag:'sharepass-queue',icon:'/assets/sharepass-approved-logo.jpg',data:{url:'/staff'}
+    body:summary+' · Waiting for staff review.',tag:'sharepass-queue',icon:'/assets/sharepass-approved-logo.jpg',data:{url:'/staff'}
   })).catch(()=>{});
 }
 let deskQrLoading=false;
@@ -550,20 +550,20 @@ async function showDeskQr(){
   if(view!=='desk'||!staff||register||deskQrLoading||tile.firstChild)return;
   deskQrLoading=true;
   try{
-    const poster=staff.booth_url?{url:staff.booth_url}:await fetchJson('/api/booth');
+    const poster={url:location.origin+'/deposit'};
     if(view!=='desk'||register)return;
     const url=new URL(poster.url,location.origin);
-    if(url.origin!==location.origin||!/^\/booth\/[a-f0-9-]{36}$/.test(url.pathname))return;
+    if(url.origin!==location.origin||url.pathname!=='/deposit')return;
     boothQrUrl=url.href;
     tile.replaceChildren(draft.qrImage(url.href,'QR for the customer deposit form'));
     tile.hidden=false;
     byId('copy-deposit-link').disabled=false;
     const share=byId('share-deposit-link');
-    const invite='https://wa.me/?text='+encodeURIComponent('SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to booth staff. A collection code is issued after staff check and approve the deposit.\n\n'+boothQrUrl);
-    if(invite.length>1200)throw new Error('The booth link is too long to share.');
+    const invite='https://wa.me/?text='+encodeURIComponent('SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to SharePass staff. A collection code is issued after staff check and approve the deposit.\n\n'+boothQrUrl);
+    if(invite.length>1200)throw new Error('The deposit link is too long to share.');
     share.href=invite;
-    share.hidden=false;byId('desk-link-status').textContent='This booth QR stays the same for every customer.';
-  }catch{byId('desk-link-status').textContent='Connecting to your booth… Open Settings to retry if needed.';}
+    share.hidden=false;byId('desk-link-status').textContent='This permanent QR is the same in the app and website.';
+  }catch{byId('desk-link-status').textContent='The QR could not display. Refresh to try again.';}
   finally{deskQrLoading=false;}
 }
 if('ResizeObserver' in window)new ResizeObserver(showDeskQr).observe(byId('desk'));
@@ -576,12 +576,12 @@ async function openBoothPoster(){
   const qr=byId('poster-qr');
   link.hidden=qr.hidden=print.disabled=download.disabled=true;
   show('booth-poster');
-  const result=await fetchJson('/api/booth');
+  const result={url:location.origin+'/deposit',booth:'SharePass'};
   if(view!=='booth-poster')return;
   const url=new URL(result.url,location.origin);
-  if(url.origin!==location.origin||!/^\/booth\/[A-Za-z0-9_-]+$/.test(url.pathname))throw new Error('The booth link could not be opened.');
+  if(url.origin!==location.origin||url.pathname!=='/deposit')throw new Error('The deposit link could not be opened.');
   byId('poster-booth').textContent=result.booth;
-  qr.replaceChildren(draft.qrImage(url.href,'QR for this booth’s customer form'));
+  qr.replaceChildren(draft.qrImage(url.href,'QR for the shared deposit form'));
   link.href=url.href;
   link.hidden=qr.hidden=print.disabled=download.disabled=false;
 }
@@ -790,7 +790,7 @@ function openShare(){
   show('share');
   const {deposit,collection_code:code} = receipt;
   const refresh=register?undefined:async()=>draft.eligibleReceipt(await fetchJson('/api/deposits/'+deposit.id+'/receipt'),{id:deposit.id,reference:deposit.packet_id,code});
-  draft.renderDeposit(byId('share-content'),{code,reference:register?undefined:deposit.packet_id,booth:register?'Box office':staff.booth_label||'Box office',location:register?'Main entrance':staff.pickup_location,quantities:deposit.remaining,recipients:receipt.recipients,expiresAt:deposit.code_expires_at,refresh,saveRecipients:people=>{receipt.recipients=people;}});
+  draft.renderDeposit(byId('share-content'),{code,reference:register?undefined:deposit.packet_id,booth:register?'Box office':staff.booth_label||'Box office',location:register?'Main entrance':staff.pickup_location,quantities:deposit.remaining,recipients:receipt.recipients,expiresAt:deposit.code_expires_at,depositorName:deposit.depositor_label,staffName:deposit.received_by_name,refresh,saveRecipients:people=>{receipt.recipients=people;}});
 }
 
 function openLookup(code=''){

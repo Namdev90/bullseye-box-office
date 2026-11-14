@@ -1,0 +1,20 @@
+package in.sharepass.foundation;
+import java.util.*;
+
+public final class RegisterResetTest {
+    static class JSONObject extends HashMap<String,Object> {
+        public JSONObject put(String key,Object value){super.put(key,value);return this;}
+        long optLong(String key,long fallback){return get(key) instanceof Number value?value.longValue():fallback;}
+    }
+    /* PRODUCTION_METHODS */
+    public static void main(String[] args)throws Exception{
+        JSONObject saved=new JSONObject().put("register_reset_at",10L).put("token","new-auth").put("pending","physical-intent").put("receipt","private-receipt").put("handover","reserved").put("intake","waiting").put("account","old-staff");
+        resetTransactions(saved,10L);if(!saved.containsKey("pending"))throw new AssertionError("Same epoch cannot erase uncertain intent");
+        resetTransactions(saved,9L);if(!saved.containsKey("pending"))throw new AssertionError("An older epoch cannot erase uncertain intent");
+        resetTransactions(saved,11L);
+        for(String key:new String[]{"pending","receipt","handover","intake","account"})if(saved.containsKey(key))throw new AssertionError("Reset retained "+key);
+        if(!"new-auth".equals(saved.get("token"))||saved.optLong("register_reset_at",0)!=11L)throw new AssertionError("Fresh authenticated setup must survive transaction reset");
+        JSONObject revoked=resetTransactions(new JSONObject(),11L);if(revoked.containsKey("token")||revoked.optLong("register_reset_at",0)!=11L)throw new AssertionError();
+        System.out.println("PASS server-authorized reset clears private transaction state once, preserves fresh setup, and keeps same/older uncertain intent");
+    }
+}

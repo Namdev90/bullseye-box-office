@@ -22,6 +22,9 @@ public final class WhatsAppDraftTest {
   String current=WhatsAppDraft.message("0007","","Box office","North entrance",all,"Riya","PKT-A1B2C3D4",Map.of("normal",3),"https://sharepass.example.test",System.currentTimeMillis()+86400000);
   for(String required:new String[]{"Original plan for you: 3 Normal","Group balance on this receipt: 1 Normal + 1 VIP + 1 VVIP + 1 MIP","Collection code: 0007","IST (UTC+05:30)","Receipt: https://sharepass.example.test/pickup#0007.PKT-A1B2C3D4","Plans are not reservations"})if(!current.contains(required))throw new AssertionError(required);
   WhatsAppDraft.url("+12025550101",current);
+  String named=WhatsAppDraft.message("0007","","SharePass staff","",all,"Riya","PKT-A1B2C3D4",null,"https://sharepass.example.test",System.currentTimeMillis()+86400000,"Taylor","Asha");
+  if(!named.contains("Hi Riya!")||!named.contains("Depositor: Taylor\n")||!named.contains("Received by: Asha\n"))throw new AssertionError(named);
+  WhatsAppDraft.url("+12025550101",named);
   try{WhatsAppDraft.message("0007","","Box office","",all,"Riya","PKT-A1B2C3D4",null,"https://sharepass.example.test",1);throw new AssertionError();}catch(IllegalArgumentException expected){}
   for(String input:new String[]{"8123456789","0 81234 56789","+91 81234 56789","00918123456789"}){
    if(!WhatsAppDraft.complete(input)||!WhatsAppDraft.phone(input).equals("918123456789"))throw new AssertionError(input);

@@ -6,6 +6,15 @@ const root = join(__dirname, '..');
 const read = file => readFileSync(join(root, file), 'utf8');
 const harness = import('../tools/prepare-source-harnesses.mjs');
 
+test('main QR uses the same built-in deposit URL without session or network lookup',async()=>{
+  const {extractJavaMethod}=await harness;
+  const desk=read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
+  const fixed=extractJavaMethod(desk,'private String cachedBoothUrl()');
+  assert.match(fixed,/return HostedRegisterClient\.ORIGIN \+ "\/deposit"/);
+  const panel=extractJavaMethod(desk,'private void showDepositPanel()');
+  assert(!panel.includes('client.request('));assert(!panel.includes('getSharedPreferences('));
+});
+
 test('initial confirmation and current depositor update are mutually exclusive on the receipt',async()=>{
   const {extractJavaMethod}=await harness;
   const receipt=extractJavaMethod(read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java'),'private void receipt(JSONObject result)');
@@ -32,7 +41,7 @@ test('Java method extraction preserves lambdas, comments, braces and quoted char
 test('JVM fixture generation uses current production methods and needs no Java installation', async () => {
   const {sourceHarnesses, extractJavaMethod} = await harness;
   const fixtures = sourceHarnesses();
-  assert.deepEqual(fixtures.map(f => f.name), ['FreshSharingTest', 'QueueNotificationPolicyTest', 'QueuePushServiceTest', 'QueueSummaryTest', 'QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
+  assert.deepEqual(fixtures.map(f => f.name), ['RegisterResetTest', 'FreshSharingTest', 'QueueNotificationPolicyTest', 'QueuePushServiceTest', 'QueueSummaryTest', 'QrEncoderCacheTest', 'DirectHandoverTest', 'AppUpdatesFocusTest', 'DeskWindowInsetsTest', 'NativeLookupTest', 'StaffMessageInboxTest']);
   for (const fixture of fixtures) assert(!fixture.source.includes('/* PRODUCTION_METHODS */'));
   const desk = read('android-app/src/main/java/in/sharepass/foundation/HostedDeskActivity.java');
   assert(fixtures.find(f=>f.name==='StaffMessageInboxTest').source.includes(extractJavaMethod(desk, 'private void showStaffMessage(boolean manual)')));
