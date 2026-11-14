@@ -1371,8 +1371,9 @@ public final class HostedDeskActivity extends Activity {
         if (path.endsWith("/release")) handover(result);
         else if (path.endsWith("/handover")) {
             page("Passes handed over", "done", this::desk);
+            JSONObject completed=result.optJSONObject("collection");if(completed==null)completed=result.optJSONObject("last_collection");
             line("Depositor · "+firstNonEmpty(result.optJSONObject("depositor_update")==null?"":result.getJSONObject("depositor_update").optString("name"),result.getJSONObject("deposit").optString("depositor_label"),"Name not recorded"),17,true);
-            line("Collector · "+firstNonEmpty(result.getJSONObject("collection").optString("collector_label"),"Name not recorded"),17,true);
+            line((path.equals("/api/collections/history/handover")?"Last collector · ":"Collector · ")+firstNonEmpty(completed==null?"":completed.optString("collector_label"),"Name not recorded"),17,true);
             line("Remaining · " + balance(result.getJSONObject("deposit").getJSONObject("remaining")), 19, true);
             JSONObject update=result.optJSONObject("depositor_update");
             if (update != null && "whatsapp".equals(update.optString("channel"))) {

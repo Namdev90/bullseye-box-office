@@ -142,11 +142,15 @@ async function currentDepositReceipt(db,staff,id){
   const contact=queue?JSON.parse(queue.payload):{};
   const currentCode=await ledgerStatement(db,'SELECT code FROM sharepass_ledger_codes WHERE owner=? AND event=? AND deposit_id=? ORDER BY code LIMIT 1',staff.workspace,EVENT,id).first();
   const update=deposit.update_contact;
+  const last=collection?null:await ledgerStatement(db,`SELECT payload FROM sharepass_ledger_collections WHERE owner=? AND deposit_id=? AND booth=? AND pending=0
+    ORDER BY payload->>'handed_over_at' DESC,id DESC LIMIT 1`,staff.workspace,id,staff.booth_id||'B1').first();
+  const lastCollection=last?JSON.parse(last.payload):null;
   const updatePhone=update?.channel==='whatsapp'?sharePassPhone(update.address):'';
   const phone=sharePassPhone(contact.phone)||'',remaining=model.passTypes.filter(type=>deposit.remaining[type.id]>0)
     .map(type=>deposit.remaining[type.id]+' '+type.label).join(' + ');
   return json({deposit:{...model.publicDeposit(deposit),handover_pending:!!collection},collection_code:deposit.active_collection_code||currentCode?.code||'',
     recipients:contact.recipients||[],depositor_name:contact.name||deposit.depositor_label||'',depositor_phone:phone,
+    ...(lastCollection?{last_collection:{collector_label:lastCollection.collector_label||'',quantities:lastCollection.quantities,handed_over_at:lastCollection.handed_over_at}}:{}),
     ...(updatePhone&&!collection?{depositor_update:{channel:'whatsapp',address:updatePhone,name:update.name||contact.name||deposit.depositor_label||'',message:'Hi'+((update.name||contact.name||deposit.depositor_label)?' '+(update.name||contact.name||deposit.depositor_label):'')+'! SharePass deposit update. '+
       (remaining?'Still available: '+remaining+'.':'All passes in this deposit have been collected.')}}:{})});
 }

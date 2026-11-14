@@ -68,6 +68,7 @@ test('collector identity is scoped, validated, persisted and included in named p
   }
   const partial=await pickup('Riya',{normal:2,vip:1,vvip:0,mip:0},lookup);assert.deepEqual(partial.deposit.remaining,{normal:2,vip:1,vvip:0,mip:1});
   const final=await pickup('Omar',{normal:2,vip:1,vvip:0,mip:1});assert.match(final.depositor_update.message,/All passes.*collected/);
+  const current=(await f.call('/api/deposits/'+created.deposit.id+'/receipt')).body;assert.equal(current.last_collection.collector_label,'Omar');assert.deepEqual(current.last_collection.quantities,{normal:2,vip:1,vvip:0,mip:1});
   assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM sharepass_ledger_collections').get().n,2);
   const audit=f.sqlite.prepare("SELECT payload FROM sharepass_ledger_audit WHERE payload->>'action'='HANDOVER_CONFIRMED'").all();
   assert(audit.some(row=>row.payload.includes('Riya'))&&audit.some(row=>row.payload.includes('Omar')));

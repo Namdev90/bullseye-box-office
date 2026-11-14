@@ -862,7 +862,7 @@ async function confirm(){
 }
 
 function showBalance(result){
-  byId('handover-people').textContent='Depositor: '+(result.depositor_update?.name||result.deposit.depositor_label||'Name not recorded')+' · Collector: '+(result.collection?.collector_label||'Name not recorded');
+  byId('handover-people').textContent='Depositor: '+(result.depositor_update?.name||result.deposit.depositor_label||'Name not recorded')+(result.collection?' · Collector: ':' · Last collector: ')+(result.collection?.collector_label||result.last_collection?.collector_label||'Name not recorded');
   byId('balance').textContent = balance(result.deposit.remaining);
   const compose=byId('pickup-update-draft');
   compose.replaceChildren();

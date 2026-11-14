@@ -52,4 +52,7 @@ test('confirmed handover shows both roles and names the depositor message button
   runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> '1 Normal',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
   assert.match(nodes.get('handover-people').textContent,/Depositor: Taylor Example · Collector: Riya/);
   assert.equal(links[0].name,'Taylor Example');assert.match(links[0].message,/to Riya/);
+  delete result.collection;result.last_collection={collector_label:'Omar'};
+  runInNewContext(render+'\nshowBalance(result);',{byId,result,balance:()=> 'No passes remaining',show(){},sharePassPhone:()=>true,draft:{composeLink:details=>details}});
+  assert.match(nodes.get('handover-people').textContent,/Last collector: Omar/);
 });
