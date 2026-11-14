@@ -8,7 +8,7 @@ const artworkPath=process.env.SHAREPASS_ARTWORK_PATH;
 if(hostingConfig&&(!artworkPath||!process.env.SHAREPASS_CODE_MASTER_PATH)){
   throw Error('A private Sites build requires the approved artwork and private code catalogue.');
 }
-const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.jpg':'image/jpeg','.png':'image/png','.webmanifest':'application/manifest+json'};
+const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.jpg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};
 function collect(dir,prefix=''){
   for(const entry of readdirSync(dir,{withFileTypes:true})){
     const file=join(dir,entry.name),key=prefix+'/'+entry.name;

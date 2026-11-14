@@ -16,6 +16,15 @@ function draftTools(globals={}){
  return {drafts:context.SharePassDrafts,qr:context.SharePassQR};
 }
 
+test('WhatsApp actions display a safe named message label and consistent green styling hook',()=>{
+ const {drafts}=draftTools();
+ const link=drafts.composeLink({address:'+12025550123',message:'Synthetic receipt',name:'Taylor <Example>'});
+ assert.equal(link.textContent,'Message — Taylor <Example>');
+ assert.match(link.className,/whatsapp-action/);assert.equal(new URL(link.href).hostname,'wa.me');
+ assert.equal(link.attributes['aria-label'],'Open WhatsApp draft · Message — Taylor <Example>');
+ assert.equal(drafts.composeLink({address:'+12025550123',message:'Synthetic'}).textContent,'Message on WhatsApp');
+});
+
 // Minimal synthetic DOM for the real renderDeposit handlers, not browser
 // rendering, native focus/keyboard behavior, camera permissions or QR scanning.
 function draftPage(){

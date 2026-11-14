@@ -334,7 +334,7 @@ test('unsuccessful code checks survive across requests and rate-limit lookup',as
 });
 test('public opening stays clean and staff and admin routes are protected',async()=>{
   const publicPage=await worker.fetch(new Request('https://test.example/'),{});
-  assert.equal(publicPage.headers.get('X-SharePass-Version'),'36');
+  assert.equal(publicPage.headers.get('X-SharePass-Version'),'37');
   const html=await publicPage.text();
   assert(html.includes('Open register'));
   assert(!html.includes('Desk menu'));
@@ -342,7 +342,7 @@ test('public opening stays clean and staff and admin routes are protected',async
   assert.equal(staffPage.status,302);
   assert.equal(staffPage.headers.get('Location'),'/connect');
   const signed=await worker.fetch(new Request('https://test.example/staff',{headers:{'oai-authenticated-user-id':'account-one'}}),{});
-  assert((await signed.text()).includes('src="/counter.js?v=36-'));
+  assert((await signed.text()).includes('src="/counter.js?v=37-'));
   assert.equal((await worker.fetch(new Request('https://test.example/admin'),{})).status,404);
   assert.equal((await worker.fetch(new Request('https://test.example/admin.html'),{})).status,404);
 });
@@ -649,8 +649,8 @@ test('optional push registers live devices and sends one private, booth-scoped a
       assert.equal(send.url,'https://fcm.googleapis.com/v1/projects/sharepass-fixture/messages:send');
       assert.equal(send.authorization,'Bearer fixture-access');
       assert.deepEqual(send.message.data,{type:'sharepass_queue'});
-      assert.deepEqual(send.message.notification,{title:'SharePass',body:'A pass deposit is ready for review.'});
-      assert.equal(send.message.android.notification.channel_id,'booth_queue');
+        assert.equal(send.message.notification,undefined);
+        assert.equal(send.message.android.priority,'HIGH');
       assert.equal(JSON.stringify(send.message).includes(draft.name),false);
       assert.equal(JSON.stringify(send.message).includes(draft.email),false);
       assert.equal(JSON.stringify(send.message).includes(draft.request_id),false);

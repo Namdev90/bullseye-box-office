@@ -1,6 +1,7 @@
 'use strict';
 // One approved brand source, reused without changing the artwork file.
 (()=>{
+  const sound=document.createElement('script');sound.src='/interaction-audio.js'+new URL(document.currentScript.src).search;document.head.append(sound);
   const rail=document.createElement('div');
   rail.className='brand-rail';
   const home=document.createElement('a');
@@ -26,9 +27,12 @@
     }
   }
   const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const markWhatsApp=()=>{for(const button of document.querySelectorAll('button,a'))if(/WhatsApp/i.test(button.textContent)||button.getAttribute('href')?.startsWith('https://wa.me/'))button.classList.add('whatsapp-action');};
+  markWhatsApp();
   // Attribute changes cover page and wizard transitions; buttons stay operable
   // throughout the animation and OS reduced-motion preference is respected.
   const observer=new MutationObserver(changes=>{
+    markWhatsApp();
     if(reduced())return;
     for(const {target} of changes){
       if(target.hidden||!target.matches('main>section,[data-wizard-page],.admin-card'))continue;
@@ -36,7 +40,7 @@
         {duration:180,easing:'cubic-bezier(.2,.7,.2,1)'});
     }
   });
-  observer.observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden']});
+  observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
 })();
 
 let feedbackToast,feedbackTimer;
@@ -48,6 +52,7 @@ window.sharePassToast=message=>{
     feedbackToast.setAttribute('aria-hidden','true');document.body.append(feedbackToast);
   }
   feedbackToast.textContent=message;feedbackToast.hidden=false;
+  window.sharePassFeedback?.(/^(Handover confirmed\.|Passes received\.)/.test(message)?'confirm':'alert');
   clearTimeout(feedbackTimer);feedbackTimer=setTimeout(()=>{feedbackToast.hidden=true;},6500);
 };
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&feedbackToast){feedbackToast.hidden=true;clearTimeout(feedbackTimer);}});

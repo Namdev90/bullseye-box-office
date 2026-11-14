@@ -95,10 +95,9 @@ async function deliverBoothPush(env,workspace,booth,staffMessage){
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(5000),
       headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},
       body:JSON.stringify({message:{
-        token,notification:{title:'SharePass',body:staffMessage?'Open SharePass to review a staff message.':'A pass deposit is ready for review.'},
+        token,
         data:{type:'sharepass_queue'},
-        android:{priority:'HIGH',ttl:'120s',collapse_key:'sharepass_queue',
-          notification:{channel_id:'booth_queue',tag:'sharepass_queue',visibility:'PRIVATE'}}
+        android:{priority:'HIGH',ttl:'120s',collapse_key:'sharepass_queue'}
       }})
     });
     if(response.status===401&&pushAccessCache?.token===access)pushAccessCache=null;

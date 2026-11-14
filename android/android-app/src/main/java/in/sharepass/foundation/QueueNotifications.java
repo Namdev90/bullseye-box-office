@@ -25,6 +25,7 @@ final class QueueNotifications {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationChannel channel = new NotificationChannel(CHANNEL, "Booth queue", NotificationManager.IMPORTANCE_DEFAULT);
         channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        channel.setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION).build());
         context.getSystemService(NotificationManager.class).createNotificationChannel(channel);
     }
 
@@ -42,14 +43,20 @@ final class QueueNotifications {
 
     @SuppressWarnings("deprecation")
     static void show(Context context, int count) {
+        show(context,count,"Open the booth queue to review.");
+    }
+
+    @SuppressWarnings("deprecation")
+    static void show(Context context,int count,String body) {
         if (!allowed(context)) return;
         ensureChannel(context);
         PendingIntent target = PendingIntent.getActivity(context, NOTICE_ID, openQueue(context), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder notification = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(context, CHANNEL) : new Notification.Builder(context);
         notification.setSmallIcon(android.R.drawable.stat_notify_more)
-            .setContentTitle(count == 1 ? "New booth deposit" : count + " new booth deposits")
-            .setContentText("Open the booth queue to review.").setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setContentTitle(count==0?"Message from admin":count == 1 ? "New booth deposit" : count + " waiting deposits")
+            .setContentText(body).setStyle(new Notification.BigTextStyle().bigText(body)).setVisibility(Notification.VISIBILITY_PRIVATE)
             .setAutoCancel(true).setContentIntent(target);
+        if(Build.VERSION.SDK_INT<26)notification.setDefaults(Notification.DEFAULT_SOUND|Notification.DEFAULT_VIBRATE);
         try { context.getSystemService(NotificationManager.class).notify(NOTICE_ID, notification.build()); }
         catch (SecurityException ignored) { /* Android permission changed while posting. */ }
     }

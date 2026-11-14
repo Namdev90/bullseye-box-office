@@ -11,7 +11,9 @@
   return 'https://wa.me/'+normalizePhone(address)+'?text='+encodeURIComponent(message);
  }
  function composeLink(details,label='Open WhatsApp draft'){
-  const link=node('a',label,'menu-link');
+  const name=String(details.name||'').trim();
+  const link=node('a',name?'Message — '+name:label==='Open WhatsApp draft'?'Message on WhatsApp':label,'menu-link whatsapp-action');
+  link.title=label;link.setAttribute('aria-label',label+' · '+link.textContent);
   link.href=composeUrl(details.address,details.message);
   link.target='_blank';link.rel='noopener noreferrer';
   return link;
@@ -167,7 +169,7 @@
      const tile=button('Show WhatsApp QR',()=>{
       selected=entries.filter(item=>item.draft).indexOf(entry);drawScan();scan.showModal();
      },'scan-tile');
-     const link=composeLink({address:entry.draft.recipient,message:entry.draft.message});
+     const link=composeLink({address:entry.draft.recipient,message:entry.draft.message,name:entry.draft.name});
      const preview=node('details'),message=node('textarea');
      message.readOnly=true;message.rows=5;message.value=entry.draft.message;
      message.setAttribute('aria-label','Prepared WhatsApp message');

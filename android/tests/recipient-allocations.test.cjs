@@ -35,6 +35,6 @@ test('native formatter receives separate uncoerced original allocations and rece
  assert(!message.includes('optInt('),'Invalid counts must not be coerced or truncated');
  assert(!message.includes('Math.min'),'A group debit cannot be assigned to a person');
  const share=section('private void sharingPerson(','private void editRecipient(');
- assert.match(share,/button\("Open WhatsApp draft", \(\) ->/);
+ assert.match(share,/messageButton\(recipient.name, \(\) ->/);
  assert.match(share,/compose\(recipient\.phone, depositMessage\(receipt, recipient\)\)/);
 });

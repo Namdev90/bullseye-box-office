@@ -150,6 +150,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showOpening() {
+        DeskSounds.play(this,"open");
         int gap = DeskSurface.dp(this, 8);
         LinearLayout stage = new LinearLayout(this);
         stage.setOrientation(LinearLayout.VERTICAL);
@@ -271,6 +272,7 @@ public final class MainActivity extends Activity {
     @android.annotation.SuppressLint("GestureBackNavigation")
     @Override public void onBackPressed() { handleBack(); }
     @Override protected void onPause() {
+        DeskSounds.stop();
         if (updates != null) updates.stop();
         if (web != null) web.onPause();
         super.onPause();
