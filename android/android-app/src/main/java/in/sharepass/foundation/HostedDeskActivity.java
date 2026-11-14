@@ -741,7 +741,7 @@ public final class HostedDeskActivity extends Activity {
         String url = cachedBoothUrl();
         if (url.isEmpty()) { note("The booth link is still loading."); return; }
         Intent draft = new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage("com.whatsapp")
-            .putExtra(Intent.EXTRA_TEXT, "Leave your passes with SharePass · " + boothLabel() + "\n" + url);
+            .putExtra(Intent.EXTRA_TEXT, "SharePass by Bullseye Entertainment\n\nTo leave passes, complete this form and hand your passes to booth staff. A collection code is issued after staff check and approve the deposit.\n\n" + url);
         try { startActivity(draft); }
         catch (android.content.ActivityNotFoundException unavailable) {
             draft.setPackage(null);
